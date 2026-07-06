@@ -104,13 +104,15 @@ ax = fig.add_axes([0.04, 0.045, 0.92, 0.80], projection=proj)
 ax.set_facecolor("white")
 ax.set_extent(EXTENT, crs=pc)
 
+MAPS_DIR = "../maps"
+
 # ---------- land ----------
-land = json.load(open("land_slim.json"))
+land = json.load(open(f"{MAPS_DIR}/land_slim.json"))
 geoms = [shape(f["geometry"]) for f in land["features"]]
 ax.add_geometries(geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", zorder=1)
 
 # ---------- countries (US/Canada/Mexico border) ----------
-countries = json.load(open("countries_slim.json"))
+countries = json.load(open(f"{MAPS_DIR}/countries_slim.json"))
 target_names = {"United States of America", "Canada", "Mexico"}
 c_geoms = []
 for f in countries["features"]:
@@ -122,7 +124,7 @@ ax.add_geometries(c_geoms, crs=pc, facecolor="none", edgecolor="#9a978c",
                    linewidth=1.1, zorder=2)
 
 # ---------- states + lakes ----------
-states = json.load(open("states_lakes_slim.json"))
+states = json.load(open(f"{MAPS_DIR}/states_lakes_slim.json"))
 s_geoms = []
 lake_geoms = []
 for f in states["features"]:
@@ -140,7 +142,7 @@ ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac",
                    linewidth=0.7, zorder=3)
 
 # ---------- counties ----------
-counties = json.load(open("counties_wa_or_id.geojson"))
+counties = json.load(open(f"{MAPS_DIR}/counties_wa_or_id.geojson"))
 co_geoms = [shape(f["geometry"]) for f in counties["features"]]
 ax.add_geometries(co_geoms, crs=pc, facecolor="none", edgecolor="#c7c4b8",
                    linewidth=0.5, zorder=4)
@@ -152,8 +154,8 @@ MOTORWAY_COLOR = "#8FB8E0"  # pastel blue
 TRUNK_COLOR = "#F2B880"     # pastel orange
 
 motorway_geoms, trunk_geoms = [], []
-for region_file in ["washington_roads_trimmed.geojson", "oregon_roads_trimmed.geojson", "idaho_roads_north.geojson"]:
-    d = json.load(open(region_file))
+for region_file in ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]:
+    d = json.load(open(f"{MAPS_DIR}/{region_file}"))
     for f in d["features"]:
         hwy = f["properties"].get("highway")
         geom = shape(f["geometry"])
@@ -246,7 +248,7 @@ top_y = map_pos.y1
 center_x = (map_pos.x0 + map_pos.x1) / 2
 
 # ---------- logo (bottom-right, ~8% of map width, ~22px inset) ----------
-LOGO_PATH = "/home/claude/alerts_map/ingalls_weather_logo.png"
+LOGO_PATH = "../assets/ingalls_weather_logo.png"
 if os.path.exists(LOGO_PATH):
     logo_img = plt.imread(LOGO_PATH)
     img_h, img_w = logo_img.shape[0], logo_img.shape[1]
@@ -300,6 +302,6 @@ fig.text(center_x, 0.02, "NWS / US Census (counties) / OpenStreetMap (roads) \u2
           fontproperties=f_reg, fontsize=9, color="#5a584f", ha="center")
 
 
-plt.savefig("/home/claude/alerts_map/columbia_basin_alerts.png",
+plt.savefig("columbia_basin_alerts.png",
             facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
 print("saved")
