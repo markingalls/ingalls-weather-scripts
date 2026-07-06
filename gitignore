@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Secrets / local config
+.env
+*.local
+
+# --- columbia-basin-alerts-map ---
+# alerts_with_zones.json is live data fetch_alerts.py regenerates every run --
+# committing it just creates noise. The rendered map images are outputs too,
+# not source -- regenerate with build_map.py rather than tracking them.
+columbia-basin-alerts-map/alerts_with_zones.json
+columbia-basin-alerts-map/columbia_basin_alerts*.png
