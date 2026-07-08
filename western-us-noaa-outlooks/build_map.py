@@ -606,10 +606,15 @@ def build_map(product_key, output_path, override_path=None):
                for d in ordered]
     # Anchor the legend's lower-left corner the same MAP_FRAME_INSET_PX away
     # from the axes frame's lower-left corner as the logo sits from the
-    # frame's lower-right corner.
+    # frame's lower-right corner. Cartopy shrinks the axes box to preserve
+    # the projection's aspect ratio, so the rendered frame doesn't sit at
+    # AXES_RECT's raw figure-fraction position -- ask the canvas where it
+    # actually landed instead of assuming.
+    fig.canvas.draw()
+    frame_px = ax.get_window_extent()
     legend_anchor = (
-        AXES_RECT[0] + MAP_FRAME_INSET_PX / (FIG_WIDTH_IN * FIG_DPI),
-        AXES_RECT[1] + MAP_FRAME_INSET_PX / (FIG_HEIGHT_IN * FIG_DPI),
+        (frame_px.x0 + MAP_FRAME_INSET_PX) / (FIG_WIDTH_IN * FIG_DPI),
+        (frame_px.y0 + MAP_FRAME_INSET_PX) / (FIG_HEIGHT_IN * FIG_DPI),
     )
     leg = fig.legend(handles=handles, loc="lower left", frameon=True, fontsize=8.25,
                       prop=poppins_reg, handlelength=1.05, handleheight=1.05, borderpad=0.3,
