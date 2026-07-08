@@ -83,6 +83,15 @@ POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
 # ---------------------------------------------------------------------------
+# Figure geometry -- shared by the legend (bottom-left) and the logo
+# (bottom-right) so both sit the same distance from the map frame's corner.
+# ---------------------------------------------------------------------------
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 10, 8.9
+FIG_DPI = 200
+AXES_RECT = [0.035, 0.045, 0.93, 0.855]  # [left, bottom, width, height], figure fraction
+MAP_FRAME_INSET_PX = 22
+
+# ---------------------------------------------------------------------------
 # Map domain (western US) — do not change this when adding new cities;
 # cities right at the edge often still render fine thanks to the curved
 # projection. Only change this if you deliberately want a wider/narrower map.
@@ -555,10 +564,10 @@ def build_map(product_key, output_path, override_path=None):
                                      satellite_height=4_000_000)
     pc = ccrs.PlateCarree()
 
-    fig = plt.figure(figsize=(10, 8.9), dpi=200)
+    fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
 
-    ax = fig.add_axes([0.035, 0.045, 0.93, 0.855], projection=proj)
+    ax = fig.add_axes(AXES_RECT, projection=proj)
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
     ax.patch.set_facecolor("white")
 
@@ -595,10 +604,17 @@ def build_map(product_key, output_path, override_path=None):
     ordered = sorted(legend_by_label.values(), key=lambda d: d["order_key"], reverse=True)
     handles = [Patch(facecolor=d["color"], edgecolor=d["color"], alpha=d["alpha"], label=d["label"])
                for d in ordered]
+    # Anchor the legend's lower-left corner the same MAP_FRAME_INSET_PX away
+    # from the axes frame's lower-left corner as the logo sits from the
+    # frame's lower-right corner.
+    legend_anchor = (
+        AXES_RECT[0] + MAP_FRAME_INSET_PX / (FIG_WIDTH_IN * FIG_DPI),
+        AXES_RECT[1] + MAP_FRAME_INSET_PX / (FIG_HEIGHT_IN * FIG_DPI),
+    )
     leg = fig.legend(handles=handles, loc="lower left", frameon=True, fontsize=8.25,
                       prop=poppins_reg, handlelength=1.05, handleheight=1.05, borderpad=0.3,
                       facecolor="white", framealpha=0.7, edgecolor="none",
-                      bbox_to_anchor=(0.045, 0.055))
+                      bbox_to_anchor=legend_anchor)
     for text in leg.get_texts():
         text.set_color("#2b2a26")
 
@@ -636,8 +652,7 @@ def build_map(product_key, output_path, override_path=None):
         target_h = int(logo.height * scale)
         logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
 
-        inset = 22
-        pos = (frame_right - inset - target_w, frame_bottom - inset - target_h)
+        pos = (frame_right - MAP_FRAME_INSET_PX - target_w, frame_bottom - MAP_FRAME_INSET_PX - target_h)
         base.paste(logo_resized, pos)
         base.save(output_path)
         print(f"Composited logo at {pos}")
