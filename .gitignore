@@ -28,7 +28,9 @@ columbia-basin-alerts-map/alerts_with_zones.json
 columbia-basin-alerts-map/columbia_basin_alerts*.png
 
 # --- western-us-noaa-outlooks ---
-# CPC KMLs are hand-downloaded input data, and the rendered PNGs are
-# outputs -- neither is source, so don't track them.
+# build_map.py fetches its source KML/KMZ live; data/ only holds files
+# dropped there for a --file override (testing / a source being down), and
+# the rendered PNGs are outputs -- neither is source, so don't track them.
 western-us-noaa-outlooks/data/*.kml
+western-us-noaa-outlooks/data/*.kmz
 western-us-noaa-outlooks/output/*.png

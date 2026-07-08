@@ -8,9 +8,10 @@ workflows. Each project lives in its own directory with its own README.
 - [`columbia-basin-alerts-map/`](columbia-basin-alerts-map/) — generates a
   styled map of active NWS weather alerts across the Columbia Basin for
   Instagram.
-- [`western-us-noaa-outlooks/`](western-us-noaa-outlooks/) — generates a
-  styled map of NOAA/CPC's Day 8–14 Extreme Heat outlook across the
-  Western U.S.
+- [`western-us-noaa-outlooks/`](western-us-noaa-outlooks/) — generates
+  styled Western U.S. maps for a range of NOAA outlooks: CPC extreme heat,
+  temperature, and precipitation (6–10 day, 8–14 day, week 3–4); SPC fire
+  weather and severe weather; and WPC excessive rainfall.
 
 ## Shared resources
 
