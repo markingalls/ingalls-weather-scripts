@@ -3,3 +3,4 @@ cartopy
 shapely
 Pillow
 numpy
+requests
