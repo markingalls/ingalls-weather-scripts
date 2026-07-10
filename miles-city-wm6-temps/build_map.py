@@ -99,7 +99,7 @@ MAP_FRAME_INSET_PX = 22
 # Map domain -- centered on Miles City, MT; framed a little west of Helena
 # to a little east of Bismarck.
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -113.3, -99.3
+LON_MIN, LON_MAX = -114.3, -98.3
 LAT_MIN, LAT_MAX = 42.0, 50.4
 CENTER_LON, CENTER_LAT = -105.8404, 46.4083  # Miles City, MT
 
@@ -127,15 +127,16 @@ CITIES = [
     ("Helena", -112.03, 46.59, "left"),
     ("Sweet Grass", -111.96, 48.98, "right"),
     ("Medicine Hat", -110.68, 50.04, "left"),
-    ("Swift Current", -107.80, 50.28, "left"),
+    ("Swift Current", -107.80, 50.28, "right"),
     ("Havre", -109.68, 48.55, "right"),
     ("Great Falls", -111.28, 47.50, "right"),
     ("Lewistown", -109.43, 47.06, "right"),
     ("Rexburg", -111.79, 43.83, "left"),
-    ("Jackson", -110.76, 43.48, "left"),
+    ("Jackson", -110.76, 43.48, "right"),
     ("Old Faithful", -110.83, 44.46, "right"),
     ("Bozeman", -111.04, 45.68, "right"),
-    ("Thermopolis", -108.21, 43.65, "left"),
+    ("Thermopolis", -108.21, 43.65, "right"),
+    ("Casper", -106.31, 42.87, "right"),
     ("Sheridan", -106.96, 44.80, "right"),
     ("Billings", -108.50, 45.78, "left"),
     ("Glasgow", -106.64, 48.20, "right"),
