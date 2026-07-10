@@ -125,13 +125,20 @@ RESAMPLE_PAD_DEG = 1.5
 
 CITIES = [
     ("Helena", -112.03, 46.59, "left"),
+    ("Sweet Grass", -111.96, 48.98, "right"),
+    ("Medicine Hat", -110.68, 50.04, "left"),
+    ("Havre", -109.68, 48.55, "right"),
     ("Great Falls", -111.28, 47.50, "right"),
+    ("Rexburg", -111.79, 43.83, "left"),
+    ("Old Faithful", -110.83, 44.46, "right"),
     ("Bozeman", -111.04, 45.68, "right"),
     ("Sheridan", -106.96, 44.80, "right"),
     ("Billings", -108.50, 45.78, "left"),
+    ("Glasgow", -106.64, 48.20, "right"),
     ("Miles City", -105.84, 46.41, "left"),
     ("Glendive", -104.71, 47.11, "left"),
     ("Williston", -103.62, 48.15, "left"),
+    ("Lemmon", -102.16, 45.94, "left"),
     ("Dickinson", -102.79, 46.88, "right"),
     ("Minot", -101.30, 48.23, "right"),
     ("Bismarck", -100.78, 46.81, "right"),
@@ -383,27 +390,26 @@ def build_map(date, output_path, override_path=None):
     # City labels -- name plus that spot's forecast high, sampled from the
     # resampled regular grid. Text always sits left or right of its dot;
     # the name (top line) is vertically centered on the dot, with the
-    # temperature tucked in tight just below it. A plain multi-line Text
-    # centers the whole two-line block on the dot instead of just the top
-    # line, so the two lines are drawn as separate artists: the name at
-    # the dot's exact geographic position, and the temperature offset a
-    # fixed number of *points* below it (not degrees) via offset_copy, so
-    # the gap stays tight and constant regardless of map scale.
+    # temperature tucked in tight just below it. Both the dot-to-label gap
+    # and the name-to-temperature gap are offsets in *points* (via
+    # offset_copy), not degrees, so they stay a constant, tight distance
+    # regardless of map scale rather than growing or shrinking with it.
     geodetic_transform = pc._as_mpl_transform(ax)
     stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
     for name, lon_c, lat_c, pos in CITIES:
         ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
                 mec="black", mew=0.8, transform=pc)
         city_f = sample_grid_value(temp_f, lon_c, lat_c)
-        dx = 0.12 if pos == "right" else -0.12
+        dx_pt = 6 if pos == "right" else -6
         ha = "left" if pos == "right" else "right"
 
-        name_txt = ax.text(lon_c + dx, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold,
-                            color="white", ha=ha, va="center", zorder=101, transform=pc)
+        name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
+        name_txt = ax.text(lon_c, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold,
+                            color="white", ha=ha, va="center", zorder=101, transform=name_transform)
         name_txt.set_path_effects(stroke)
 
-        temp_transform = offset_copy(geodetic_transform, fig=fig, x=0, y=-4, units="points")
-        temp_txt = ax.text(lon_c + dx, lat_c, f"{city_f:.0f}°F", fontsize=9.75,
+        temp_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-4, units="points")
+        temp_txt = ax.text(lon_c, lat_c, f"{city_f:.0f}°F", fontsize=9.75,
                             fontproperties=poppins_semibold, color="white", ha=ha, va="top",
                             zorder=101, transform=temp_transform)
         temp_txt.set_path_effects(stroke)
