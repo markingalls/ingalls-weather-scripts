@@ -125,15 +125,15 @@ RESAMPLE_PAD_DEG = 1.5
 
 CITIES = [
     ("Helena", -112.03, 46.59, "left"),
-    ("Great Falls", -111.28, 47.50, "above"),
-    ("Bozeman", -111.04, 45.68, "below"),
-    ("Sheridan", -106.96, 44.80, "below"),
+    ("Great Falls", -111.28, 47.50, "right"),
+    ("Bozeman", -111.04, 45.68, "right"),
+    ("Sheridan", -106.96, 44.80, "right"),
     ("Billings", -108.50, 45.78, "left"),
-    ("Miles City", -105.84, 46.41, "above"),
-    ("Glendive", -104.71, 47.11, "right", (0.44, -0.1)),
+    ("Miles City", -105.84, 46.41, "left"),
+    ("Glendive", -104.71, 47.11, "left"),
     ("Sidney", -104.16, 47.72, "right"),
-    ("Williston", -103.62, 48.15, "above"),
-    ("Dickinson", -102.79, 46.88, "below"),
+    ("Williston", -103.62, 48.15, "left"),
+    ("Dickinson", -102.79, 46.88, "right"),
     ("Minot", -101.30, 48.23, "right"),
     ("Bismarck", -100.78, 46.81, "right"),
     ("Rapid City", -103.23, 44.08, "left"),
@@ -382,24 +382,17 @@ def build_map(date, output_path, override_path=None):
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
     # City labels -- name plus that spot's forecast high, sampled from the
-    # resampled regular grid. The optional 5th field is an explicit
-    # (dx, dy) override for a couple of spots that are tightly clustered
-    # with a neighboring city, where the default pos-based offset collides.
-    for city in CITIES:
-        name, lon_c, lat_c, pos = city[:4]
-        ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="#3b3a35", zorder=100,
-                mec="white", mew=0.7, transform=pc)
+    # resampled regular grid. Text always sits left or right of its dot,
+    # vertically centered on it.
+    for name, lon_c, lat_c, pos in CITIES:
+        ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
+                mec="black", mew=0.8, transform=pc)
         city_f = sample_grid_value(temp_f, lon_c, lat_c)
         label = f"{name}\n{city_f:.0f}°F"
-        if len(city) > 4:
-            dx, dy = city[4]
-        else:
-            dx = 0.26 if pos == "right" else (-0.26 if pos == "left" else 0)
-            dy = 0.24 if pos == "above" else (-0.24 if pos == "below" else 0)
-        ha = "left" if pos == "right" else ("right" if pos == "left" else "center")
-        va = "bottom" if pos == "above" else ("top" if pos == "below" else "center")
-        txt = ax.text(lon_c + dx, lat_c + dy, label, fontsize=13, fontproperties=poppins_semibold,
-                       color="white", ha=ha, va=va, zorder=101, transform=pc, linespacing=1.3)
+        dx = 0.26 if pos == "right" else -0.26
+        ha = "left" if pos == "right" else "right"
+        txt = ax.text(lon_c + dx, lat_c, label, fontsize=9.75, fontproperties=poppins_semibold,
+                       color="white", ha=ha, va="center", zorder=101, transform=pc, linespacing=1.0)
         txt.set_path_effects([pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))])
 
     ax.spines['geo'].set_edgecolor('black')
