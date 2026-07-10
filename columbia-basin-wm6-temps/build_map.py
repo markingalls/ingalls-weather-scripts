@@ -82,7 +82,12 @@ OUTPUT_DIR = THIS_DIR / "output"
 ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LAND_FILE = MAPS_DIR / "land_slim.json"
-ROAD_FILES = ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]
+ROAD_FILES = [
+    "washington_roads.geojson",
+    "oregon_roads.geojson",
+    "idaho_roads_north.geojson",
+    "pacific_nw_roads_west.geojson",
+]
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 MOTORWAY_TYPES = {"motorway", "motorway_link"}
@@ -159,10 +164,15 @@ CITIES = [
     ("Goldendale", -120.8215, 45.8210, "left"),
     ("Boardman", -119.7006, 45.8393, "left"),
     ("Hermiston", -119.2895, 45.8404, "right"),
-    ("Pendleton", -118.7879, 45.6721, "left"),
+    ("Pendleton", -118.7879, 45.6721, "right"),
     ("The Dalles", -121.1787, 45.5946, "left"),
     ("La Grande", -118.0877, 45.3246, "right"),
     ("Condon", -120.1837, 45.2373, "right"),
+    ("Portland", -122.6784, 45.5152, "left"),
+    ("Salem", -123.0351, 44.9429, "right"),
+    ("Longview", -122.9382, 46.1382, "left"),
+    ("Olympia", -122.9007, 47.0379, "left"),
+    ("Maupin", -121.0793, 45.1748, "left"),
 ]
 
 # ---------------------------------------------------------------------------

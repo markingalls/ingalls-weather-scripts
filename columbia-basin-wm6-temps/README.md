@@ -44,7 +44,13 @@ Shared basemap data lives one level up in [`../maps/`](../maps/):
 `admin1_boundary_lines.json` / `admin0_boundary_lines.json` (state/province
 and international borders), `land_slim.json` (coastline), and
 `washington_roads.geojson` / `oregon_roads.geojson` /
-`idaho_roads_north.geojson` (highways). The Ingalls Weather logo lives in
+`idaho_roads_north.geojson` / `pacific_nw_roads_west.geojson` (highways).
+The last of those fills a gap: the WA/OR road files were pre-clipped to a
+bounding box that stops short of the map's widened western edge and cities
+like Portland, Salem, Longview, and Olympia, so it's a supplemental OSM
+motorway/trunk extract (via the Overpass API, bbox
+`44.0,-124.2,48.0,-122.4`) in the same GeoJSON schema as the others. The
+Ingalls Weather logo lives in
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
 
 ## Notes
