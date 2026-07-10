@@ -55,6 +55,7 @@ import numpy as np
 import requests
 import jwt
 import zarr
+from scipy.interpolate import griddata
 
 import cartopy.crs as ccrs
 from shapely.geometry import shape
@@ -85,12 +86,14 @@ LOCAL_TZ = ZoneInfo("America/Denver")
 DAY_START_HOUR, DAY_END_HOUR = 8, 20  # local daytime window used for the daily high
 
 # ---------------------------------------------------------------------------
-# Figure geometry -- shared by the colorbar (bottom-left) and the logo
-# (bottom-right) so both sit the same distance from the map frame's corner.
+# Figure geometry. AXES_RECT leaves extra room below the map (compared to a
+# full-bleed map area) for the off-map colorbar + attribution.
+# MAP_FRAME_INSET_PX positions the logo snug inside the map frame's
+# lower-right corner.
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN, FIG_HEIGHT_IN = 10, 8.9
 FIG_DPI = 200
-AXES_RECT = [0.035, 0.045, 0.93, 0.855]  # [left, bottom, width, height], figure fraction
+AXES_RECT = [0.035, 0.2, 0.93, 0.7]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
@@ -101,6 +104,26 @@ LON_MIN, LON_MAX = -113.3, -99.3
 LAT_MIN, LAT_MAX = 42.7, 50.2
 CENTER_LON, CENTER_LAT = -105.8404, 46.4083  # Miles City, MT
 
+# Degrees beyond the plotted extent to keep when cropping the fetched
+# (curvilinear) grid, so the regular (and itself padded, see
+# RESAMPLE_PAD_DEG below) grid has real data to interpolate from all the
+# way to its own edges.
+FETCH_PAD_DEG = 2.0
+
+# The source grid is curvilinear (the model's native projection warped into
+# lat/lon), which leaves rendering gaps at the corners of a NearsidePerspective
+# frame -- both for pcolormesh (a reprojected QuadMesh) and, it turns out,
+# imshow too, unless the resampled raster itself extends past the plotted
+# extent. cartopy warps imshow's raster into the map projection by inverse-
+# projecting each screen pixel back to lon/lat and sampling the source array;
+# right at the requested extent's edge that inverse lookup can land a hair
+# outside the source array's bounds and get masked out. Resampling onto a
+# regular grid that's padded beyond LON_MIN/MAX/LAT_MIN/MAX (then still
+# cropping the *view* to the unpadded extent via ax.set_extent) gives that
+# lookup a margin to sample from, so no corner goes unfilled.
+RESAMPLE_NX, RESAMPLE_NY = 500, 400
+RESAMPLE_PAD_DEG = 1.5
+
 CITIES = [
     ("Helena", -112.03, 46.59, "left"),
     ("Great Falls", -111.28, 47.50, "above"),
@@ -108,14 +131,14 @@ CITIES = [
     ("Sheridan", -106.96, 44.80, "below"),
     ("Billings", -108.50, 45.78, "left"),
     ("Miles City", -105.84, 46.41, "above"),
-    ("Glendive", -104.71, 47.11, "right"),
+    ("Glendive", -104.71, 47.11, "below"),
     ("Sidney", -104.16, 47.72, "right"),
-    ("Williston", -103.62, 48.15, "left"),
+    ("Williston", -103.62, 48.15, "above"),
     ("Dickinson", -102.79, 46.88, "below"),
     ("Minot", -101.30, 48.23, "right"),
     ("Bismarck", -100.78, 46.81, "right"),
     ("Rapid City", -103.23, 44.08, "left"),
-    ("Pierre", -100.35, 44.37, "below"),
+    ("Pierre", -100.35, 44.37, "left"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -186,6 +209,43 @@ def k_to_f(k):
     return (k - 273.15) * 9 / 5 + 32
 
 
+def k_to_c(k):
+    return k - 273.15
+
+
+def c_to_k(c):
+    return c + 273.15
+
+
+RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAMPLE_PAD_DEG
+RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAMPLE_PAD_DEG
+
+
+def resample_to_regular_grid(lat, lon, values):
+    """Interpolate a curvilinear (lat, lon, values) grid onto a plain
+    regular lat/lon grid padded past the map's plotted extent (see
+    RESAMPLE_PAD_DEG). Returns values_2d, indexed [lat, lon] ascending."""
+    reg_lon = np.linspace(RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_NX)
+    reg_lat = np.linspace(RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX, RESAMPLE_NY)
+    reg_lon_grid, reg_lat_grid = np.meshgrid(reg_lon, reg_lat)
+    points = np.column_stack([lon.ravel(), lat.ravel()])
+    regridded = griddata(points, values.ravel(), (reg_lon_grid, reg_lat_grid), method="linear")
+    nan_mask = np.isnan(regridded)
+    if nan_mask.any():
+        regridded[nan_mask] = griddata(points, values.ravel(),
+                                        (reg_lon_grid[nan_mask], reg_lat_grid[nan_mask]), method="nearest")
+    return regridded
+
+
+def sample_grid_value(value_grid, lon_pt, lat_pt):
+    """Nearest value in the regular RESAMPLE_NX x RESAMPLE_NY grid to a point."""
+    col = round((lon_pt - RESAMPLE_LON_MIN) / (RESAMPLE_LON_MAX - RESAMPLE_LON_MIN) * (RESAMPLE_NX - 1))
+    row = round((lat_pt - RESAMPLE_LAT_MIN) / (RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN) * (RESAMPLE_NY - 1))
+    col = min(max(col, 0), RESAMPLE_NX - 1)
+    row = min(max(row, 0), RESAMPLE_NY - 1)
+    return value_grid[row, col]
+
+
 def sign_jwt(api_key):
     return jwt.encode({"iat": int(time.time())}, api_key, algorithm="HS256")
 
@@ -238,12 +298,8 @@ def fetch_daily_high(date, api_key):
         if lat is None:
             lat = g["latitude"][:]
             lon = g["longitude"][:]
-            # Pad the crop beyond the plotted extent -- the source grid is
-            # curvilinear (rotated relative to lat/lon), so a tight crop can
-            # leave slivers of missing data at the corners of the map frame.
-            pad = 0.6
-            mask = ((lon >= LON_MIN - pad) & (lon <= LON_MAX + pad) &
-                    (lat >= LAT_MIN - pad) & (lat <= LAT_MAX + pad))
+            mask = ((lon >= LON_MIN - FETCH_PAD_DEG) & (lon <= LON_MAX + FETCH_PAD_DEG) &
+                    (lat >= LAT_MIN - FETCH_PAD_DEG) & (lat <= LAT_MAX + FETCH_PAD_DEG))
             rows = np.where(mask.any(axis=1))[0]
             cols = np.where(mask.any(axis=0))[0]
             r0, r1 = rows.min(), rows.max() + 1
@@ -290,8 +346,19 @@ def build_map(date, output_path, override_path=None):
                       "to render from a saved snapshot instead.")
         lat, lon, temp_k = fetch_daily_high(date, api_key)
 
+    print("Resampling onto a regular grid...")
+    temp_k = resample_to_regular_grid(lat, lon, temp_k)
+
     temp_f = k_to_f(temp_k)
-    print(f"Daily high range: {temp_f.min():.0f}F - {temp_f.max():.0f}F")
+    # Slice off the resample padding (real data, but outside the visible
+    # frame) before reporting the range actually shown on the map.
+    lon_frac0 = (LON_MIN - RESAMPLE_LON_MIN) / (RESAMPLE_LON_MAX - RESAMPLE_LON_MIN)
+    lon_frac1 = (LON_MAX - RESAMPLE_LON_MIN) / (RESAMPLE_LON_MAX - RESAMPLE_LON_MIN)
+    lat_frac0 = (LAT_MIN - RESAMPLE_LAT_MIN) / (RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN)
+    lat_frac1 = (LAT_MAX - RESAMPLE_LAT_MIN) / (RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN)
+    visible = temp_f[round(lat_frac0 * RESAMPLE_NY):round(lat_frac1 * RESAMPLE_NY),
+                      round(lon_frac0 * RESAMPLE_NX):round(lon_frac1 * RESAMPLE_NX)]
+    print(f"Daily high range: {visible.min():.0f}F - {visible.max():.0f}F")
 
     print("Loading basemap layers...")
     lake_geoms = load_lakes()
@@ -311,65 +378,74 @@ def build_map(date, output_path, override_path=None):
 
     # Temperature field -- a fixed Kelvin-to-color enhancement curve (not
     # rescaled to this map's data range), so color reads consistently
-    # across every map this script renders.
+    # across every map this script renders. Rendered with imshow (not
+    # pcolormesh): cartopy warps the raster directly into the map
+    # projection, which -- unlike a reprojected QuadMesh -- doesn't leave
+    # rendering gaps at the corners of a NearsidePerspective frame.
     temp_cmap = build_temp_colormap()
     temp_norm = Normalize(vmin=TEMP_KMIN, vmax=TEMP_KMAX)
-    ax.pcolormesh(lon, lat, temp_k, transform=pc, cmap=temp_cmap, norm=temp_norm,
-                  shading="auto", zorder=1)
+    ax.imshow(temp_k, transform=pc, cmap=temp_cmap, norm=temp_norm, origin="lower",
+              extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
 
     ax.add_geometries(lake_geoms, crs=pc, facecolor="#dce7ef", edgecolor="#5a4632", linewidth=0.7, zorder=2.2)
     ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
-    # City labels
+    # City labels -- name plus that spot's forecast high, sampled from the
+    # resampled regular grid.
     for name, lon_c, lat_c, pos in CITIES:
-        is_center = name == "Miles City"
-        ax.plot(lon_c, lat_c, marker=("*" if is_center else "o"),
-                markersize=(13 if is_center else 5.5), color="#2b2a26", zorder=100,
-                mec="white", mew=0.8, transform=pc)
-        dx = 0.28 if pos == "right" else (-0.28 if pos == "left" else 0)
-        dy = 0.30 if pos == "above" else (-0.42 if pos == "below" else 0)
+        ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="#3b3a35", zorder=100,
+                mec="white", mew=0.7, transform=pc)
+        city_f = sample_grid_value(temp_f, lon_c, lat_c)
+        label = f"{name}\n{city_f:.0f}°F"
+        dx = 0.3 if pos == "right" else (-0.3 if pos == "left" else 0)
+        dy = 0.5 if pos == "above" else (-0.66 if pos == "below" else 0)
         ha = "left" if pos == "right" else ("right" if pos == "left" else "center")
         va = "bottom" if pos == "above" else ("top" if pos == "below" else "center")
-        txt = ax.text(lon_c + dx, lat_c + dy, name,
-                       fontsize=15.5 if is_center else 13, fontproperties=poppins_semibold,
-                       color="#2b2a26", ha=ha, va=va, zorder=101, transform=pc)
-        txt.set_path_effects([pe.withStroke(linewidth=1.8, foreground=(1, 1, 1, 0.75))])
+        txt = ax.text(lon_c + dx, lat_c + dy, label, fontsize=13, fontproperties=poppins_semibold,
+                       color="white", ha=ha, va=va, zorder=101, transform=pc, linespacing=1.3)
+        txt.set_path_effects([pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))])
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
 
-    # Colorbar -- anchored the same MAP_FRAME_INSET_PX from the axes frame's
-    # lower-left corner as the logo sits from the frame's lower-right corner.
+    # Colorbar -- below the map, horizontally centered on the rendered map
+    # frame (cartopy shrinks the axes box to preserve the projection's
+    # aspect ratio, so the frame doesn't necessarily span AXES_RECT's full
+    # width -- ask the canvas where it actually landed).
     fig.canvas.draw()
     frame_px = ax.get_window_extent()
-    cbar_left = (frame_px.x0 + MAP_FRAME_INSET_PX) / (FIG_WIDTH_IN * FIG_DPI)
-    cbar_bottom = (frame_px.y0 + MAP_FRAME_INSET_PX) / (FIG_HEIGHT_IN * FIG_DPI)
-    cbar_width, cbar_height = 0.40, 0.022
+    frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
+    frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
+    cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.022
+    cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
+    cbar_bottom = 0.095
 
-    bg_ax = fig.add_axes([cbar_left - 0.012, cbar_bottom - 0.028, cbar_width + 0.024, cbar_height + 0.05],
-                          zorder=150)
-    bg_ax.set_facecolor("white")
-    bg_ax.patch.set_alpha(0.7)
-    bg_ax.set_xticks([])
-    bg_ax.set_yticks([])
-    for spine in bg_ax.spines.values():
-        spine.set_visible(False)
-
-    cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height], zorder=151)
+    cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     sm = ScalarMappable(norm=temp_norm, cmap=temp_cmap)
     cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cb.outline.set_linewidth(0.6)
     cb.outline.set_edgecolor("#8a887e")
-    # Fixed Fahrenheit tick marks (the underlying scale is Kelvin) spanning
-    # the color table's own range, not this map's data range.
-    f_ticks = range(-80, 121, 40)
+
+    # Primary axis (bottom): fixed Fahrenheit tick marks. The underlying
+    # scale is Kelvin and spans the color table's own range, not this map's
+    # data range.
+    f_ticks = list(range(-80, 121, 40))
     cb.set_ticks([f_to_k(f) for f in f_ticks])
-    cb.set_ticklabels([str(f) for f in f_ticks])
+    cb.set_ticklabels([f"{f}°F" for f in f_ticks])
     cb.ax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cb.ax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
-    cax.text(0.5, 2.6, "High Temperature (°F)", transform=cax.transAxes, fontsize=8.5,
+
+    # Secondary axis (top): the same scale in Celsius.
+    cax_c = cax.secondary_xaxis("top", functions=(k_to_c, c_to_k))
+    cax_c.set_xticks(list(range(-60, 51, 20)))
+    cax_c.xaxis.set_major_formatter(lambda c, _: f"{c:.0f}°C")
+    cax_c.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
+    for label in cax_c.get_xticklabels():
+        label.set_fontproperties(poppins_reg)
+
+    cax.text(0.5, 3.6, "High Temperature", transform=cax.transAxes, fontsize=9.5,
               fontproperties=poppins_reg, color="#2b2a26", ha="center", va="bottom")
 
     # Title & subtitle above the map

@@ -49,7 +49,11 @@ The Ingalls Weather logo lives in
 - The color scale (`TEMP_COLOR_TABLE` in `build_map.py`) is a fixed
   Kelvin-to-RGB curve, not rescaled to each day's min/max — the same color
   always means the same absolute temperature across every map this script
-  renders.
+  renders. The colorbar sits below the map, centered, with Fahrenheit
+  ticks on the bottom edge and Celsius ticks on the top edge (both are the
+  same underlying Kelvin scale, via `secondary_xaxis`).
+- City labels show that spot's forecast high on a second line, sampled
+  from the resampled grid (see below) at each city's coordinates.
 - Borders are drawn from Natural Earth's dedicated boundary-*line*
   datasets (`admin1_boundary_lines.json` / `admin0_boundary_lines.json`),
   not from state/country polygon outlines. Adjacent polygons in the
@@ -60,5 +64,16 @@ The Ingalls Weather logo lives in
   `ne_10m_admin_1_states_provinces_lines.json` /
   `ne_10m_admin_0_boundary_lines_land.json` (same source repo as the other
   `../maps/` files) down to US/Canada/Mexico.
+- The fetched grid is curvilinear (the model's native projection warped
+  into lat/lon) and is resampled onto a plain regular lat/lon grid
+  (`resample_to_regular_grid()`) before rendering. This isn't just
+  cosmetic: rendering the curvilinear grid directly left a stripe of
+  missing data at the corner of the map frame, and it turns out the
+  resampled grid itself has to be padded past the plotted extent
+  (`RESAMPLE_PAD_DEG`) too, or the same gap reappears -- cartopy's `imshow`
+  warps the raster into the map projection by inverse-projecting each
+  screen pixel back to lon/lat and sampling the source array, and right at
+  the requested extent's edge that lookup can land a hair outside the
+  source array's bounds and get masked out.
 - wm-6-3km's forecast horizon is short (currently 72 hours), so `--date`
   only works for the next few days out.
