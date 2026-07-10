@@ -12,6 +12,9 @@ workflows. Each project lives in its own directory with its own README.
   styled Western U.S. maps for a range of NOAA outlooks: CPC extreme heat,
   temperature, and precipitation (6–10 day, 8–14 day, week 3–4); SPC fire
   weather and severe weather; and WPC excessive rainfall.
+- [`miles-city-wm6-temps/`](miles-city-wm6-temps/) — one-off map of
+  WindBorne WeatherMesh-6 3km daily high temperatures over eastern Montana
+  and the western Dakotas, centered on Miles City.
 
 ## Shared resources
 

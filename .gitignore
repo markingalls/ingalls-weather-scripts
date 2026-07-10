@@ -34,3 +34,10 @@ columbia-basin-alerts-map/columbia_basin_alerts*.png
 western-us-noaa-outlooks/data/*.kml
 western-us-noaa-outlooks/data/*.kmz
 western-us-noaa-outlooks/output/*.png
+
+# --- miles-city-wm6-temps ---
+# build_map.py fetches its source grids live; data/ only holds saved
+# snapshots for a --file override (testing / avoiding a ~1 GB re-fetch),
+# and the rendered PNGs are outputs -- neither is source, so don't track them.
+miles-city-wm6-temps/data/*.npz
+miles-city-wm6-temps/output/*.png
