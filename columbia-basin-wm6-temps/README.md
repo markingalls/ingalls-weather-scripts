@@ -42,7 +42,9 @@ omit it and the subtitle just reads "unknown").
 
 Shared basemap data lives one level up in [`../maps/`](../maps/):
 `admin1_boundary_lines.json` / `admin0_boundary_lines.json` (state/province
-and international borders). The Ingalls Weather logo lives in
+and international borders), `land_slim.json` (coastline), and
+`washington_roads.geojson` / `oregon_roads.geojson` /
+`idaho_roads_north.geojson` (highways). The Ingalls Weather logo lives in
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
 
 ## Notes
@@ -60,8 +62,18 @@ and international borders). The Ingalls Weather logo lives in
   offsets (constant regardless of map scale) rather than degrees.
 - Borders are drawn from Natural Earth's dedicated boundary-*line*
   datasets, not polygon outlines — see the Miles City README for why.
+- The coastline (`land_slim.json`, the same layer `columbia-basin-alerts-map`
+  uses for its land fill) is drawn outline-only here, with no fill, so it
+  traces the Puget Sound without covering up the temperature color over
+  water. Highways are motorway + trunk from the WA/OR/ID road files, styled
+  the same pastel blue/orange as `columbia-basin-alerts-map`.
 - The fetched grid is curvilinear and is resampled onto a padded regular
   lat/lon grid before rendering to avoid corner rendering gaps — see the
   Miles City README for the full explanation.
+- The LON range is widened symmetrically beyond `columbia-basin-alerts-map`'s
+  original extent so the rendered frame fills to the title's left margin
+  and mirrors it on the right, rather than sitting centered with unused
+  space on both sides — see the Miles City README for why a wider box
+  alone doesn't do this.
 - wm-6-3km's forecast horizon is short (currently 72 hours), so `--date`
   only works for the next few days out.

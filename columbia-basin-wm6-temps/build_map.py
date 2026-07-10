@@ -32,6 +32,14 @@ Ingalls Weather map projects):
   real-world border. The line datasets store each border once, so
   neighboring regions share identical vertices.
 
+    land_slim.json -- drawn outline-only (no fill) on top of the
+  temperature raster so the Puget Sound coastline reads clearly without
+  hiding the temperature color over water.
+
+    washington_roads.geojson, oregon_roads.geojson, idaho_roads_north.geojson
+  -- motorway + trunk highways, same source/styling as
+  ../columbia-basin-alerts-map/build_map.py.
+
 Logo is read from /assets/ingalls_weather_logo.png at repo root.
 """
 
@@ -73,7 +81,14 @@ OUTPUT_DIR = THIS_DIR / "output"
 
 ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
+LAND_FILE = MAPS_DIR / "land_slim.json"
+ROAD_FILES = ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
+
+MOTORWAY_TYPES = {"motorway", "motorway_link"}
+TRUNK_TYPES = {"trunk", "trunk_link"}
+MOTORWAY_COLOR = "#8FB8E0"  # pastel blue
+TRUNK_COLOR = "#F2B880"     # pastel orange
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -100,7 +115,7 @@ MAP_FRAME_INSET_PX = 22
 # Map domain -- same extent as ../columbia-basin-alerts-map/build_map.py
 # (North Bend, WA down to the Baker City, OR corridor).
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -122.5, -117.0
+LON_MIN, LON_MAX = -123.3, -116.2
 LAT_MIN, LAT_MAX = 44.4, 48.0
 CENTER_LON, CENTER_LAT = -119.75, 46.2
 
@@ -332,6 +347,29 @@ def load_boundary_lines(path):
     return [shape(feat["geometry"]) for feat in data["features"]]
 
 
+def load_land():
+    with open(LAND_FILE) as f:
+        data = json.load(f)
+    return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
+
+
+def load_roads():
+    """Motorway + trunk highways (WA/OR/ID), same source/styling as
+    ../columbia-basin-alerts-map/build_map.py."""
+    motorway_geoms, trunk_geoms = [], []
+    for region_file in ROAD_FILES:
+        with open(MAPS_DIR / region_file) as f:
+            data = json.load(f)
+        for feat in data["features"]:
+            hwy = feat["properties"].get("highway")
+            geom = shape(feat["geometry"])
+            if hwy in MOTORWAY_TYPES:
+                motorway_geoms.append(geom)
+            elif hwy in TRUNK_TYPES:
+                trunk_geoms.append(geom)
+    return motorway_geoms, trunk_geoms
+
+
 def build_map(date, output_path, override_path=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
@@ -366,6 +404,8 @@ def build_map(date, output_path, override_path=None):
     print("Loading basemap layers...")
     admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
+    land_geoms = load_land()
+    motorway_geoms, trunk_geoms = load_roads()
 
     proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
                                      satellite_height=4_000_000)
@@ -388,6 +428,13 @@ def build_map(date, output_path, override_path=None):
     temp_norm = Normalize(vmin=TEMP_KMIN, vmax=TEMP_KMAX)
     ax.imshow(temp_k, transform=pc, cmap=temp_cmap, norm=temp_norm, origin="lower",
               extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
+
+    # Coastline -- outline only (no fill) so the temperature color still
+    # shows over water; this is what traces the Puget Sound's shape.
+    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
+
+    ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR, linewidth=1.1, zorder=1.6)
+    ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR, linewidth=1.3, zorder=1.7)
 
     ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
