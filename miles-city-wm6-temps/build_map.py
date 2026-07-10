@@ -124,14 +124,17 @@ RESAMPLE_NX, RESAMPLE_NY = 500, 400
 RESAMPLE_PAD_DEG = 1.5
 
 CITIES = [
+    ("Kalispell", -114.31, 48.20, "right"),
+    ("Missoula", -114.01, 46.87, "right"),
     ("Helena", -112.03, 46.59, "left"),
     ("Sweet Grass", -111.96, 48.98, "right"),
+    ("Cardston", -113.31, 49.20, "right"),
     ("Medicine Hat", -110.68, 50.04, "left"),
     ("Swift Current", -107.80, 50.28, "right"),
     ("Havre", -109.68, 48.55, "right"),
     ("Great Falls", -111.28, 47.50, "right"),
     ("Lewistown", -109.43, 47.06, "right"),
-    ("Rexburg", -111.79, 43.83, "left"),
+    ("Idaho Falls", -112.04, 43.47, "left"),
     ("Jackson", -110.76, 43.48, "right"),
     ("Old Faithful", -110.83, 44.46, "right"),
     ("Bozeman", -111.04, 45.68, "right"),
@@ -147,8 +150,10 @@ CITIES = [
     ("Dickinson", -102.79, 46.88, "right"),
     ("Minot", -101.30, 48.23, "right"),
     ("Bismarck", -100.78, 46.81, "right"),
+    ("Devils Lake", -98.87, 48.11, "right"),
     ("Brandon", -99.95, 49.85, "left"),
     ("Rapid City", -103.23, 44.08, "left"),
+    ("Aberdeen", -98.49, 45.46, "left"),
     ("Pierre", -100.35, 44.37, "left"),
 ]
 
