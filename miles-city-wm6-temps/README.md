@@ -39,9 +39,8 @@ for the npz layout (`lat`, `lon`, `temp_k`, all cropped to the map's bbox).
   needs GDAL, which only installs via apt, not pip).
 
 Shared basemap data lives one level up in [`../maps/`](../maps/):
-`states_lakes_slim.json` (lake fills), and `admin1_boundary_lines.json` /
-`admin0_boundary_lines.json` (state/province and international borders).
-The Ingalls Weather logo lives in
+`admin1_boundary_lines.json` / `admin0_boundary_lines.json` (state/province
+and international borders). The Ingalls Weather logo lives in
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
 
 ## Notes
@@ -56,11 +55,11 @@ The Ingalls Weather logo lives in
   from the resampled grid (see below) at each city's coordinates.
 - Borders are drawn from Natural Earth's dedicated boundary-*line*
   datasets (`admin1_boundary_lines.json` / `admin0_boundary_lines.json`),
-  not from state/country polygon outlines. Adjacent polygons in the
-  `states_lakes_slim.json` dataset are simplified independently, so their
-  outlines drift apart at shared borders (visible as a jagged double line
-  at this map's zoom level); the line datasets store each border once, so
-  neighboring regions share identical vertices. Both were filtered from
+  not from state/country polygon outlines -- polygon-outline datasets
+  simplify each polygon independently, so adjacent shapes' outlines drift
+  apart at shared borders (visible as a jagged double line at this map's
+  zoom level); the line datasets store each border once, so neighboring
+  regions share identical vertices. Both were filtered from
   `ne_10m_admin_1_states_provinces_lines.json` /
   `ne_10m_admin_0_boundary_lines_land.json` (same source repo as the other
   `../maps/` files) down to US/Canada/Mexico.

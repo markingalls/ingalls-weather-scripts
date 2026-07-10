@@ -22,13 +22,13 @@ live gridded forecast data. To render from a previously-saved grid instead
 
 REQUIRES (already checked into /maps at repo root, shared across all
 Ingalls Weather map projects):
-    states_lakes_slim.json, admin1_boundary_lines.json, admin0_boundary_lines.json
+    admin1_boundary_lines.json, admin0_boundary_lines.json
   Sourced from raw.githubusercontent.com/martynafford/natural-earth-geojson
-  (10m), clipped down to North America. The boundary lines are drawn from
-  Natural Earth's dedicated line datasets (not polygon outlines) because
-  adjacent state/province polygons are simplified independently -- drawing
-  their outlines directly produces two slightly different paths for the
-  same real-world border. The line datasets store each border once, so
+  (10m), clipped down to US/Canada/Mexico. These are Natural Earth's
+  dedicated line datasets (not polygon outlines) because adjacent
+  state/province polygons are simplified independently -- drawing their
+  outlines directly produces two slightly different paths for the same
+  real-world border. The line datasets store each border once, so
   neighboring regions share identical vertices.
 
 Logo is read from /assets/ingalls_weather_logo.png at repo root.
@@ -70,7 +70,6 @@ ASSETS_DIR = REPO_ROOT / "assets"
 THIS_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = THIS_DIR / "output"
 
-STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
 ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
@@ -131,7 +130,7 @@ CITIES = [
     ("Sheridan", -106.96, 44.80, "below"),
     ("Billings", -108.50, 45.78, "left"),
     ("Miles City", -105.84, 46.41, "above"),
-    ("Glendive", -104.71, 47.11, "below"),
+    ("Glendive", -104.71, 47.11, "right", (0.44, -0.1)),
     ("Sidney", -104.16, 47.72, "right"),
     ("Williston", -103.62, 48.15, "above"),
     ("Dickinson", -102.79, 46.88, "below"),
@@ -312,13 +311,6 @@ def fetch_daily_high(date, api_key):
     return lat, lon, max_temp_k
 
 
-def load_lakes():
-    with open(STATES_LAKES_FILE) as f:
-        data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]
-            if "Lake" in feat["properties"].get("featurecla", "")]
-
-
 def load_boundary_lines(path):
     """Natural Earth's dedicated boundary-*line* datasets (as opposed to
     polygon outlines) -- each border is stored once, so adjacent
@@ -361,7 +353,6 @@ def build_map(date, output_path, override_path=None):
     print(f"Daily high range: {visible.min():.0f}F - {visible.max():.0f}F")
 
     print("Loading basemap layers...")
-    lake_geoms = load_lakes()
     admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
@@ -387,19 +378,24 @@ def build_map(date, output_path, override_path=None):
     ax.imshow(temp_k, transform=pc, cmap=temp_cmap, norm=temp_norm, origin="lower",
               extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
 
-    ax.add_geometries(lake_geoms, crs=pc, facecolor="#dce7ef", edgecolor="#5a4632", linewidth=0.7, zorder=2.2)
     ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
     # City labels -- name plus that spot's forecast high, sampled from the
-    # resampled regular grid.
-    for name, lon_c, lat_c, pos in CITIES:
+    # resampled regular grid. The optional 5th field is an explicit
+    # (dx, dy) override for a couple of spots that are tightly clustered
+    # with a neighboring city, where the default pos-based offset collides.
+    for city in CITIES:
+        name, lon_c, lat_c, pos = city[:4]
         ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="#3b3a35", zorder=100,
                 mec="white", mew=0.7, transform=pc)
         city_f = sample_grid_value(temp_f, lon_c, lat_c)
         label = f"{name}\n{city_f:.0f}°F"
-        dx = 0.3 if pos == "right" else (-0.3 if pos == "left" else 0)
-        dy = 0.5 if pos == "above" else (-0.66 if pos == "below" else 0)
+        if len(city) > 4:
+            dx, dy = city[4]
+        else:
+            dx = 0.26 if pos == "right" else (-0.26 if pos == "left" else 0)
+            dy = 0.24 if pos == "above" else (-0.24 if pos == "below" else 0)
         ha = "left" if pos == "right" else ("right" if pos == "left" else "center")
         va = "bottom" if pos == "above" else ("top" if pos == "below" else "center")
         txt = ax.text(lon_c + dx, lat_c + dy, label, fontsize=13, fontproperties=poppins_semibold,
