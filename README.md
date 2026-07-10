@@ -15,6 +15,9 @@ workflows. Each project lives in its own directory with its own README.
 - [`miles-city-wm6-temps/`](miles-city-wm6-temps/) — one-off map of
   WindBorne WeatherMesh-6 3km daily high temperatures over eastern Montana
   and the western Dakotas, centered on Miles City.
+- [`columbia-basin-wm6-temps/`](columbia-basin-wm6-temps/) — the same
+  WindBorne WeatherMesh-6 3km daily high temperature map, adapted to the
+  Columbia Basin (same domain as `columbia-basin-alerts-map/`).
 
 ## Shared resources
 

@@ -41,3 +41,8 @@ western-us-noaa-outlooks/output/*.png
 # and the rendered PNGs are outputs -- neither is source, so don't track them.
 miles-city-wm6-temps/data/*.npz
 miles-city-wm6-temps/output/*.png
+
+# --- columbia-basin-wm6-temps ---
+# same reasoning as miles-city-wm6-temps above.
+columbia-basin-wm6-temps/data/*.npz
+columbia-basin-wm6-temps/output/*.png
