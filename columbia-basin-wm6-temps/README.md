@@ -72,7 +72,8 @@ Ingalls Weather logo lives in
   uses for its land fill) is drawn outline-only here, with no fill, so it
   traces the Puget Sound without covering up the temperature color over
   water. Highways are motorway + trunk from the WA/OR/ID road files, styled
-  the same pastel blue/orange as `columbia-basin-alerts-map`.
+  the same pastel blue/orange as `columbia-basin-alerts-map`, and drawn on
+  top of the state/international border lines rather than under them.
 - The fetched grid is curvilinear and is resampled onto a padded regular
   lat/lon grid before rendering to avoid corner rendering gaps — see the
   Miles City README for the full explanation.

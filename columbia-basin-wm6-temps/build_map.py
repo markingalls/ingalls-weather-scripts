@@ -167,12 +167,18 @@ CITIES = [
     ("Pendleton", -118.7879, 45.6721, "right"),
     ("The Dalles", -121.1787, 45.5946, "left"),
     ("La Grande", -118.0877, 45.3246, "right"),
-    ("Condon", -120.1837, 45.2373, "right"),
+    ("Condon", -120.1837, 45.2373, "left"),
     ("Portland", -122.6784, 45.5152, "left"),
     ("Salem", -123.0351, 44.9429, "right"),
-    ("Longview", -122.9382, 46.1382, "left"),
-    ("Olympia", -122.9007, 47.0379, "left"),
+    ("Longview", -122.9382, 46.1382, "right"),
+    ("Olympia", -122.9007, 47.0379, "right"),
     ("Maupin", -121.0793, 45.1748, "left"),
+    ("Centralia", -122.9542, 46.7162, "right"),
+    ("Davenport", -118.1489, 47.6543, "left"),
+    ("Heppner", -119.5528, 45.3554, "right"),
+    ("Lewiston", -117.0177, 46.4165, "right"),
+    ("Baker City", -117.8344, 44.7749, "right"),
+    ("Madras", -121.1290, 44.6338, "right"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -443,11 +449,11 @@ def build_map(date, output_path, override_path=None):
     # shows over water; this is what traces the Puget Sound's shape.
     ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
 
-    ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR, linewidth=1.1, zorder=1.6)
-    ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR, linewidth=1.3, zorder=1.7)
-
     ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+
+    ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR, linewidth=1.1, zorder=2.6)
+    ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR, linewidth=1.3, zorder=2.7)
 
     # City labels -- name plus that spot's forecast high, sampled from the
     # resampled regular grid. Text always sits left or right of its dot;
