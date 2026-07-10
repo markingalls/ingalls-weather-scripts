@@ -42,7 +42,7 @@ western-us-noaa-outlooks/output/*.png
 miles-city-wm6-temps/data/*.npz
 miles-city-wm6-temps/output/*.png
 
-# --- columbia-basin-wm6-temps ---
+# --- columbia-basin-temps ---
 # same reasoning as miles-city-wm6-temps above.
-columbia-basin-wm6-temps/data/*.npz
-columbia-basin-wm6-temps/output/*.png
+columbia-basin-temps/data/*.npz
+columbia-basin-temps/output/*.png
