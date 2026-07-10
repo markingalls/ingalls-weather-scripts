@@ -131,7 +131,6 @@ CITIES = [
     ("Billings", -108.50, 45.78, "left"),
     ("Miles City", -105.84, 46.41, "left"),
     ("Glendive", -104.71, 47.11, "left"),
-    ("Sidney", -104.16, 47.72, "right"),
     ("Williston", -103.62, 48.15, "left"),
     ("Dickinson", -102.79, 46.88, "right"),
     ("Minot", -101.30, 48.23, "right"),
@@ -396,14 +395,14 @@ def build_map(date, output_path, override_path=None):
         ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
                 mec="black", mew=0.8, transform=pc)
         city_f = sample_grid_value(temp_f, lon_c, lat_c)
-        dx = 0.26 if pos == "right" else -0.26
+        dx = 0.12 if pos == "right" else -0.12
         ha = "left" if pos == "right" else "right"
 
         name_txt = ax.text(lon_c + dx, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold,
                             color="white", ha=ha, va="center", zorder=101, transform=pc)
         name_txt.set_path_effects(stroke)
 
-        temp_transform = offset_copy(geodetic_transform, fig=fig, x=0, y=-7, units="points")
+        temp_transform = offset_copy(geodetic_transform, fig=fig, x=0, y=-4, units="points")
         temp_txt = ax.text(lon_c + dx, lat_c, f"{city_f:.0f}°F", fontsize=9.75,
                             fontproperties=poppins_semibold, color="white", ha=ha, va="top",
                             zorder=101, transform=temp_transform)
