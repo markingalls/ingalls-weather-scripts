@@ -82,12 +82,7 @@ OUTPUT_DIR = THIS_DIR / "output"
 ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LAND_FILE = MAPS_DIR / "land_slim.json"
-ROAD_FILES = [
-    "washington_roads.geojson",
-    "oregon_roads.geojson",
-    "idaho_roads_north.geojson",
-    "pacific_nw_roads_west.geojson",
-]
+ROAD_FILES = ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 MOTORWAY_TYPES = {"motorway", "motorway_link"}
