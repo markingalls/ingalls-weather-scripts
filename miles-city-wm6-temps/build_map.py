@@ -22,9 +22,14 @@ live gridded forecast data. To render from a previously-saved grid instead
 
 REQUIRES (already checked into /maps at repo root, shared across all
 Ingalls Weather map projects):
-    states_lakes_slim.json
+    states_lakes_slim.json, admin1_boundary_lines.json, admin0_boundary_lines.json
   Sourced from raw.githubusercontent.com/martynafford/natural-earth-geojson
-  (10m), clipped down to North America.
+  (10m), clipped down to North America. The boundary lines are drawn from
+  Natural Earth's dedicated line datasets (not polygon outlines) because
+  adjacent state/province polygons are simplified independently -- drawing
+  their outlines directly produces two slightly different paths for the
+  same real-world border. The line datasets store each border once, so
+  neighboring regions share identical vertices.
 
 Logo is read from /assets/ingalls_weather_logo.png at repo root.
 """
@@ -44,7 +49,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, LinearSegmentedColormap
 from matplotlib.cm import ScalarMappable
 import numpy as np
 import requests
@@ -53,7 +58,6 @@ import zarr
 
 import cartopy.crs as ccrs
 from shapely.geometry import shape
-from shapely.ops import unary_union
 from PIL import Image
 
 # ---------------------------------------------------------------------------
@@ -66,9 +70,9 @@ THIS_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = THIS_DIR / "output"
 
 STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
+ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
+ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
-
-TARGET_COUNTRIES = {"United States of America", "Canada"}
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -113,6 +117,73 @@ CITIES = [
     ("Rapid City", -103.23, 44.08, "left"),
     ("Pierre", -100.35, 44.37, "below"),
 ]
+
+# ---------------------------------------------------------------------------
+# Temperature color table -- a fixed Kelvin-to-RGB enhancement curve (not
+# rescaled per map) so the same color always means the same absolute
+# temperature across every map this script renders. (K, [R, G, B]) control
+# points; the source table's alpha channel is constant (fully opaque) and
+# is dropped here.
+# ---------------------------------------------------------------------------
+TEMP_COLOR_TABLE = [
+    (205.53962824635747, [20, 1, 11]),
+    (220.54105933801642, [72, 2, 42]),
+    (223.30970412365585, [114, 5, 69]),
+    (226.07834890929527, [156, 7, 95]),
+    (228.8469936949347, [190, 31, 133]),
+    (231.61563848057412, [216, 33, 184]),
+    (234.38428326621354, [224, 94, 226]),
+    (237.15292805185297, [208, 143, 208]),
+    (239.9215728374924, [198, 174, 206]),
+    (242.71111221757047, [177, 149, 200]),
+    (245.48274194527255, [153, 122, 186]),
+    (248.25437167297463, [120, 90, 160]),
+    (251.02600140067673, [95, 67, 136]),
+    (253.7976311283788, [75, 44, 128]),
+    (256.5692608560809, [52, 34, 130]),
+    (259.2740222360249, [44, 54, 150]),
+    (262.11252031148507, [62, 73, 174]),
+    (264.88415003918715, [79, 90, 198]),
+    (267.13811875987665, [90, 128, 206]),
+    (269.1251668409579, [100, 165, 214]),
+    (271.1122149220392, [94, 194, 212]),
+    (273.0992630031204, [40, 142, 160]),
+    (275.0863110842017, [24, 105, 120]),
+    (279.0604072463642, [28, 108, 79]),
+    (283.03450340852675, [39, 132, 85]),
+    (286.97216346781227, [60, 150, 83]),
+    (289.741977590991, [112, 172, 91]),
+    (292.5117917141697, [159, 190, 91]),
+    (295.2816058373485, [208, 200, 84]),
+    (298.0514199605272, [204, 172, 70]),
+    (300.8212340837059, [212, 146, 61]),
+    (303.5910482068847, [218, 121, 35]),
+    (306.3608623300634, [208, 90, 31]),
+    (309.13067645324213, [216, 59, 32]),
+    (311.9004905764209, [182, 32, 7]),
+    (314.6703046995996, [142, 36, 19]),
+    (317.44011882277835, [102, 23, 10]),
+    (320.20993294595706, [142, 15, 54]),
+    (322.9797470691358, [194, 50, 94]),
+    (325.74956119231456, [216, 120, 149]),
+    (332.71070543555834, [204, 16, 171]),
+]
+TEMP_KMIN = TEMP_COLOR_TABLE[0][0]
+TEMP_KMAX = TEMP_COLOR_TABLE[-1][0]
+
+
+def build_temp_colormap():
+    span = TEMP_KMAX - TEMP_KMIN
+    stops = [((k - TEMP_KMIN) / span, [c / 255 for c in rgb]) for k, rgb in TEMP_COLOR_TABLE]
+    return LinearSegmentedColormap.from_list("ingalls_temp", stops, N=256)
+
+
+def f_to_k(f):
+    return (f - 32) * 5 / 9 + 273.15
+
+
+def k_to_f(k):
+    return (k - 273.15) * 9 / 5 + 32
 
 
 def sign_jwt(api_key):
@@ -185,23 +256,22 @@ def fetch_daily_high(date, api_key):
     return lat, lon, max_temp_k
 
 
-def load_states_lakes_and_countries():
+def load_lakes():
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
-    state_geoms, lake_geoms = [], []
-    by_country = {c: [] for c in TARGET_COUNTRIES}
-    for feat in data["features"]:
-        props = feat["properties"]
-        if "Lake" in props.get("featurecla", ""):
-            lake_geoms.append(shape(feat["geometry"]))
-            continue
-        admin = props.get("admin")
-        if admin in TARGET_COUNTRIES:
-            geom = shape(feat["geometry"])
-            state_geoms.append(geom)
-            by_country[admin].append(geom)
-    country_geoms = [unary_union(geoms) for geoms in by_country.values() if geoms]
-    return state_geoms, lake_geoms, country_geoms
+    return [shape(feat["geometry"]) for feat in data["features"]
+            if "Lake" in feat["properties"].get("featurecla", "")]
+
+
+def load_boundary_lines(path):
+    """Natural Earth's dedicated boundary-*line* datasets (as opposed to
+    polygon outlines) -- each border is stored once, so adjacent
+    states/provinces/countries share identical vertices and draw as a
+    single clean line instead of two independently-simplified, slightly
+    misaligned ones."""
+    with open(path) as f:
+        data = json.load(f)
+    return [shape(feat["geometry"]) for feat in data["features"]]
 
 
 def build_map(date, output_path, override_path=None):
@@ -220,11 +290,13 @@ def build_map(date, output_path, override_path=None):
                       "to render from a saved snapshot instead.")
         lat, lon, temp_k = fetch_daily_high(date, api_key)
 
-    temp_f = (temp_k - 273.15) * 9 / 5 + 32
+    temp_f = k_to_f(temp_k)
     print(f"Daily high range: {temp_f.min():.0f}F - {temp_f.max():.0f}F")
 
     print("Loading basemap layers...")
-    state_geoms, lake_geoms, country_geoms = load_states_lakes_and_countries()
+    lake_geoms = load_lakes()
+    admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
+    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
     proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
                                      satellite_height=4_000_000)
@@ -237,16 +309,17 @@ def build_map(date, output_path, override_path=None):
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
     ax.patch.set_facecolor("white")
 
-    # Temperature field -- sequential single-hue (warm) ramp, light to dark,
-    # scaled to the actual range present so the map uses its full contrast.
-    vmin = 5 * np.floor(temp_f.min() / 5)
-    vmax = 5 * np.ceil(temp_f.max() / 5)
-    ax.pcolormesh(lon, lat, temp_f, transform=pc, cmap="YlOrRd",
-                  vmin=vmin, vmax=vmax, shading="auto", zorder=1, alpha=0.92)
+    # Temperature field -- a fixed Kelvin-to-color enhancement curve (not
+    # rescaled to this map's data range), so color reads consistently
+    # across every map this script renders.
+    temp_cmap = build_temp_colormap()
+    temp_norm = Normalize(vmin=TEMP_KMIN, vmax=TEMP_KMAX)
+    ax.pcolormesh(lon, lat, temp_k, transform=pc, cmap=temp_cmap, norm=temp_norm,
+                  shading="auto", zorder=1)
 
-    ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(lake_geoms, crs=pc, facecolor="#dce7ef", edgecolor="#5a4632", linewidth=0.7, zorder=2.2)
-    ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+    ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
+    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
     # City labels
     for name, lon_c, lat_c, pos in CITIES:
@@ -272,7 +345,7 @@ def build_map(date, output_path, override_path=None):
     frame_px = ax.get_window_extent()
     cbar_left = (frame_px.x0 + MAP_FRAME_INSET_PX) / (FIG_WIDTH_IN * FIG_DPI)
     cbar_bottom = (frame_px.y0 + MAP_FRAME_INSET_PX) / (FIG_HEIGHT_IN * FIG_DPI)
-    cbar_width, cbar_height = 0.30, 0.022
+    cbar_width, cbar_height = 0.40, 0.022
 
     bg_ax = fig.add_axes([cbar_left - 0.012, cbar_bottom - 0.028, cbar_width + 0.024, cbar_height + 0.05],
                           zorder=150)
@@ -284,11 +357,15 @@ def build_map(date, output_path, override_path=None):
         spine.set_visible(False)
 
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height], zorder=151)
-    sm = ScalarMappable(norm=Normalize(vmin=vmin, vmax=vmax), cmap="YlOrRd")
+    sm = ScalarMappable(norm=temp_norm, cmap=temp_cmap)
     cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
     cb.outline.set_linewidth(0.6)
     cb.outline.set_edgecolor("#8a887e")
-    cb.set_ticks(np.arange(vmin, vmax + 1, 10))
+    # Fixed Fahrenheit tick marks (the underlying scale is Kelvin) spanning
+    # the color table's own range, not this map's data range.
+    f_ticks = range(-80, 121, 40)
+    cb.set_ticks([f_to_k(f) for f in f_ticks])
+    cb.set_ticklabels([str(f) for f in f_ticks])
     cb.ax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cb.ax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
