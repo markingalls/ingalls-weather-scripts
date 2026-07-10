@@ -17,9 +17,16 @@ Instagram, using live NWS data plus a pre-built local basemap.
 Shared basemap data lives one level up in [`../maps/`](../maps/) so other
 scripts can reuse it:
 
-- `land_slim.json`, `countries_slim.json`, `states_lakes_slim.json` —
-  coastline / country / state-province+lake boundaries (US, Canada,
-  Mexico), simplified and clipped for this project's scale.
+- `land_slim.json`, `countries_slim.json` — coastline / country
+  boundaries (US, Canada, Mexico), simplified and clipped for this
+  project's scale.
+- `admin1_boundary_lines.json` — state/province outlines (drawn instead of
+  `states_lakes_slim.json`'s own state polygons, which are coarser Natural
+  Earth 10m outlines; this dedicated line dataset's US portion is Census
+  TIGER/Line, so it tracks rivers like the WA/OR border tightly).
+- `states_lakes_slim.json` — used only for its lake polygons here (the
+  white-filled lakes); state outlines come from `admin1_boundary_lines.json`
+  instead, see above.
 - `counties_wa_or_id.geojson` — county boundaries for WA/OR/ID.
 - `washington_roads.geojson`, `oregon_roads.geojson`,
   `idaho_roads_north.geojson` — motorway/trunk road geometry per state

@@ -80,7 +80,10 @@ Shared basemap data lives one level up in [`../maps/`](../maps/):
 and international borders), `land_slim.json` (coastline), and
 `washington_roads.geojson` / `oregon_roads.geojson` / `idaho_roads_north.geojson`
 (highways — one file per state, no separate/duplicate regional extract).
-The Ingalls Weather logo lives in
+US state lines in `admin1_boundary_lines.json` are Census TIGER/Line
+boundaries (not Natural Earth's 10m generalization), so they track rivers
+like the WA/OR border tightly instead of visibly cutting corners — see
+Notes. The Ingalls Weather logo lives in
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
 
 ## Notes
@@ -96,8 +99,17 @@ The Ingalls Weather logo lives in
 - City labels show that spot's forecast value on a second line, sampled
   from the resampled grid, tucked in tight below the name via points-based
   offsets (constant regardless of map scale) rather than degrees.
-- Borders are drawn from Natural Earth's dedicated boundary-*line*
-  datasets, not polygon outlines — see the Miles City README for why.
+- Borders are drawn from dedicated boundary-*line* datasets, not polygon
+  outlines — see the Miles City README for why. US state lines are
+  Census TIGER/Line boundaries (full legal-boundary precision, e.g.
+  following the Columbia River's actual channel rather than Natural
+  Earth's 10m generalization of it), merged into a single deduplicated
+  line network (so adjacent states still share identical vertices at
+  their common border, same reasoning as the dedicated-line-dataset
+  approach generally) and simplified to ~20m tolerance -- finer than
+  the map ever resolves, but far smaller than TIGER's raw ~1m vertices.
+  International (admin0) and Canadian provincial lines are still Natural
+  Earth 10m, since TIGER only covers the US.
 - The coastline (`land_slim.json`, the same layer `columbia-basin-alerts-map`
   uses for its land fill) is drawn outline-only here, with no fill, so it
   traces the Puget Sound without covering up the temperature color over

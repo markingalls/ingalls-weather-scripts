@@ -56,16 +56,24 @@ and international borders). The Ingalls Weather logo lives in
   same underlying Kelvin scale, via `secondary_xaxis`).
 - City labels show that spot's forecast high on a second line, sampled
   from the resampled grid (see below) at each city's coordinates.
-- Borders are drawn from Natural Earth's dedicated boundary-*line*
-  datasets (`admin1_boundary_lines.json` / `admin0_boundary_lines.json`),
-  not from state/country polygon outlines -- polygon-outline datasets
-  simplify each polygon independently, so adjacent shapes' outlines drift
-  apart at shared borders (visible as a jagged double line at this map's
-  zoom level); the line datasets store each border once, so neighboring
-  regions share identical vertices. Both were filtered from
+- Borders are drawn from dedicated boundary-*line* datasets
+  (`admin1_boundary_lines.json` / `admin0_boundary_lines.json`), not from
+  state/country polygon outlines -- polygon-outline datasets simplify each
+  polygon independently, so adjacent shapes' outlines drift apart at
+  shared borders (visible as a jagged double line at this map's zoom
+  level); the line datasets store each border once, so neighboring
+  regions share identical vertices. `admin0_boundary_lines.json`
+  (international) and Canadian provincial lines in
+  `admin1_boundary_lines.json` were filtered from
   `ne_10m_admin_1_states_provinces_lines.json` /
   `ne_10m_admin_0_boundary_lines_land.json` (same source repo as the other
-  `../maps/` files) down to US/Canada/Mexico.
+  `../maps/` files) down to US/Canada/Mexico. US state lines in
+  `admin1_boundary_lines.json` are Census TIGER/Line boundaries instead --
+  full legal-boundary precision (e.g. following a river's actual channel,
+  not Natural Earth 10m's generalization of it) -- merged into a single
+  deduplicated line network the same way (so the "shared vertices, no
+  double line" property holds) and simplified to ~20m tolerance, well
+  below what this map ever resolves.
 - The fetched grid is curvilinear (the model's native projection warped
   into lat/lon) and is resampled onto a plain regular lat/lon grid
   (`resample_to_regular_grid()`) before rendering. This isn't just

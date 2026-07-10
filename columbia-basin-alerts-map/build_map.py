@@ -124,18 +124,23 @@ ax.add_geometries(c_geoms, crs=pc, facecolor="none", edgecolor="#9a978c",
                    linewidth=1.1, zorder=2)
 
 # ---------- states + lakes ----------
+# State outlines come from the dedicated admin1_boundary_lines.json (TIGER-
+# derived for the US, full state-line precision -- following rivers like
+# the WA/OR border tightly instead of states_lakes_slim.json's coarser,
+# generalized polygon edges), not from the lake/state polygon file's own
+# state boundaries. Lakes still come from states_lakes_slim.json since
+# that's the only source for them.
+admin1_lines = json.load(open(f"{MAPS_DIR}/admin1_boundary_lines.json"))
+s_geoms = [shape(f["geometry"]) for f in admin1_lines["features"]]
+
 states = json.load(open(f"{MAPS_DIR}/states_lakes_slim.json"))
-s_geoms = []
 lake_geoms = []
 for f in states["features"]:
     props = f["properties"]
     featurecla = props.get("featurecla", "")
     admin = props.get("admin", "")
-    if admin in ("United States of America", "Canada", "Mexico"):
-        if "Lake" in featurecla:
-            lake_geoms.append(shape(f["geometry"]))
-        else:
-            s_geoms.append(shape(f["geometry"]))
+    if admin in ("United States of America", "Canada", "Mexico") and "Lake" in featurecla:
+        lake_geoms.append(shape(f["geometry"]))
 ax.add_geometries(s_geoms, crs=pc, facecolor="none", edgecolor="#b9b6ac",
                    linewidth=0.8, zorder=3)
 ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac",
