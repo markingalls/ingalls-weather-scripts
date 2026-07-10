@@ -7,3 +7,6 @@ requests
 PyJWT
 zarr
 scipy
+herbie-data
+cfgrib
+eccodes

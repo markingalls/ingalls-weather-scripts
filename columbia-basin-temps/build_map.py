@@ -9,9 +9,12 @@ temperature metrics:
 
   --source wm6-3km    WindBorne WeatherMesh-6, 3 km, fetched directly from
                        the WindBorne API (requires WB_API_KEY).
-  --source hrrr        NOAA HRRR CONUS, 3 km          \\
-  --source ecmwf-ifs    ECMWF IFS, 0.25 deg             } via Open-Meteo
-  --source ecmwf-aifs   ECMWF AIFS, 0.25 deg           /  (no key needed)
+  --source hrrr        NOAA HRRR CONUS, 3 km, full native grid, via Herbie
+                        (AWS Open Data / NOMADS -- no key needed).
+  --source ecmwf-ifs    ECMWF IFS, 0.25 deg, full native grid, via Herbie
+                        (ECMWF Open Data -- no key needed).
+  --source ecmwf-aifs   ECMWF AIFS, 0.25 deg, full native grid, via Herbie
+                        (ECMWF Open Data -- no key needed).
 
   --metric high   max hourly 2m temp, 8am-8pm local time (the daytime
                   window that reliably contains the daily peak)
@@ -27,14 +30,17 @@ USAGE
     python build_map.py --source ecmwf-aifs --date 2026-07-12
 
 wm6-3km requires WB_API_KEY (see https://app.windbornesystems.com/api_tokens)
-in the environment. The Open-Meteo-backed sources (hrrr, ecmwf-ifs,
-ecmwf-aifs) need no API key, but query a coarse grid of points across the
-domain (Open-Meteo serves point forecasts, not gridded downloads) and
-interpolate -- see fetch_open_meteo() and OPEN_METEO_GRID_DEG.
+in the environment. hrrr/ecmwf-ifs/ecmwf-aifs need no API key -- Herbie
+pulls each model's own free GRIB2 distribution directly (NOAA's for HRRR,
+ECMWF's Open Data program for IFS/AIFS) via byte-range requests, so only
+the temperature_2m record is downloaded from each file, not the whole
+multi-GB archive. IFS publishes 3-hourly steps and AIFS 6-hourly, coarser
+than wm6-3km/hrrr's hourly steps, so --metric time snaps to the nearest
+step Herbie can actually fetch -- see snap_fxx_list().
 
 To render from a previously-saved grid instead of fetching live (useful for
 testing, or to avoid re-fetching), pass --file path/to/snapshot.npz -- see
-fetch_wm6_3km() / fetch_open_meteo() for the npz layout.
+fetch_wm6_3km() / fetch_hrrr() / fetch_ecmwf() for the npz layout.
 
 REQUIRES (already checked into /maps at repo root, shared across all
 Ingalls Weather map projects):
@@ -64,9 +70,15 @@ import json
 import os
 import sys
 import time
+import warnings
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+# cfgrib's xr.merge (used when Herbie loads a GRIB2 subset) warns about a
+# future xarray default that doesn't affect a single-variable subset like
+# ours -- harmless noise on every hrrr/ecmwf-ifs/ecmwf-aifs fetch.
+warnings.filterwarnings("ignore", message="In a future version of xarray.*compat", category=FutureWarning)
 
 import matplotlib
 matplotlib.use("Agg")
@@ -80,6 +92,7 @@ import requests
 import jwt
 import zarr
 from scipy.interpolate import griddata
+from herbie import Herbie
 
 import cartopy.crs as ccrs
 from shapely.geometry import shape
@@ -112,12 +125,6 @@ POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 # Data sources
 # ---------------------------------------------------------------------------
 WB_BASE = "https://api.windbornesystems.com/forecasts/v1/wm-6-3km"
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-OPEN_METEO_MODELS = {
-    "hrrr": "ncep_hrrr_conus",
-    "ecmwf-ifs": "ecmwf_ifs025",
-    "ecmwf-aifs": "ecmwf_aifs025_single",
-}
 SOURCE_LABELS = {
     "wm6-3km": "WeatherMesh-6 3 km",
     "hrrr": "NOAA HRRR 3 km",
@@ -136,16 +143,17 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 HIGH_WINDOW = (8, 20)
 LOW_WINDOW = (2, 9)
 
-# Open-Meteo serves point forecasts, not gridded downloads, so the
-# Open-Meteo-backed sources (hrrr, ecmwf-ifs, ecmwf-aifs) are sampled on a
-# regular query grid at this spacing (degrees) across the padded domain,
-# then interpolated the same way wm6-3km's native curvilinear grid is.
-# 0.15 deg (~15-17 km here) balances map fidelity against request count --
-# HRRR's native 3 km grid and IFS/AIFS's native 0.25 deg grid both have
-# real detail below/near this, but a report map doesn't need per-pixel
-# accuracy, and a finer query grid means proportionally more requests.
-OPEN_METEO_GRID_DEG = 0.15
-OPEN_METEO_BATCH = 200
+# hrrr/ecmwf-ifs/ecmwf-aifs are fetched at full native resolution, straight
+# from each model's own free distribution, via Herbie (byte-range GRIB2
+# subsetting -- only the temperature_2m record is pulled from each file,
+# not the whole multi-GB archive):
+#   hrrr        NOAA HRRR CONUS, hourly steps, from AWS Open Data / NOMADS
+#   ecmwf-ifs   ECMWF IFS 0.25 deg, 3-hourly steps, from ECMWF Open Data
+#   ecmwf-aifs  ECMWF AIFS 0.25 deg, 6-hourly steps, from ECMWF Open Data
+# The coarser IFS/AIFS step sizes mean requested local hours are snapped to
+# the nearest available step -- see snap_fxx_list().
+ECMWF_MODEL_NAMES = {"ecmwf-ifs": "ifs", "ecmwf-aifs": "aifs"}
+ECMWF_STEP_HOURS = {"ecmwf-ifs": 3, "ecmwf-aifs": 6}
 
 # ---------------------------------------------------------------------------
 # Figure geometry. AXES_RECT leaves extra room below the map (compared to a
@@ -293,10 +301,6 @@ def k_to_f(k):
     return (k - 273.15) * 9 / 5 + 32
 
 
-def c_to_k(c):
-    return c + 273.15
-
-
 def f_to_c(f):
     return (f - 32) * 5 / 9
 
@@ -310,12 +314,12 @@ RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAM
 
 
 def resample_to_regular_grid(lat, lon, values):
-    """Interpolate a curvilinear or scattered-point (lat, lon, values) grid
-    onto a plain regular lat/lon grid padded past the map's plotted extent
-    (see RESAMPLE_PAD_DEG). Works equally for wm6-3km's curvilinear native
-    grid and the Open-Meteo sources' scattered query-point grid, since both
-    just get raveled into flat point lists. Returns values_2d, indexed
-    [lat, lon] ascending."""
+    """Interpolate a (lat, lon, values) grid -- curvilinear (wm6-3km, hrrr)
+    or already-regular but on different axes (ecmwf-ifs/aifs) -- onto a
+    single common regular lat/lon grid padded past the map's plotted extent
+    (see RESAMPLE_PAD_DEG), so every source renders through the same
+    downstream code regardless of its native projection. Returns
+    values_2d, indexed [lat, lon] ascending."""
     reg_lon = np.linspace(RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_NX)
     reg_lat = np.linspace(RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX, RESAMPLE_NY)
     reg_lon_grid, reg_lat_grid = np.meshgrid(reg_lon, reg_lat)
@@ -345,12 +349,6 @@ def metric_local_hour_window(metric, hour):
     if metric == "low":
         return LOW_WINDOW
     return hour, hour
-
-
-def reduce_temps(metric, temps):
-    """Reduce a sequence of temperatures (same units in and out) to the
-    single value the metric asks for."""
-    return min(temps) if metric == "low" else max(temps)
 
 
 # ---------------------------------------------------------------------------
@@ -427,80 +425,136 @@ def fetch_wm6_3km(date, metric, hour, api_key):
 
 
 # ---------------------------------------------------------------------------
-# Open-Meteo (hrrr, ecmwf-ifs, ecmwf-aifs)
+# hrrr / ecmwf-ifs / ecmwf-aifs -- full native-resolution GRIB2, fetched
+# directly from each model's own free distribution via Herbie (byte-range
+# subsetting, so only the temperature_2m record is pulled from each file).
 # ---------------------------------------------------------------------------
-def open_meteo_query_points():
-    """Regular query grid across the padded domain -- see OPEN_METEO_GRID_DEG."""
-    lons = np.arange(RESAMPLE_LON_MIN, RESAMPLE_LON_MAX + 1e-9, OPEN_METEO_GRID_DEG)
-    lats = np.arange(RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX + 1e-9, OPEN_METEO_GRID_DEG)
-    lon_grid, lat_grid = np.meshgrid(lons, lats)
-    return lat_grid.ravel(), lon_grid.ravel()
+def select_hrrr_run(valid_times):
+    """Most recent HRRR init (UTC, on the hour) whose forecast horizon
+    covers every valid_time -- synoptic-hour cycles (00/06/12/18z) run out
+    to 48h, other hourly cycles only to 18h."""
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    for lookback in range(30):
+        candidate = now - timedelta(hours=lookback)
+        fxxs = [round((vt - candidate).total_seconds() / 3600) for vt in valid_times]
+        if min(fxxs) < 0:
+            continue
+        horizon = 48 if candidate.hour % 6 == 0 else 18
+        if max(fxxs) > horizon:
+            continue
+        if Herbie(candidate.replace(tzinfo=None), model="hrrr", product="sfc", fxx=min(fxxs), verbose=False).grib is not None:
+            return candidate
+    sys.exit("Could not find an HRRR run covering the requested date/window on NOAA's servers.")
 
 
-def fetch_open_meteo(source, date, metric, hour):
-    """Query a grid of points across the domain from Open-Meteo, reduce each
-    point's local hourly series to the metric's single value, and return
-    (lat_flat, lon_flat, temp_k_flat, {"kind": "retrieved", "value": iso_utc}).
-    Open-Meteo serves point forecasts (not gridded downloads), so this
-    samples OPEN_METEO_GRID_DEG-spaced points rather than fetching a native
-    grid -- resample_to_regular_grid() interpolates the rest same as it
-    does for wm6-3km's curvilinear grid."""
-    model = OPEN_METEO_MODELS[source]
+def select_ecmwf_run(model, valid_times, step_hours):
+    """Most recent ECMWF Open Data cycle (00/06/12/18z) whose forecast
+    covers every valid_time. IFS/AIFS runs out to 144h/360h, far beyond
+    what this script's --date range needs, so horizon isn't the limiting
+    factor -- just how recently a run has finished processing."""
+    now = datetime.now(timezone.utc)
+    latest_cycle = now.replace(hour=(now.hour // 6) * 6, minute=0, second=0, microsecond=0)
+    for lookback_cycles in range(40):
+        candidate = latest_cycle - timedelta(hours=6 * lookback_cycles)
+        fxxs = [round((vt - candidate).total_seconds() / 3600) for vt in valid_times]
+        if min(fxxs) < 0:
+            continue
+        test_fxx = int(round(min(fxxs) / step_hours) * step_hours)
+        if Herbie(candidate.replace(tzinfo=None), model=model, product="oper", fxx=test_fxx, verbose=False).grib is not None:
+            return candidate
+    sys.exit(f"Could not find an ECMWF {model} run covering the requested date/window.")
+
+
+def snap_fxx_list(valid_times, run_init, step_hours):
+    """Local hours snapped to the nearest forecast step the model actually
+    publishes (IFS: 3-hourly, AIFS: 6-hourly), deduplicated."""
+    fxxs = set()
+    for vt in valid_times:
+        raw_hours = (vt - run_init).total_seconds() / 3600
+        fxxs.add(max(int(round(raw_hours / step_hours)) * step_hours, 0))
+    return sorted(fxxs)
+
+
+def fetch_hrrr(date, metric, hour):
+    """Fetch hourly HRRR 2m temperature (full 3 km CONUS grid, cropped to
+    the map bbox) for the local-hour window the metric needs, and reduce.
+    Returns (lat_2d, lon_2d, temp_k_2d, {"kind": "init", "value": ...})."""
     start_hour, end_hour = metric_local_hour_window(metric, hour)
-    date_str = date.isoformat()
+    valid_times = local_window_valid_times(date, start_hour, end_hour)
+    run_init = select_hrrr_run(valid_times)
+    fxxs = sorted({round((vt - run_init).total_seconds() / 3600) for vt in valid_times})
 
-    query_lats, query_lons = open_meteo_query_points()
-    n = len(query_lats)
+    lat = lon = reduced_temp_k = None
+    r0 = r1 = c0 = c1 = None
+    for fxx in fxxs:
+        print(f"Fetching HRRR {run_init:%Y-%m-%d %H}z F{fxx:02d} ...")
+        ds = Herbie(run_init.replace(tzinfo=None), model="hrrr", product="sfc", fxx=fxx, verbose=False).xarray("TMP:2 m above ground")
+        if lat is None:
+            lat_full = ds.latitude.values
+            lon_full = np.where(ds.longitude.values > 180, ds.longitude.values - 360, ds.longitude.values)
+            mask = ((lon_full >= LON_MIN - FETCH_PAD_DEG) & (lon_full <= LON_MAX + FETCH_PAD_DEG) &
+                    (lat_full >= LAT_MIN - FETCH_PAD_DEG) & (lat_full <= LAT_MAX + FETCH_PAD_DEG))
+            rows = np.where(mask.any(axis=1))[0]
+            cols = np.where(mask.any(axis=0))[0]
+            r0, r1 = rows.min(), rows.max() + 1
+            c0, c1 = cols.min(), cols.max() + 1
+            lat, lon = lat_full[r0:r1, c0:c1], lon_full[r0:r1, c0:c1]
+            reduced_temp_k = np.full(lat.shape, np.inf if metric == "low" else -np.inf, dtype=np.float32)
+        values = ds["t2m"].values[r0:r1, c0:c1]
+        reduced_temp_k = (np.minimum if metric == "low" else np.maximum)(reduced_temp_k, values)
 
-    out_lat, out_lon, out_temp_k = [], [], []
-    missing = 0
-    for i in range(0, n, OPEN_METEO_BATCH):
-        batch_lat = query_lats[i:i + OPEN_METEO_BATCH]
-        batch_lon = query_lons[i:i + OPEN_METEO_BATCH]
-        print(f"Fetching {source} points {i + 1}-{min(i + OPEN_METEO_BATCH, n)} of {n} ...")
-        resp = requests.get(OPEN_METEO_URL, params={
-            "latitude": ",".join(f"{v:.4f}" for v in batch_lat),
-            "longitude": ",".join(f"{v:.4f}" for v in batch_lon),
-            "hourly": "temperature_2m",
-            "models": model,
-            "start_date": date_str,
-            "end_date": date_str,
-            "timezone": "America/Los_Angeles",
-        }, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        locations = data if isinstance(data, list) else [data]
+    return lat, lon, reduced_temp_k, {"kind": "init", "value": run_init.strftime("%Y-%m-%dT%H:00:00Z")}
 
-        for loc in locations:
-            hourly_by_local_hour = {
-                t[11:13]: v for t, v in zip(loc["hourly"]["time"], loc["hourly"]["temperature_2m"])
-                if t[:10] == date_str
-            }
-            wanted_c = [hourly_by_local_hour.get(f"{h:02d}") for h in range(start_hour, end_hour + 1)]
-            if any(v is None for v in wanted_c):
-                missing += 1
-                continue
-            out_lat.append(loc["latitude"])
-            out_lon.append(loc["longitude"])
-            out_temp_k.append(c_to_k(reduce_temps(metric, wanted_c)))
 
-    if missing > n * 0.5:
-        sys.exit(f"{source} returned no data for {missing}/{n} query points on {date_str} -- "
-                  f"the date is likely outside this model's forecast horizon on Open-Meteo.")
+def fetch_ecmwf(source, date, metric, hour):
+    """Fetch ECMWF IFS/AIFS 2m temperature (full 0.25 deg global grid,
+    cropped to the map bbox) at whichever native forecast steps overlap the
+    metric's local-hour window, and reduce. Returns (lat_2d, lon_2d,
+    temp_k_2d, {"kind": "init", "value": ...})."""
+    model = ECMWF_MODEL_NAMES[source]
+    step_hours = ECMWF_STEP_HOURS[source]
+    start_hour, end_hour = metric_local_hour_window(metric, hour)
+    valid_times = local_window_valid_times(date, start_hour, end_hour)
+    run_init = select_ecmwf_run(model, valid_times, step_hours)
+    fxxs = snap_fxx_list(valid_times, run_init, step_hours)
 
-    retrieved = datetime.now(timezone.utc).strftime("%Y-%m-%d %H") + "z"
-    return (np.array(out_lat), np.array(out_lon), np.array(out_temp_k),
-            {"kind": "retrieved", "value": retrieved})
+    display_hour = hour
+    if metric == "time":
+        actual_valid = run_init + timedelta(hours=fxxs[0])
+        display_hour = actual_valid.astimezone(LOCAL_TZ).hour
+        if actual_valid != valid_times[0]:
+            print(f"Note: {source} publishes every {step_hours}h -- using {actual_valid.isoformat()} "
+                  f"(nearest available step to the requested {valid_times[0].isoformat()}), "
+                  f"shown on the map as {display_hour}:00 local.")
+
+    lat = lon = reduced_temp_k = None
+    lat_idx = lon_idx = None
+    for fxx in fxxs:
+        print(f"Fetching {source} {run_init:%Y-%m-%d %H}z F{fxx:03d} ...")
+        ds = Herbie(run_init.replace(tzinfo=None), model=model, product="oper", fxx=fxx, verbose=False).xarray("2t")
+        if lat is None:
+            lat_1d, lon_1d = ds.latitude.values, ds.longitude.values
+            lat_idx = np.where((lat_1d >= LAT_MIN - FETCH_PAD_DEG) & (lat_1d <= LAT_MAX + FETCH_PAD_DEG))[0]
+            lon_idx = np.where((lon_1d >= LON_MIN - FETCH_PAD_DEG) & (lon_1d <= LON_MAX + FETCH_PAD_DEG))[0]
+            lon, lat = np.meshgrid(lon_1d[lon_idx], lat_1d[lat_idx])
+            reduced_temp_k = np.full(lat.shape, np.inf if metric == "low" else -np.inf, dtype=np.float32)
+        values = ds["t2m"].values[np.ix_(lat_idx, lon_idx)]
+        reduced_temp_k = (np.minimum if metric == "low" else np.maximum)(reduced_temp_k, values)
+
+    return lat, lon, reduced_temp_k, {"kind": "init", "value": run_init.strftime("%Y-%m-%dT%H:00:00Z"),
+                                       "display_hour": display_hour}
 
 
 def fetch_grid(source, date, metric, hour, api_key=None):
-    if source == "wm6-3km":
-        if not api_key:
-            sys.exit("WB_API_KEY not set -- get a token at "
-                      "https://app.windbornesystems.com/api_tokens, or pass --file "
-                      "to render from a saved snapshot instead.")
-        return fetch_wm6_3km(date, metric, hour, api_key)
-    return fetch_open_meteo(source, date, metric, hour)
+    if source == "hrrr":
+        return fetch_hrrr(date, metric, hour)
+    if source in ECMWF_MODEL_NAMES:
+        return fetch_ecmwf(source, date, metric, hour)
+    if not api_key:
+        sys.exit("WB_API_KEY not set -- get a token at "
+                  "https://app.windbornesystems.com/api_tokens, or pass --file "
+                  "to render from a saved snapshot instead.")
+    return fetch_wm6_3km(date, metric, hour, api_key)
 
 
 # ---------------------------------------------------------------------------
@@ -702,7 +756,8 @@ def build_map(source, metric, hour, date, output_path, override_path=None):
         run_str = f"Retrieved {meta['value']}"
     else:
         run_str = "unknown"
-    fig.text(0.03, 0.975, f"{date.strftime('%A')} {metric_title(metric, hour)}", fontsize=22,
+    display_hour = meta.get("display_hour", hour) if meta else hour
+    fig.text(0.03, 0.975, f"{date.strftime('%A')} {metric_title(metric, display_hour)}", fontsize=22,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
     fig.text(0.03, 0.935, f"{SOURCE_LABELS[source]} • {run_str}",
               fontsize=12, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")

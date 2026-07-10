@@ -7,14 +7,15 @@ North Bend, WA down to the Baker City, OR corridor), adapted from
 and house style. Supersedes the old `columbia-basin-wm6-temps/` (WM-6
 3km-only, high-only) — everything that could do is one mode of this script.
 
-Supports four forecast sources and three temperature metrics:
+Supports four forecast sources, all at full native resolution, and three
+temperature metrics:
 
 | `--source`     | Model                          | Native resolution | Via |
 |----------------|---------------------------------|--------------------|-----|
 | `wm6-3km` (default) | WindBorne WeatherMesh-6     | 3 km               | WindBorne API (needs `WB_API_KEY`) |
-| `hrrr`         | NOAA HRRR CONUS                 | 3 km               | Open-Meteo |
-| `ecmwf-ifs`    | ECMWF IFS                       | 0.25°              | Open-Meteo |
-| `ecmwf-aifs`   | ECMWF AIFS                      | 0.25°              | Open-Meteo |
+| `hrrr`         | NOAA HRRR CONUS                 | 3 km               | Herbie, from AWS Open Data / NOMADS |
+| `ecmwf-ifs`    | ECMWF IFS                       | 0.25°, 3-hourly steps | Herbie, from ECMWF Open Data |
+| `ecmwf-aifs`   | ECMWF AIFS                      | 0.25°, 6-hourly steps | Herbie, from ECMWF Open Data |
 
 | `--metric`        | Definition |
 |--------------------|------------|
@@ -39,20 +40,28 @@ python build_map.py --source ecmwf-aifs --date 2026-07-12
 only serves whole-run snapshots with every surface variable even though
 only `temperature_2m` is used).
 
-`hrrr` / `ecmwf-ifs` / `ecmwf-aifs` go through
-[Open-Meteo](https://open-meteo.com), which serves point forecasts rather
-than gridded downloads, so `fetch_open_meteo()` queries a grid of points
-spaced `OPEN_METEO_GRID_DEG` (0.15°, ~3,000 points over this domain) apart
-in batches of 200, then interpolates the same way the WM-6 path
-interpolates its native curvilinear grid. No API key needed. A full run
-takes about 30 seconds.
+`hrrr` / `ecmwf-ifs` / `ecmwf-aifs` are fetched at full native resolution
+via [Herbie](https://herbie.readthedocs.io), which pulls each model's own
+free GRIB2 distribution directly from its source (NOAA's AWS Open
+Data/NOMADS for HRRR, ECMWF's Open Data program for IFS/AIFS) using
+byte-range requests, so only the `temperature_2m` record is downloaded
+from each file, not the whole multi-GB archive. No API key needed. A full
+run takes well under a minute.
+
+IFS publishes 3-hourly steps and AIFS 6-hourly — coarser than
+wm6-3km/hrrr's hourly steps — so `--metric time` snaps to the nearest step
+actually available (`fetch_ecmwf()`'s `snap_fxx_list()`), and the map's
+title reflects the local hour that was actually plotted, not necessarily
+the one requested; a console note explains the substitution when one
+happens. `high`/`low` just reduce over whichever native steps fall in the
+window (so IFS gets ~4-5 samples across the daytime window, AIFS ~2).
 
 Output PNG lands in `output/`. To render from a previously-saved grid
 instead of fetching live (useful for testing, or to avoid re-fetching),
 pass `--file path/to/snapshot.npz` — see `fetch_wm6_3km()` /
-`fetch_open_meteo()` in `build_map.py` for the npz layout (`lat`, `lon`,
-`temp_k`, plus `meta_kind`/`meta_value` for the subtitle's "Init ..." or
-"Retrieved ..." line — omit both and it reads "unknown"). `--source` /
+`fetch_hrrr()` / `fetch_ecmwf()` in `build_map.py` for the npz layout
+(`lat`, `lon`, `temp_k`, plus `meta_kind`/`meta_value` for the subtitle's
+"Init ..." line — omit both and it reads "unknown"). `--source` /
 `--metric` / `--hour` still need to be passed alongside `--file` since the
 snapshot only holds the grid, not the labels.
 
@@ -63,7 +72,8 @@ snapshot only holds the grid, not the labels.
   table, and the high/low hour windows are all defined near the top — edit
   directly to adjust.
 - `requirements.txt` / `setup.sh` — Python + system dependencies (cartopy
-  needs GDAL, which only installs via apt, not pip).
+  needs GDAL, and cfgrib/eccodes -- GRIB2 decoding for hrrr/ecmwf-ifs/
+  ecmwf-aifs -- needs libeccodes, both only installing via apt, not pip).
 
 Shared basemap data lives one level up in [`../maps/`](../maps/):
 `admin1_boundary_lines.json` / `admin0_boundary_lines.json` (state/province
@@ -94,16 +104,14 @@ The Ingalls Weather logo lives in
   water. Highways are motorway + trunk from the WA/OR/ID road files, styled
   the same pastel blue/orange as `columbia-basin-alerts-map`, and drawn on
   top of the state/international border lines rather than under them.
-- Both the WM-6 curvilinear native grid and the Open-Meteo sources' scattered
-  query-point grid are resampled onto the same padded regular lat/lon grid
-  before rendering (to avoid corner rendering gaps in the NearsidePerspective
-  projection) — see the Miles City README for the full explanation of why.
-- The Open-Meteo sources' 0.15° query grid is coarser than HRRR's native 3 km
-  grid (and, in sharp terrain, coarser than what smoothly resolves a single
-  cold or hot outlier point), so a lone high-elevation grid cell can render
-  as a sharp-edged patch rather than a smooth gradient — a real value, just
-  under-sampled. Lower `OPEN_METEO_GRID_DEG` in `build_map.py` for higher
-  fidelity at the cost of more requests/runtime.
+- Every source's native grid -- wm6-3km's and HRRR's curvilinear projected
+  grid, IFS/AIFS's regular 0.25° lat/lon grid -- is cropped to the map bbox
+  then resampled onto the same padded regular lat/lon grid before rendering
+  (to avoid corner rendering gaps in the NearsidePerspective projection, and
+  so every source renders through identical downstream code) — see the
+  Miles City README for the full explanation of the padding.
+- HRRR's GRIB2 longitude is 0-360°; it's converted to -180..180° before
+  cropping, same convention as everything else in this script.
 - The `low` metric's 2am-9am window is a same-calendar-day approximation,
   not a true overnight low spanning the previous evening into this
   morning's sunrise — matches how `high`'s daytime window avoids fetching
@@ -115,5 +123,9 @@ The Ingalls Weather logo lives in
   space on both sides — see the Miles City README for why a wider box
   alone doesn't do this.
 - wm-6-3km's forecast horizon is short (currently 72 hours); HRRR's is ~48
-  hours; IFS/AIFS reach 15 days — `--date` only works within whichever
-  source's horizon.
+  hours (18 for non-synoptic-hour init cycles, `select_hrrr_run()` picks
+  whichever recent cycle actually covers the requested window); IFS/AIFS
+  reach 15 days — `--date` only works within whichever source's horizon.
+- Herbie caches downloaded GRIB2 subsets under `~/data/<model>/` (its
+  default `save_dir`, outside this repo) rather than this project's own
+  `data/`.
