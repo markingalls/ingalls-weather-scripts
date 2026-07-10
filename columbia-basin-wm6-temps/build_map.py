@@ -146,7 +146,7 @@ RESAMPLE_PAD_DEG = 1.5
 
 # Same city list (and left/right sides) as ../columbia-basin-alerts-map/build_map.py.
 CITIES = [
-    ("Spokane", -117.4260, 47.6588, "left"),
+    ("Spokane", -117.4260, 47.6588, "right"),
     ("Seattle", -122.3321, 47.6062, "right"),
     ("Wenatchee", -120.3103, 47.4235, "right"),
     ("Tacoma", -122.4443, 47.2529, "right"),
@@ -179,6 +179,7 @@ CITIES = [
     ("Lewiston", -117.0177, 46.4165, "right"),
     ("Baker City", -117.8344, 44.7749, "right"),
     ("Madras", -121.1290, 44.6338, "right"),
+    ("Enterprise", -117.2782, 45.4271, "right"),
 ]
 
 # ---------------------------------------------------------------------------
