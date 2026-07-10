@@ -92,7 +92,7 @@ DAY_START_HOUR, DAY_END_HOUR = 8, 20  # local daytime window used for the daily 
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN, FIG_HEIGHT_IN = 10, 8.9
 FIG_DPI = 200
-AXES_RECT = [0.035, 0.2, 0.93, 0.7]  # [left, bottom, width, height], figure fraction
+AXES_RECT = [0.035, 0.15, 0.93, 0.75]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ MAP_FRAME_INSET_PX = 22
 # to a little east of Bismarck.
 # ---------------------------------------------------------------------------
 LON_MIN, LON_MAX = -113.3, -99.3
-LAT_MIN, LAT_MAX = 42.7, 50.2
+LAT_MIN, LAT_MAX = 42.0, 50.4
 CENTER_LON, CENTER_LAT = -105.8404, 46.4083  # Miles City, MT
 
 # Degrees beyond the plotted extent to keep when cropping the fetched
@@ -127,11 +127,15 @@ CITIES = [
     ("Helena", -112.03, 46.59, "left"),
     ("Sweet Grass", -111.96, 48.98, "right"),
     ("Medicine Hat", -110.68, 50.04, "left"),
+    ("Swift Current", -107.80, 50.28, "left"),
     ("Havre", -109.68, 48.55, "right"),
     ("Great Falls", -111.28, 47.50, "right"),
+    ("Lewistown", -109.43, 47.06, "right"),
     ("Rexburg", -111.79, 43.83, "left"),
+    ("Jackson", -110.76, 43.48, "left"),
     ("Old Faithful", -110.83, 44.46, "right"),
     ("Bozeman", -111.04, 45.68, "right"),
+    ("Thermopolis", -108.21, 43.65, "left"),
     ("Sheridan", -106.96, 44.80, "right"),
     ("Billings", -108.50, 45.78, "left"),
     ("Glasgow", -106.64, 48.20, "right"),
@@ -142,6 +146,7 @@ CITIES = [
     ("Dickinson", -102.79, 46.88, "right"),
     ("Minot", -101.30, 48.23, "right"),
     ("Bismarck", -100.78, 46.81, "right"),
+    ("Brandon", -99.95, 49.85, "left"),
     ("Rapid City", -103.23, 44.08, "left"),
     ("Pierre", -100.35, 44.37, "left"),
 ]
@@ -275,7 +280,7 @@ def local_daytime_valid_times(date):
 def fetch_daily_high(date, api_key):
     """Fetch hourly temperature_2m grids spanning the local daytime window on
     `date`, crop to the map bbox, and reduce to a max (the daily high).
-    Returns (lat_2d, lon_2d, temp_k_2d)."""
+    Returns (lat_2d, lon_2d, temp_k_2d, init_time_str)."""
     run_info = wb_get("run_information", api_key)
     forecast_zero = datetime.fromisoformat(run_info["forecast_zero"].replace("Z", "+00:00"))
     init_time = run_info["initialization_time"]
@@ -314,7 +319,7 @@ def fetch_daily_high(date, api_key):
         max_temp_k = np.maximum(max_temp_k, g["temperature_2m"][r0:r1, c0:c1])
         store.close()
 
-    return lat, lon, max_temp_k
+    return lat, lon, max_temp_k, init_time
 
 
 def load_boundary_lines(path):
@@ -336,13 +341,14 @@ def build_map(date, output_path, override_path=None):
         print(f"Using local snapshot: {override_path}")
         npz = np.load(override_path)
         lat, lon, temp_k = npz["lat"], npz["lon"], npz["temp_k"]
+        init_time = str(npz["init_time"]) if "init_time" in npz else None
     else:
         api_key = os.environ.get("WB_API_KEY")
         if not api_key:
             sys.exit("WB_API_KEY not set -- get a token at "
                       "https://app.windbornesystems.com/api_tokens, or pass --file "
                       "to render from a saved snapshot instead.")
-        lat, lon, temp_k = fetch_daily_high(date, api_key)
+        lat, lon, temp_k, init_time = fetch_daily_high(date, api_key)
 
     print("Resampling onto a regular grid...")
     temp_k = resample_to_regular_grid(lat, lon, temp_k)
@@ -427,7 +433,7 @@ def build_map(date, output_path, override_path=None):
     frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
     cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.022
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
-    cbar_bottom = 0.095
+    cbar_bottom = 0.085
 
     # Only draw the slice of the color table that's actually visible on the
     # map today -- but sample it with the exact same cmap + Kelvin norm used
@@ -462,14 +468,15 @@ def build_map(date, output_path, override_path=None):
     for label in cax_c.get_xticklabels():
         label.set_fontproperties(poppins_reg)
 
-    cax.text(0.5, 3.6, "High Temperature", transform=cax.transAxes, fontsize=9.5,
-              fontproperties=poppins_reg, color="#2b2a26", ha="center", va="bottom")
-
     # Title & subtitle above the map
-    date_str = date.strftime("%A, %B %-d, %Y")
-    fig.text(0.03, 0.975, f"Miles City Area — {date.strftime('%A')} High Temperatures", fontsize=22,
+    if init_time:
+        init_dt = datetime.fromisoformat(init_time.replace("Z", "+00:00"))
+        init_str = init_dt.strftime("%Y-%m-%d %H") + "z"
+    else:
+        init_str = "unknown"
+    fig.text(0.03, 0.975, f"{date.strftime('%A')} High Temperatures", fontsize=22,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.935, f"WindBorne WeatherMesh-6 (3 km) — {date_str}, Mountain Time",
+    fig.text(0.03, 0.935, f"WeatherMesh-6 3 km • Init {init_str}",
               fontsize=12, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
     # Attribution

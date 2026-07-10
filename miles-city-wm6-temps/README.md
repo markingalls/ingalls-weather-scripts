@@ -1,10 +1,11 @@
 # Miles City WM-6 3km High Temps Map
 
 A one-off styled map of WindBorne WeatherMesh-6 3km high (daily max) 2m
-temperatures over eastern Montana and the western Dakotas, centered on
-Miles City, MT, and framed from a little west of Helena to a little east
-of Bismarck. Styled to match Ingalls Weather's regional-scale map house
-style (see [`../western-us-noaa-outlooks/`](../western-us-noaa-outlooks/)).
+temperatures over Montana, the western Dakotas, and neighboring parts of
+Wyoming, Idaho, and the Canadian Prairies, centered on Miles City, MT, and
+framed from a little west of Helena to a little east of Bismarck. Styled
+to match Ingalls Weather's regional-scale map house style (see
+[`../western-us-noaa-outlooks/`](../western-us-noaa-outlooks/)).
 
 "High" for a given date is the max hourly 2m temperature between 8am and
 8pm local time (America/Denver) — the daytime window that reliably
@@ -27,7 +28,9 @@ only `temperature_2m` is used). Output PNG lands in `output/`.
 To render from a previously-saved grid instead of fetching live (useful
 for testing, or to avoid re-pulling ~1 GB of hourly grids), pass
 `--file path/to/snapshot.npz` — see `fetch_daily_high()` in `build_map.py`
-for the npz layout (`lat`, `lon`, `temp_k`, all cropped to the map's bbox).
+for the npz layout (`lat`, `lon`, `temp_k`, all cropped to the map's bbox,
+plus an optional `init_time` string for the subtitle's "Init" timestamp —
+omit it and the subtitle just reads "unknown").
 
 ## Files
 
