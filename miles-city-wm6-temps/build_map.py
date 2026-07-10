@@ -50,7 +50,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
 from matplotlib.colors import Normalize, LinearSegmentedColormap
-from matplotlib.cm import ScalarMappable
+from matplotlib.transforms import offset_copy
 import numpy as np
 import requests
 import jwt
@@ -208,12 +208,12 @@ def k_to_f(k):
     return (k - 273.15) * 9 / 5 + 32
 
 
-def k_to_c(k):
-    return k - 273.15
+def f_to_c(f):
+    return (f - 32) * 5 / 9
 
 
-def c_to_k(c):
-    return c + 273.15
+def c_to_f(c):
+    return c * 9 / 5 + 32
 
 
 RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAMPLE_PAD_DEG
@@ -382,18 +382,32 @@ def build_map(date, output_path, override_path=None):
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
     # City labels -- name plus that spot's forecast high, sampled from the
-    # resampled regular grid. Text always sits left or right of its dot,
-    # vertically centered on it.
+    # resampled regular grid. Text always sits left or right of its dot;
+    # the name (top line) is vertically centered on the dot, with the
+    # temperature tucked in tight just below it. A plain multi-line Text
+    # centers the whole two-line block on the dot instead of just the top
+    # line, so the two lines are drawn as separate artists: the name at
+    # the dot's exact geographic position, and the temperature offset a
+    # fixed number of *points* below it (not degrees) via offset_copy, so
+    # the gap stays tight and constant regardless of map scale.
+    geodetic_transform = pc._as_mpl_transform(ax)
+    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
     for name, lon_c, lat_c, pos in CITIES:
         ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
                 mec="black", mew=0.8, transform=pc)
         city_f = sample_grid_value(temp_f, lon_c, lat_c)
-        label = f"{name}\n{city_f:.0f}°F"
         dx = 0.26 if pos == "right" else -0.26
         ha = "left" if pos == "right" else "right"
-        txt = ax.text(lon_c + dx, lat_c, label, fontsize=9.75, fontproperties=poppins_semibold,
-                       color="white", ha=ha, va="center", zorder=101, transform=pc, linespacing=1.0)
-        txt.set_path_effects([pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))])
+
+        name_txt = ax.text(lon_c + dx, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold,
+                            color="white", ha=ha, va="center", zorder=101, transform=pc)
+        name_txt.set_path_effects(stroke)
+
+        temp_transform = offset_copy(geodetic_transform, fig=fig, x=0, y=-7, units="points")
+        temp_txt = ax.text(lon_c + dx, lat_c, f"{city_f:.0f}°F", fontsize=9.75,
+                            fontproperties=poppins_semibold, color="white", ha=ha, va="top",
+                            zorder=101, transform=temp_transform)
+        temp_txt.set_path_effects(stroke)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
@@ -410,25 +424,34 @@ def build_map(date, output_path, override_path=None):
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
     cbar_bottom = 0.095
 
-    cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
-    sm = ScalarMappable(norm=temp_norm, cmap=temp_cmap)
-    cb = fig.colorbar(sm, cax=cax, orientation="horizontal")
-    cb.outline.set_linewidth(0.6)
-    cb.outline.set_edgecolor("#8a887e")
+    # Only draw the slice of the color table that's actually visible on the
+    # map today -- but sample it with the exact same cmap + Kelvin norm used
+    # to color the map, so a given shade still means the same temperature it
+    # always does. Rounded outward to the nearest 5F so the bar's ends land
+    # on clean numbers.
+    vmin_disp = 5 * np.floor(visible.min() / 5)
+    vmax_disp = 5 * np.ceil(visible.max() / 5)
+    gradient_k = f_to_k(np.linspace(vmin_disp, vmax_disp, 256)).reshape(1, -1)
 
-    # Primary axis (bottom): fixed Fahrenheit tick marks. The underlying
-    # scale is Kelvin and spans the color table's own range, not this map's
-    # data range.
-    f_ticks = list(range(-80, 121, 40))
-    cb.set_ticks([f_to_k(f) for f in f_ticks])
-    cb.set_ticklabels([f"{f}°F" for f in f_ticks])
-    cb.ax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
-    for label in cb.ax.get_xticklabels():
+    cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
+    cax.imshow(gradient_k, aspect="auto", cmap=temp_cmap, norm=temp_norm,
+               extent=[vmin_disp, vmax_disp, 0, 1])
+    cax.set_yticks([])
+    for spine in cax.spines.values():
+        spine.set_edgecolor("#8a887e")
+        spine.set_linewidth(0.6)
+
+    # Primary axis (bottom): Fahrenheit, ticked every 10F across the
+    # visible range.
+    f_ticks = [f for f in range(-100, 151, 10) if vmin_disp <= f <= vmax_disp]
+    cax.set_xticks(f_ticks)
+    cax.set_xticklabels([f"{f}°F" for f in f_ticks])
+    cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
+    for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
 
-    # Secondary axis (top): the same scale in Celsius.
-    cax_c = cax.secondary_xaxis("top", functions=(k_to_c, c_to_k))
-    cax_c.set_xticks(list(range(-60, 51, 20)))
+    # Secondary axis (top): the same range in Celsius.
+    cax_c = cax.secondary_xaxis("top", functions=(f_to_c, c_to_f))
     cax_c.xaxis.set_major_formatter(lambda c, _: f"{c:.0f}°C")
     cax_c.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cax_c.get_xticklabels():
