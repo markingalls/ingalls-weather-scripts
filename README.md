@@ -12,6 +12,10 @@ workflows. Each project lives in its own directory with its own README.
   styled Western U.S. maps for a range of NOAA outlooks: CPC extreme heat,
   temperature, and precipitation (6–10 day, 8–14 day, week 3–4); SPC fire
   weather and severe weather; and WPC excessive rainfall.
+- [`columbia-basin-temps/`](columbia-basin-temps/) — the canonical
+  Columbia Basin temperature map (same domain as
+  `columbia-basin-alerts-map/`): high, low, or a specific hour's temps,
+  from WM-6 3km, NOAA HRRR, ECMWF IFS, or ECMWF AIFS.
 - [`850-700-temp-chart/`](850-700-temp-chart/) — generates a styled
   meteogram of the WindBorne WM-6 ensemble spread for a pressure-level
   temperature at a point (defaults to KPSC / 850 mb), compared against
