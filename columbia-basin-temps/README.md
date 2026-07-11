@@ -2,10 +2,9 @@
 
 The canonical styled map of 2m temperatures over the Columbia Basin (same
 domain as [`../columbia-basin-alerts-map/`](../columbia-basin-alerts-map/):
-North Bend, WA down to the Baker City, OR corridor), adapted from
-[`../miles-city-wm6-temps/`](../miles-city-wm6-temps/)'s rendering approach
-and house style. Supersedes the old `columbia-basin-wm6-temps/` (WM-6
-3km-only, high-only) — everything that could do is one mode of this script.
+North Bend, WA down to the Baker City, OR corridor). Supersedes the old
+`columbia-basin-wm6-temps/` (WM-6 3km-only, high-only) — everything that
+could do is one mode of this script.
 
 Supports four forecast sources, all at full native resolution, and three
 temperature metrics:
@@ -91,25 +90,27 @@ Notes. The Ingalls Weather logo lives in
 - The color scale (`TEMP_COLOR_TABLE` in `build_map.py`) is a fixed
   Kelvin-to-RGB curve, not rescaled to each map's min/max — the same color
   always means the same absolute temperature across every map this script
-  renders (and across the Miles City version, since they share the same
-  table). The colorbar sits below the map, centered, with Fahrenheit ticks
+  renders. The colorbar sits below the map, centered, with Fahrenheit ticks
   on the bottom edge and Celsius ticks on the top edge (both are the same
   underlying Kelvin scale, via `secondary_xaxis`) and only draws the slice
   of the table actually visible that day.
 - City labels show that spot's forecast value on a second line, sampled
   from the resampled grid, tucked in tight below the name via points-based
   offsets (constant regardless of map scale) rather than degrees.
-- Borders are drawn from dedicated boundary-*line* datasets, not polygon
-  outlines — see the Miles City README for why. US state lines are
-  Census TIGER/Line boundaries (full legal-boundary precision, e.g.
-  following the Columbia River's actual channel rather than Natural
-  Earth's 10m generalization of it), merged into a single deduplicated
-  line network (so adjacent states still share identical vertices at
-  their common border, same reasoning as the dedicated-line-dataset
-  approach generally) and simplified to ~20m tolerance -- finer than
-  the map ever resolves, but far smaller than TIGER's raw ~1m vertices.
-  International (admin0) and Canadian provincial lines are still Natural
-  Earth 10m, since TIGER only covers the US.
+- Borders are drawn from dedicated boundary-*line* datasets
+  (`admin1_boundary_lines.json` / `admin0_boundary_lines.json`), not from
+  state/country polygon outlines -- polygon-outline datasets simplify each
+  polygon independently, so adjacent shapes' outlines drift apart at
+  shared borders (a jagged double line at this map's zoom level); the
+  line datasets store each border once, so neighboring regions share
+  identical vertices. US state lines are Census TIGER/Line boundaries
+  (full legal-boundary precision, e.g. following the Columbia River's
+  actual channel rather than Natural Earth's 10m generalization of it),
+  merged into a single deduplicated line network the same way and
+  simplified to ~20m tolerance -- finer than the map ever resolves, but
+  far smaller than TIGER's raw ~1m vertices. International (admin0) and
+  Canadian provincial lines are still Natural Earth 10m, since TIGER only
+  covers the US.
 - The coastline (`land_slim.json`, the same layer `columbia-basin-alerts-map`
   uses for its land fill) is drawn outline-only here, with no fill, so it
   traces the Puget Sound without covering up the temperature color over
@@ -119,9 +120,16 @@ Notes. The Ingalls Weather logo lives in
 - Every source's native grid -- wm6-3km's and HRRR's curvilinear projected
   grid, IFS/AIFS's regular 0.25° lat/lon grid -- is cropped to the map bbox
   then resampled onto the same padded regular lat/lon grid before rendering
-  (to avoid corner rendering gaps in the NearsidePerspective projection, and
-  so every source renders through identical downstream code) — see the
-  Miles City README for the full explanation of the padding.
+  (`resample_to_regular_grid()`), so every source renders through identical
+  downstream code regardless of its native projection. The padding isn't
+  just cosmetic: rendering a curvilinear grid directly leaves a stripe of
+  missing data at the corner of the map frame, and the resampled grid
+  itself has to be padded past the plotted extent (`RESAMPLE_PAD_DEG`) too,
+  or the same gap reappears -- cartopy's `imshow` warps the raster into the
+  map projection by inverse-projecting each screen pixel back to lon/lat
+  and sampling the source array, and right at the requested extent's edge
+  that lookup can land a hair outside the source array's bounds and get
+  masked out.
 - HRRR's GRIB2 longitude is 0-360°; it's converted to -180..180° before
   cropping, same convention as everything else in this script.
 - The `low` metric's 2am-9am window is a same-calendar-day approximation,
@@ -132,8 +140,14 @@ Notes. The Ingalls Weather logo lives in
 - The LON range is widened symmetrically beyond `columbia-basin-alerts-map`'s
   original extent so the rendered frame fills to the title's left margin
   and mirrors it on the right, rather than sitting centered with unused
-  space on both sides — see the Miles City README for why a wider box
-  alone doesn't do this.
+  space on both sides. Just picking a wider degree box doesn't reliably
+  land on that outcome: cartopy shrinks the axes to preserve the
+  projection's true geographic aspect ratio within `AXES_RECT`, so how
+  much frame-width-per-degree that produces isn't obvious ahead of time.
+  The actual `LON_MIN`/`LON_MAX` values were derived by rendering once,
+  measuring the frame's actual left/right pixel margins (a black-pixel row
+  scan) and the title's left inset, then solving for the scale factor that
+  makes the frame width equal `image_width - 2 * title_inset_px`.
 - wm-6-3km's forecast horizon is short (currently 72 hours); HRRR's is ~48
   hours (18 for non-synoptic-hour init cycles, `select_hrrr_run()` picks
   whichever recent cycle actually covers the requested window); IFS/AIFS

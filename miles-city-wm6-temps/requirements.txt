@@ -1,9 +1,0 @@
-matplotlib
-cartopy
-shapely
-Pillow
-numpy
-requests
-PyJWT
-zarr
-scipy
