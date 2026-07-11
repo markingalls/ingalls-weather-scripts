@@ -1,17 +1,17 @@
 """
-Fetches 1991-2020 monthly climatology (mean + interannual std dev) for air
-temperature at a given pressure level and point from the NCEP/NCAR
-Reanalysis 1, served by NOAA PSL's public OPeNDAP endpoint. Writes
-climatology.json. This has nothing to do with the current model run, so it
-only needs to be re-run if you change location/level, or want to refresh it
-against a newer climate normal period.
+Fetches 1991-2020 monthly climatology (mean) for air temperature at a given
+pressure level and point from the NCEP/NCAR Reanalysis 1, served by NOAA
+PSL's public OPeNDAP endpoint. Writes climatology.json. This has nothing to
+do with the current model run, so it only needs to be re-run if you change
+location/level, or want to refresh it against a newer climate normal period.
 
 Data source: air.mon.mean.nc (monthly means, 1948-present, 2.5-degree grid)
 at https://psl.noaa.gov/thredds/dodsC/Datasets/ncep.reanalysis.derived/pressure/
 We pull each calendar month's 1991-2020 time series directly via OPeNDAP
 array slicing (12 small requests) rather than downloading the full file, and
-compute mean/std ourselves -- the mean matches NOAA's own published long-term
-monthly normals.
+average it ourselves -- this matches NOAA's own published long-term monthly
+normals. build_chart.py fits a smooth annual-cycle curve through these 12
+points rather than plotting them as a stepped monthly series.
 
 No API key required.
 """
@@ -77,9 +77,8 @@ if __name__ == "__main__":
     for month in range(1, 13):
         years = fetch_month(level_idx, lat_idx, lon_idx, month)
         mean = statistics.fmean(years)
-        std = statistics.pstdev(years)
-        monthly.append({"month": month, "mean": round(mean, 3), "std": round(std, 3)})
-        print(f"  month {month:2d}: mean {mean:6.2f} C, std {std:5.2f} C ({len(years)} yrs)")
+        monthly.append({"month": month, "mean": round(mean, 3)})
+        print(f"  month {month:2d}: mean {mean:6.2f} C ({len(years)} yrs)")
 
     out = {
         "source": "NCEP/NCAR Reanalysis 1 (NOAA PSL), nearest 2.5-degree grid point",

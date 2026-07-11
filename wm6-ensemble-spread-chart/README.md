@@ -17,10 +17,10 @@ lat/lon and any WM-6 pressure level works.
   `forecast.json`. Requires `WB_API_KEY` in the environment (get one at
   https://app.windbornesystems.com/api_tokens). Run this first, any time
   you want the chart to reflect the latest model run.
-- `fetch_climatology.py` — pulls 1991–2020 monthly climatology (mean +
-  interannual std dev) for the same point/level from NOAA's NCEP/NCAR
-  Reanalysis 1, via PSL's public OPeNDAP server. No API key needed. Only
-  needs re-running if you change location or level.
+- `fetch_climatology.py` — pulls 1991–2020 monthly climatology (mean) for
+  the same point/level from NOAA's NCEP/NCAR Reanalysis 1, via PSL's public
+  OPeNDAP server. No API key needed. Only needs re-running if you change
+  location or level.
 - `build_chart.py` — renders `forecast.json` + `climatology.json` into
   `wm6_ensemble_spread.png`.
 - `requirements.txt` / `setup.sh` — Python dependencies (no system packages
@@ -51,16 +51,26 @@ multiple forecast refreshes for the same point.
 
 - **Climatology source**: NCEP/NCAR Reanalysis 1, native 2.5° grid — we pull
   the nearest grid point via OPeNDAP array-slicing (no full-file download).
-  The monthly mean/std (1991–2020) are interpolated to a smooth day-of-year
-  curve so the climatology line doesn't step at month boundaries. This is a
-  coarse-resolution reanalysis, so treat the climatology band as a regional
-  reference rather than a station-exact normal.
+  The 12 monthly means (1991–2020) are fit with a smooth 2-harmonic
+  (annual + semiannual) curve rather than plotted as a stepped monthly
+  series or a range — just the raw climatological normal, no spread. This
+  is a coarse-resolution reanalysis, so treat it as a regional reference
+  rather than a station-exact normal.
 - **Forecast source**: WM-6's calibrated ensemble percentiles
   (p01/p10/p25/p75/p90/p99) and mean, from the interpolated point-forecast
   endpoint. WM-6 runs 3-hourly out to 360h (15 days); `--max-hour` on
   `fetch_forecast.py` controls how far out to pull.
 - Both datasets report temperature in °C already, so `build_chart.py` does
   no unit conversion.
+- **Y-axis** is fixed to `min(p10) − 5°C` .. `max(p90) + 5°C` across the
+  whole series (not autoscaled), so a couple of extreme p01/p99 members
+  don't stretch the axis -- those tails can clip off the top/bottom, which
+  is expected.
+- **Layering** (back to front): percentile shading, then gridlines, then
+  the climatology line, then the ensemble mean line on top.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_chart.py` directly
-  to adjust.
+  to adjust. The forecast line/shading color is pulled from the pine tree
+  in the Ingalls Weather logo (`#0e303a`); the percentile bands taper it via
+  alpha rather than a lighter tint, since lightening this hue at full
+  saturation drifts toward blue.

@@ -23,42 +23,52 @@ INK_SECONDARY = "#5a584f"
 GRID_COLOR = "#e1e0d9"
 AXIS_COLOR = "#c3c2b7"
 
-ENSEMBLE_OUTER = "#cde2fb"   # p01-p99
-ENSEMBLE_WIDE = "#9ec5f4"    # p10-p90
-ENSEMBLE_MID = "#5598e7"     # p25-p75
-ENSEMBLE_MEAN = "#184f95"
+# Dark green/teal pulled from the pine tree in the Ingalls Weather logo.
+# Bands are the same color tapered via alpha rather than a lighter tint --
+# this hue reads as green/teal when dark but drifts toward blue if lightened
+# at full saturation, so transparency (not a lighter step) is what keeps the
+# bands reading as "this same color," just fainter.
+ENSEMBLE_BASE = "#0e303a"
+ENSEMBLE_MEAN = ENSEMBLE_BASE
+ENSEMBLE_OUTER_ALPHA = 0.14   # p01-p99
+ENSEMBLE_WIDE_ALPHA = 0.28    # p10-p90
+ENSEMBLE_MID_ALPHA = 0.46     # p25-p75
 
 CLIMO_LINE = "#c9531c"
-CLIMO_BAND = "#f6c19f"
 
 DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
+# z-order layering, back to front: ensemble shading -> gridlines ->
+# climatology line -> ensemble mean line.
+Z_SHADING = 1
+Z_GRID = 2
+Z_CLIMO = 3
+Z_MEAN = 4
 
-def build_climo_series(monthly, times):
-    """Interpolates the 12 monthly climatology values (assigned to the 15th
-    of each month) to a smooth day-of-year curve, evaluated at each forecast
-    valid time. Wraps around the year boundary."""
+
+def fit_annual_harmonic(monthly):
+    """Fits a smooth 2-harmonic (annual + semiannual) curve through the 12
+    monthly climatology means, so the climatology line has no month-boundary
+    kinks. Returns (coeffs, angular_freq) for eval_harmonic()."""
     anchor_doy, cum = [], 0
     for days in DAYS_IN_MONTH:
         anchor_doy.append(cum + 15)
         cum += days
-    means = [row["mean"] for row in monthly]
-    stds = [row["std"] for row in monthly]
+    x = np.array(anchor_doy, dtype=float)
+    y = np.array([row["mean"] for row in monthly], dtype=float)
+    w = 2 * np.pi / 365.25
+    design = np.column_stack([
+        np.ones_like(x), np.cos(w * x), np.sin(w * x), np.cos(2 * w * x), np.sin(2 * w * x),
+    ])
+    coeffs, *_ = np.linalg.lstsq(design, y, rcond=None)
+    return coeffs, w
 
-    ext_doy = [anchor_doy[-1] - 365.25] + anchor_doy + [anchor_doy[0] + 365.25]
-    ext_mean = [means[-1]] + means + [means[0]]
-    ext_std = [stds[-1]] + stds + [stds[0]]
 
-    out_mean, out_std = [], []
-    for t in times:
-        doy = t.timetuple().tm_yday + t.hour / 24 + t.minute / 1440
-        idx = int(np.searchsorted(ext_doy, doy)) - 1
-        idx = max(0, min(idx, len(ext_doy) - 2))
-        d0, d1 = ext_doy[idx], ext_doy[idx + 1]
-        frac = (doy - d0) / (d1 - d0)
-        out_mean.append(ext_mean[idx] + frac * (ext_mean[idx + 1] - ext_mean[idx]))
-        out_std.append(ext_std[idx] + frac * (ext_std[idx + 1] - ext_std[idx]))
-    return np.array(out_mean), np.array(out_std)
+def eval_harmonic(coeffs, w, times):
+    a0, a1, b1, a2, b2 = coeffs
+    doy = np.array([t.timetuple().tm_yday + t.hour / 24 + t.minute / 1440 for t in times])
+    return (a0 + a1 * np.cos(w * doy) + b1 * np.sin(w * doy)
+            + a2 * np.cos(2 * w * doy) + b2 * np.sin(2 * w * doy))
 
 
 def parse_args():
@@ -80,8 +90,8 @@ def main():
     mean, p01, p10, p25, p75, p90, p99 = (
         dist("mean"), dist("p01"), dist("p10"), dist("p25"), dist("p75"), dist("p90"), dist("p99"))
 
-    climo_mean, climo_std = build_climo_series(cdata["monthly"], times)
-    climo_lo, climo_hi = climo_mean - climo_std, climo_mean + climo_std
+    harmonic_coeffs, harmonic_w = fit_annual_harmonic(cdata["monthly"])
+    climo_mean = eval_harmonic(harmonic_coeffs, harmonic_w, times)
 
     level = fdata.get("level", cdata.get("level", 850))
     station = fdata.get("station", "")
@@ -98,23 +108,29 @@ def main():
     ax = fig.add_axes([0.075, 0.10, 0.87, 0.65])
     ax.set_facecolor("white")
 
-    ax.fill_between(times, climo_lo, climo_hi, color=CLIMO_BAND, alpha=0.5, linewidth=0, zorder=2)
+    # ensemble shading sits behind gridlines and the climatology line
+    ax.fill_between(times, p01, p99, color=ENSEMBLE_BASE, alpha=ENSEMBLE_OUTER_ALPHA,
+                     linewidth=0, zorder=Z_SHADING)
+    ax.fill_between(times, p10, p90, color=ENSEMBLE_BASE, alpha=ENSEMBLE_WIDE_ALPHA,
+                     linewidth=0, zorder=Z_SHADING, label="10–90th percentile")
+    ax.fill_between(times, p25, p75, color=ENSEMBLE_BASE, alpha=ENSEMBLE_MID_ALPHA,
+                     linewidth=0, zorder=Z_SHADING, label="25–75th percentile")
+
+    ax.axvline(init_time, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
+
     ax.plot(times, climo_mean, color=CLIMO_LINE, linewidth=2.0, linestyle="--",
-             dashes=(6, 3), zorder=3, label=f"Climatological normal ({cdata['period']})")
+             dashes=(6, 3), zorder=Z_CLIMO, label=f"Climatological normal ({cdata['period']})")
 
-    ax.fill_between(times, p01, p99, color=ENSEMBLE_OUTER, alpha=0.55, linewidth=0, zorder=4)
-    ax.fill_between(times, p10, p90, color=ENSEMBLE_WIDE, alpha=0.75, linewidth=0,
-                     zorder=5, label="10–90th percentile")
-    ax.fill_between(times, p25, p75, color=ENSEMBLE_MID, alpha=0.85, linewidth=0,
-                     zorder=6, label="25–75th percentile")
-    ax.plot(times, mean, color=ENSEMBLE_MEAN, linewidth=2.6, zorder=7, label="Ensemble mean")
+    ax.plot(times, mean, color=ENSEMBLE_MEAN, linewidth=2.6, zorder=Z_MEAN, label="Ensemble mean")
 
-    ax.axvline(init_time, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=1)
+    # ---------- y-axis: fixed to the ensemble's own p10-5 / p90+5 window,
+    # so the display doesn't rescale to chase p01/p99 outliers ----------
+    ax.set_ylim(float(np.min(p10)) - 5, float(np.max(p90)) + 5)
 
     # ---------- axes styling ----------
     ax.set_ylabel(f"{level} mb Temperature (°C)", fontproperties=f_med, fontsize=12, color=INK)
-    ax.grid(axis="y", color=GRID_COLOR, linewidth=0.9, zorder=0)
-    ax.set_axisbelow(True)
+    ax.set_axisbelow(False)
+    ax.grid(axis="y", color=GRID_COLOR, linewidth=0.9, zorder=Z_GRID)
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
     for spine in ("left", "bottom"):
