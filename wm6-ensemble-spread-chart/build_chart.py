@@ -20,7 +20,7 @@ f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
 BG = "#f7f6f2"
 INK = "#2b2a26"
 INK_SECONDARY = "#5a584f"
-GRID_COLOR = "#e1e0d9"
+GRID_COLOR = "#000000"
 AXIS_COLOR = "#000000"
 
 # Forest green, in the spirit of the pine tree in the Ingalls Weather logo
@@ -146,7 +146,7 @@ def main():
     # ---------- axes styling ----------
     ax.set_ylabel(f"{level} mb Temperature (°C)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_axisbelow(False)
-    ax.grid(axis="y", color=GRID_COLOR, linewidth=0.9, zorder=Z_GRID)
+    ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
     for spine in ("left", "bottom"):
