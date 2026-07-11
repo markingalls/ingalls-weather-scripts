@@ -35,10 +35,10 @@ western-us-noaa-outlooks/data/*.kml
 western-us-noaa-outlooks/data/*.kmz
 western-us-noaa-outlooks/output/*.png
 
-# --- wm6-ensemble-spread-chart ---
+# --- 850-700-temp-chart ---
 # forecast.json/climatology.json are live data fetch_forecast.py and
 # fetch_climatology.py regenerate every run, and the rendered chart is an
 # output too -- neither is source, so don't track them.
-wm6-ensemble-spread-chart/forecast.json
-wm6-ensemble-spread-chart/climatology.json
-wm6-ensemble-spread-chart/wm6_ensemble_spread*.png
+850-700-temp-chart/forecast.json
+850-700-temp-chart/climatology.json
+850-700-temp-chart/wm6_ensemble_spread*.png
