@@ -110,9 +110,7 @@ def main():
     climo_mean = eval_climatology_harmonics(harmonic_coeffs, times)
 
     level = fdata.get("level", cdata.get("level", 850))
-    station = fdata.get("station", "")
-    label = fdata.get("label")
-    title_loc = f"{station} ({label})" if label else station
+    title_loc = fdata.get("label") or fdata.get("station", "")
 
     init_time = datetime.fromisoformat(fdata["initialization_time"].replace("Z", "+00:00"))
     lat, lon = fdata.get("lat"), fdata.get("lon")
