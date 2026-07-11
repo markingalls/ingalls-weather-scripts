@@ -34,3 +34,11 @@ columbia-basin-alerts-map/columbia_basin_alerts*.png
 western-us-noaa-outlooks/data/*.kml
 western-us-noaa-outlooks/data/*.kmz
 western-us-noaa-outlooks/output/*.png
+
+# --- 850-700-temp-chart ---
+# forecast.json/climatology.json are live data fetch_forecast.py and
+# fetch_climatology.py regenerate every run, and the rendered chart is an
+# output too -- neither is source, so don't track them.
+850-700-temp-chart/forecast.json
+850-700-temp-chart/climatology.json
+850-700-temp-chart/wm6_ensemble_spread*.png
