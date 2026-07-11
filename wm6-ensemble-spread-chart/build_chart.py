@@ -115,8 +115,8 @@ def main():
     title_loc = f"{station} ({label})" if label else station
 
     init_time = datetime.fromisoformat(fdata["initialization_time"].replace("Z", "+00:00"))
-    max_hour = round((times[-1] - datetime.fromisoformat(fdata["forecast_zero"].replace("Z", "+00:00")))
-                      .total_seconds() / 3600)
+    lat, lon = fdata.get("lat"), fdata.get("lon")
+    ns, ew = ("N" if lat >= 0 else "S"), ("E" if lon >= 0 else "W")
 
     # ---------- figure (same footprint as the alerts map) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
@@ -135,7 +135,7 @@ def main():
     ax.axvline(init_time, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
     ax.plot(times, climo_mean, color=CLIMO_LINE, linewidth=2.0, linestyle="--",
-             dashes=(6, 3), zorder=Z_CLIMO, label=f"Climatological normal ({cdata['period']})")
+             dashes=(6, 3), zorder=Z_CLIMO, label=f"Climo ({cdata['period']})")
 
     ax.plot(times, mean, color=ENSEMBLE_MEAN, linewidth=2.6, zorder=Z_MEAN, label="Ensemble mean")
 
@@ -174,7 +174,7 @@ def main():
     # ---------- legend (horizontal strip above the plot, out of the data's way) ----------
     handles, labels = ax.get_legend_handles_labels()
     order = ["Ensemble mean", "25–75th percentile", "10–90th percentile",
-             f"Climatological normal ({cdata['period']})"]
+             f"Climo ({cdata['period']})"]
     by_label = dict(zip(labels, handles))
     handles = [by_label[l] for l in order if l in by_label]
     leg = fig.legend(handles, [l for l in order if l in by_label],
@@ -211,10 +211,10 @@ def main():
     # ---------- title / subtitle ----------
     subtitle_y = top_y + 0.058
     title_y = subtitle_y + 0.035
-    title = f"WM-6 Ensemble: {level} mb Temperature — {title_loc}"
+    title = f"{level} mb Temperature at {title_loc}"
     fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
-    subtitle = (f"Ensemble spread vs. climatology — run {init_time.strftime('%b %-d, %Y %H'):s}Z, "
-                f"3-hourly out to +{max_hour}h")
+    subtitle = (f"WeatherMesh-6 Init {init_time.strftime('%Y-%m-%d')} {init_time.strftime('%H')}z"
+                f" • {ns}{abs(lat):.2f}°, {ew}{abs(lon):.2f}°")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
