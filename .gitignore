@@ -41,3 +41,11 @@ western-us-noaa-outlooks/output/*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 columbia-basin-temps/data/*.npz
 columbia-basin-temps/output/*.png
+
+# --- 850-700-temp-chart ---
+# forecast.json/climatology.json are live data fetch_forecast.py and
+# fetch_climatology.py regenerate every run, and the rendered chart is an
+# output too -- neither is source, so don't track them.
+850-700-temp-chart/forecast.json
+850-700-temp-chart/climatology.json
+850-700-temp-chart/wm6_ensemble_spread*.png
