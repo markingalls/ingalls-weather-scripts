@@ -17,10 +17,10 @@ lat/lon and any WM-6 pressure level works.
   `forecast.json`. Requires `WB_API_KEY` in the environment (get one at
   https://app.windbornesystems.com/api_tokens). Run this first, any time
   you want the chart to reflect the latest model run.
-- `fetch_climatology.py` — pulls 1991–2020 monthly climatology (mean) for
-  the same point/level from NOAA's NCEP/NCAR Reanalysis 1, via PSL's public
-  OPeNDAP server. No API key needed. Only needs re-running if you change
-  location or level.
+- `fetch_climatology.py` — pulls the 1991–2020 long-term-mean climatology at
+  full 6-hourly (00/06/12/18Z) precision for the same point/level from
+  NOAA's NCEP/NCAR Reanalysis 1, via PSL's public OPeNDAP server. No API key
+  needed. Only needs re-running if you change location or level.
 - `build_chart.py` — renders `forecast.json` + `climatology.json` into
   `wm6_ensemble_spread.png`.
 - `requirements.txt` / `setup.sh` — Python dependencies (no system packages
@@ -51,11 +51,16 @@ multiple forecast refreshes for the same point.
 
 - **Climatology source**: NCEP/NCAR Reanalysis 1, native 2.5° grid — we pull
   the nearest grid point via OPeNDAP array-slicing (no full-file download).
-  The 12 monthly means (1991–2020) are fit with a smooth 2-harmonic
-  (annual + semiannual) curve rather than plotted as a stepped monthly
-  series or a range — just the raw climatological normal, no spread. This
-  is a coarse-resolution reanalysis, so treat it as a regional reference
-  rather than a station-exact normal.
+  `fetch_climatology.py` pulls NOAA's precomputed 1991-2020 long-term mean
+  at full 6-hourly precision (1460 points/year) rather than a monthly
+  average, so the raw series already contains the diurnal cycle, not just
+  the seasonal one. `build_chart.py` then fits smooth annual + semiannual +
+  diurnal + semidiurnal harmonics through those 1460 points -- full
+  precision in, smoothed out, but the daily bumps survive the smoothing
+  instead of being averaged away with the noise. Just the climatological
+  normal is plotted, no spread/range. This is a coarse-resolution
+  reanalysis, so treat it as a regional reference rather than a
+  station-exact normal.
 - **Forecast source**: WM-6's calibrated ensemble percentiles
   (p01/p10/p25/p75/p90/p99) and mean, from the interpolated point-forecast
   endpoint. WM-6 runs 3-hourly out to 360h (15 days); `--max-hour` on
@@ -70,7 +75,7 @@ multiple forecast refreshes for the same point.
   the climatology line, then the ensemble mean line on top.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_chart.py` directly
-  to adjust. The forecast line/shading color is pulled from the pine tree
-  in the Ingalls Weather logo (`#0e303a`); the percentile bands taper it via
-  alpha rather than a lighter tint, since lightening this hue at full
-  saturation drifts toward blue.
+  to adjust. The forecast line/shading is a forest green in the spirit of
+  the logo's pine tree (`#164f29`); the percentile bands taper it via alpha
+  rather than a lighter tint, since lightening this hue at full saturation
+  drifts toward blue. Axis spines/ticks are black.

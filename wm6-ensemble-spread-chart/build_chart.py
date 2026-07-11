@@ -21,22 +21,19 @@ BG = "#f7f6f2"
 INK = "#2b2a26"
 INK_SECONDARY = "#5a584f"
 GRID_COLOR = "#e1e0d9"
-AXIS_COLOR = "#c3c2b7"
+AXIS_COLOR = "#000000"
 
-# Dark green/teal pulled from the pine tree in the Ingalls Weather logo.
-# Bands are the same color tapered via alpha rather than a lighter tint --
-# this hue reads as green/teal when dark but drifts toward blue if lightened
-# at full saturation, so transparency (not a lighter step) is what keeps the
-# bands reading as "this same color," just fainter.
-ENSEMBLE_BASE = "#0e303a"
+# Forest green, in the spirit of the pine tree in the Ingalls Weather logo
+# (the logo's own pine color is a dark navy-teal that reads as blue once
+# lightened -- this is shifted a bit further into true green so tinting/
+# tapering it still reads as green rather than drifting blue).
+ENSEMBLE_BASE = "#164f29"
 ENSEMBLE_MEAN = ENSEMBLE_BASE
 ENSEMBLE_OUTER_ALPHA = 0.14   # p01-p99
 ENSEMBLE_WIDE_ALPHA = 0.28    # p10-p90
 ENSEMBLE_MID_ALPHA = 0.46     # p25-p75
 
 CLIMO_LINE = "#c9531c"
-
-DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
 # z-order layering, back to front: ensemble shading -> gridlines ->
 # climatology line -> ensemble mean line.
@@ -45,30 +42,49 @@ Z_GRID = 2
 Z_CLIMO = 3
 Z_MEAN = 4
 
+# Harmonic terms used to smooth the raw 6-hourly climatology: annual +
+# semiannual capture the seasonal trend, diurnal + semidiurnal capture the
+# daily heating/cooling bumps riding on top of it. Fitting all of them at
+# once on the full-precision series is what lets the smoothed curve keep
+# the modest daily bumps instead of flattening them out along with the noise.
+SEASONAL_HARMONICS = 2
+DIURNAL_HARMONICS = 2
 
-def fit_annual_harmonic(monthly):
-    """Fits a smooth 2-harmonic (annual + semiannual) curve through the 12
-    monthly climatology means, so the climatology line has no month-boundary
-    kinks. Returns (coeffs, angular_freq) for eval_harmonic()."""
-    anchor_doy, cum = [], 0
-    for days in DAYS_IN_MONTH:
-        anchor_doy.append(cum + 15)
-        cum += days
-    x = np.array(anchor_doy, dtype=float)
-    y = np.array([row["mean"] for row in monthly], dtype=float)
-    w = 2 * np.pi / 365.25
-    design = np.column_stack([
-        np.ones_like(x), np.cos(w * x), np.sin(w * x), np.cos(2 * w * x), np.sin(2 * w * x),
-    ])
+
+def fit_climatology_harmonics(cdata):
+    """Fits smooth seasonal+diurnal harmonics through the raw 6-hourly
+    long-term-mean climatology series (full precision in, smoothed function
+    out). Returns coeffs for eval_climatology_harmonics()."""
+    t = np.array(cdata["t_days"], dtype=float)
+    y = np.array(cdata["mean_c"], dtype=float)
+    w_season = 2 * np.pi / 365.25
+    w_day = 2 * np.pi / 1.0
+
+    cols = [np.ones_like(t)]
+    for k in range(1, SEASONAL_HARMONICS + 1):
+        cols += [np.cos(k * w_season * t), np.sin(k * w_season * t)]
+    for k in range(1, DIURNAL_HARMONICS + 1):
+        cols += [np.cos(k * w_day * t), np.sin(k * w_day * t)]
+    design = np.column_stack(cols)
+
     coeffs, *_ = np.linalg.lstsq(design, y, rcond=None)
-    return coeffs, w
+    return coeffs
 
 
-def eval_harmonic(coeffs, w, times):
-    a0, a1, b1, a2, b2 = coeffs
-    doy = np.array([t.timetuple().tm_yday + t.hour / 24 + t.minute / 1440 for t in times])
-    return (a0 + a1 * np.cos(w * doy) + b1 * np.sin(w * doy)
-            + a2 * np.cos(2 * w * doy) + b2 * np.sin(2 * w * doy))
+def eval_climatology_harmonics(coeffs, times):
+    t = np.array([(dt.timetuple().tm_yday - 1) + dt.hour / 24 + dt.minute / 1440 for dt in times])
+    w_season = 2 * np.pi / 365.25
+    w_day = 2 * np.pi / 1.0
+
+    out = np.full_like(t, coeffs[0])
+    i = 1
+    for k in range(1, SEASONAL_HARMONICS + 1):
+        out = out + coeffs[i] * np.cos(k * w_season * t) + coeffs[i + 1] * np.sin(k * w_season * t)
+        i += 2
+    for k in range(1, DIURNAL_HARMONICS + 1):
+        out = out + coeffs[i] * np.cos(k * w_day * t) + coeffs[i + 1] * np.sin(k * w_day * t)
+        i += 2
+    return out
 
 
 def parse_args():
@@ -90,8 +106,8 @@ def main():
     mean, p01, p10, p25, p75, p90, p99 = (
         dist("mean"), dist("p01"), dist("p10"), dist("p25"), dist("p75"), dist("p90"), dist("p99"))
 
-    harmonic_coeffs, harmonic_w = fit_annual_harmonic(cdata["monthly"])
-    climo_mean = eval_harmonic(harmonic_coeffs, harmonic_w, times)
+    harmonic_coeffs = fit_climatology_harmonics(cdata)
+    climo_mean = eval_climatology_harmonics(harmonic_coeffs, times)
 
     level = fdata.get("level", cdata.get("level", 850))
     station = fdata.get("station", "")
