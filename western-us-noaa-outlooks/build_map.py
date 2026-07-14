@@ -80,14 +80,26 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
 # Natural Earth's admin-1 polygons aren't topologically consistent across
-# countries -- e.g. Alberta's edge jogs up to ~5.5km off Montana's, even at
-# full 10m resolution, because the US and Canadian source boundaries were
-# digitized independently. That shows up as a visible double line wherever
-# two adjacent polygons from different countries share a border. Simplifying
-# each polygon individually collapses that jitter back onto one line without
-# visibly coarsening state/coastline shape at this map's scale (this render
-# is ~65px/degree, so 0.05 degrees is ~3px).
-BORDER_SIMPLIFY_TOLERANCE_DEG = 0.05
+# countries -- e.g. Alberta's edge has two separate anomalies (~6km and
+# ~17km) off Montana's shared border, even at full 10m resolution, because
+# the US and Canadian source boundaries were digitized independently. That
+# shows up as a visible double line wherever two adjacent polygons from
+# different countries share a border. 0.05 degrees collapsed the smaller
+# jog but left the larger one; 0.08 clears both without visibly coarsening
+# state/coastline shape at this map's scale (this render is ~65px/degree,
+# so 0.08 degrees is ~5px).
+BORDER_SIMPLIFY_TOLERANCE_DEG = 0.08
+
+# Simplifying can leave a very long, nearly-straight run reduced to just its
+# two endpoints (e.g. Montana's entire ~12-degree-long northern border).
+# Under this map's curved perspective projection a 2-point chord that long
+# visibly cuts the corner relative to a neighboring country's border, which
+# -- built from several shorter same-length polygons -- keeps more points
+# along the same stretch. That reads as a second, offset border line even
+# though the underlying geography now matches. Re-densifying afterwards so
+# no straight run exceeds this length fixes the projected curve without
+# reintroducing the cross-country jitter BORDER_SIMPLIFY_TOLERANCE_DEG removes.
+BORDER_DENSIFY_SEGMENT_DEG = 0.5
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -515,6 +527,7 @@ def load_land():
     with open(LAND_FILE) as f:
         data = json.load(f)
     return [shape(feat["geometry"]).simplify(BORDER_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+                                     .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
             for feat in data["features"] if feat.get("geometry")]
 
 
@@ -529,7 +542,9 @@ def load_states_lakes_and_countries():
     Each polygon is simplified before the per-country union so borders
     shared between countries (not fixed by the union, which only aligns
     a country's outline with its own states) collapse onto one line too --
-    see BORDER_SIMPLIFY_TOLERANCE_DEG."""
+    see BORDER_SIMPLIFY_TOLERANCE_DEG. Re-densified afterwards per
+    BORDER_DENSIFY_SEGMENT_DEG so the simplified border still projects as
+    a smooth curve instead of a handful of long, corner-cutting chords."""
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
     state_geoms, lake_geoms = [], []
@@ -542,7 +557,9 @@ def load_states_lakes_and_countries():
             continue
         admin = props.get("admin")
         if admin in TARGET_COUNTRIES:
-            geom = shape(feat["geometry"]).simplify(BORDER_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+            geom = (shape(feat["geometry"])
+                    .simplify(BORDER_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+                    .segmentize(BORDER_DENSIFY_SEGMENT_DEG))
             state_geoms.append(geom)
             by_country[admin].append(geom)
     country_geoms = [unary_union(geoms) for geoms in by_country.values() if geoms]
