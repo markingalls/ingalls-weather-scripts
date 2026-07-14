@@ -307,12 +307,16 @@ def cpc_prob_style(cmap_by_direction):
 
 
 SPC_FIRE_STYLE = {
-    "ELEV": {"color": "#e0b04a", "alpha": 0.60, "order_key": 1, "label": "Elevated"},
-    "CRIT": {"color": "#dd7a2e", "alpha": 0.62, "order_key": 2, "label": "Critical"},
-    "EXTM": {"color": "#c13a2b", "alpha": 0.65, "order_key": 3, "label": "Extreme"},
+    # Official SPC categorical colors, from the fire_weather/SPC_firewx
+    # MapServer renderer (mapservices.weather.noaa.gov) rather than a
+    # hand-picked approximation.
+    "ELEV": {"color": "#e69800", "alpha": 0.65, "order_key": 1, "label": "Elevated"},
+    "CRIT": {"color": "#ff0000", "alpha": 0.65, "order_key": 2, "label": "Critical"},
+    "EXTM": {"color": "#e600a9", "alpha": 0.65, "order_key": 3, "label": "Extreme"},
     # Dry thunderstorm risk is a separate hazard axis (lightning without
     # rain), not a more severe fire-weather-index tier -- distinct hue.
-    "IDRT": {"color": "#6a4c93", "alpha": 0.45, "order_key": 4, "label": "Isolated Dry Thunderstorms"},
+    # ("Iso DryT" in SPC's own renderer; "Scattered DryT" reuses Critical's red.)
+    "IDRT": {"color": "#732600", "alpha": 0.55, "order_key": 4, "label": "Isolated Dry Thunderstorms"},
 }
 
 SPC_SEVERE_STYLE = {
