@@ -59,7 +59,8 @@ import numpy as np
 import requests
 
 import cartopy.crs as ccrs
-from shapely.geometry import shape, box, Polygon as ShPolygon, MultiPolygon as ShMultiPolygon
+import shapely
+from shapely.geometry import shape, box, MultiPolygon, Polygon as ShPolygon, MultiPolygon as ShMultiPolygon
 from shapely.ops import unary_union
 from PIL import Image
 
@@ -79,26 +80,27 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
-# Natural Earth's admin-1 polygons aren't topologically consistent across
-# countries -- e.g. Alberta's edge has two separate anomalies (~6km and
-# ~17km) off Montana's shared border, even at full 10m resolution, because
-# the US and Canadian source boundaries were digitized independently. That
-# shows up as a visible double line wherever two adjacent polygons from
-# different countries share a border. 0.05 degrees collapsed the smaller
-# jog but left the larger one; 0.08 clears both without visibly coarsening
-# state/coastline shape at this map's scale (this render is ~65px/degree,
-# so 0.08 degrees is ~5px).
-BORDER_SIMPLIFY_TOLERANCE_DEG = 0.08
+# Natural Earth's admin-1 polygons aren't a clean topological coverage --
+# neighboring state/province polygons (same country or, worse, across a
+# country line) don't share identical boundary vertices, even at full 10m
+# resolution. Rendering each polygon's own edge independently then shows a
+# visible double line everywhere two of them meet. shapely.coverage_simplify
+# (called per country, below) simplifies a set of polygons while snapping
+# their shared edges together, which fixes state/province pairs within a
+# country; it happens to also clean up most of the cross-country jitter
+# along the international border (though that's not guaranteed the way the
+# within-country case is, since the US/Canada/Mexico polygons aren't
+# simplified as one shared coverage). Also used as a plain .simplify()
+# tolerance for the land layer, which has no adjacency to preserve.
+GEOM_SIMPLIFY_TOLERANCE_DEG = 0.02
 
 # Simplifying can leave a very long, nearly-straight run reduced to just its
 # two endpoints (e.g. Montana's entire ~12-degree-long northern border).
 # Under this map's curved perspective projection a 2-point chord that long
-# visibly cuts the corner relative to a neighboring country's border, which
-# -- built from several shorter same-length polygons -- keeps more points
-# along the same stretch. That reads as a second, offset border line even
-# though the underlying geography now matches. Re-densifying afterwards so
-# no straight run exceeds this length fixes the projected curve without
-# reintroducing the cross-country jitter BORDER_SIMPLIFY_TOLERANCE_DEG removes.
+# visibly cuts the corner relative to a neighboring polygon's border that
+# happens to keep more points along the same stretch, reading as a second,
+# offset line even though the underlying geography now matches. Re-densifying
+# afterwards so no straight run exceeds this length fixes the projected curve.
 BORDER_DENSIFY_SEGMENT_DEG = 0.5
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
@@ -526,9 +528,26 @@ def fetch_source(cfg, override_path):
 def load_land():
     with open(LAND_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]).simplify(BORDER_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+    return [shape(feat["geometry"]).simplify(GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
                                      .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
             for feat in data["features"] if feat.get("geometry")]
+
+
+def _as_coverage_ready(geom):
+    """coverage_simplify requires clean Polygon/MultiPolygon input -- fix up
+    the one known-invalid admin-1 polygon in this dataset (Michigan) rather
+    than letting it error out or silently drop that state."""
+    if not geom.is_valid:
+        geom = shapely.make_valid(geom)
+    if geom.geom_type == "GeometryCollection":
+        parts = []
+        for part in geom.geoms:
+            if part.geom_type == "Polygon":
+                parts.append(part)
+            elif part.geom_type == "MultiPolygon":
+                parts.extend(part.geoms)
+        geom = MultiPolygon(parts)
+    return geom
 
 
 def load_states_lakes_and_countries():
@@ -536,18 +555,17 @@ def load_states_lakes_and_countries():
     TARGET_COUNTRIES dissolved from those same state/province polygons
     (rather than a separately-sourced country layer) so the international
     border lines up exactly with the state/province borders drawn on top
-    of it -- two independently-simplified datasets of the same border
-    otherwise drift apart and leave a visible seam.
+    of it.
 
-    Each polygon is simplified before the per-country union so borders
-    shared between countries (not fixed by the union, which only aligns
-    a country's outline with its own states) collapse onto one line too --
-    see BORDER_SIMPLIFY_TOLERANCE_DEG. Re-densified afterwards per
-    BORDER_DENSIFY_SEGMENT_DEG so the simplified border still projects as
-    a smooth curve instead of a handful of long, corner-cutting chords."""
+    Each country's polygons are run through coverage_simplify together (not
+    one at a time) so shared state/province edges are snapped identical
+    rather than merely close -- see GEOM_SIMPLIFY_TOLERANCE_DEG. Re-densified
+    afterwards per BORDER_DENSIFY_SEGMENT_DEG so the simplified border still
+    projects as a smooth curve instead of a handful of long, corner-cutting
+    chords."""
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
-    state_geoms, lake_geoms = [], []
+    lake_geoms = []
     by_country = {c: [] for c in TARGET_COUNTRIES}
     for feat in data["features"]:
         props = feat["properties"]
@@ -557,12 +575,16 @@ def load_states_lakes_and_countries():
             continue
         admin = props.get("admin")
         if admin in TARGET_COUNTRIES:
-            geom = (shape(feat["geometry"])
-                    .simplify(BORDER_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
-                    .segmentize(BORDER_DENSIFY_SEGMENT_DEG))
-            state_geoms.append(geom)
-            by_country[admin].append(geom)
-    country_geoms = [unary_union(geoms) for geoms in by_country.values() if geoms]
+            by_country[admin].append(_as_coverage_ready(shape(feat["geometry"])))
+
+    state_geoms, country_geoms = [], []
+    for geoms in by_country.values():
+        if not geoms:
+            continue
+        simplified = [g.segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+                      for g in shapely.coverage_simplify(geoms, tolerance=GEOM_SIMPLIFY_TOLERANCE_DEG)]
+        state_geoms.extend(simplified)
+        country_geoms.append(unary_union(simplified))
     return state_geoms, lake_geoms, country_geoms
 
 

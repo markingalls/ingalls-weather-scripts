@@ -1,6 +1,6 @@
 matplotlib
 cartopy
-shapely
+shapely>=2.1.0
 Pillow
 numpy
 requests
