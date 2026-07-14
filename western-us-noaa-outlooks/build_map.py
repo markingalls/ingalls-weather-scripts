@@ -103,6 +103,12 @@ GEOM_SIMPLIFY_TOLERANCE_DEG = 0.02
 # afterwards so no straight run exceeds this length fixes the projected curve.
 BORDER_DENSIFY_SEGMENT_DEG = 0.5
 
+# Buffer-out-then-in amount used to close leftover slivers before tracing
+# each country's outline -- see the comment at its use in
+# load_states_lakes_and_countries(). Small relative to state-sized features,
+# big enough to bridge the gaps actually seen in this dataset.
+COUNTRY_UNION_CLOSE_DEG = 0.01
+
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
@@ -584,7 +590,17 @@ def load_states_lakes_and_countries():
         simplified = [g.segmentize(BORDER_DENSIFY_SEGMENT_DEG)
                       for g in shapely.coverage_simplify(geoms, tolerance=GEOM_SIMPLIFY_TOLERANCE_DEG)]
         state_geoms.extend(simplified)
-        country_geoms.append(unary_union(simplified))
+        # coverage_simplify guarantees matching edges only where the *input*
+        # already roughly agrees. A few state/province pairs disagree by
+        # tens of km even in the raw data (e.g. Idaho's and Montana's claims
+        # about their shared border don't quite meet Wyoming's dead-straight
+        # 111st-meridian line), which leaves unary_union unable to fully
+        # dissolve that internal seam -- the leftover sliver's edges then
+        # draw as a second, thicker-looking line right on top of the normal
+        # state line. Buffering out and back in by a small amount closes
+        # slivers like that before we trace the country outline from it.
+        country_geoms.append(unary_union([g.buffer(COUNTRY_UNION_CLOSE_DEG) for g in simplified])
+                              .buffer(-COUNTRY_UNION_CLOSE_DEG))
     return state_geoms, lake_geoms, country_geoms
 
 
