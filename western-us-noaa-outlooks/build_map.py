@@ -79,6 +79,16 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
+# Natural Earth's admin-1 polygons aren't topologically consistent across
+# countries -- e.g. Alberta's edge jogs up to ~5.5km off Montana's, even at
+# full 10m resolution, because the US and Canadian source boundaries were
+# digitized independently. That shows up as a visible double line wherever
+# two adjacent polygons from different countries share a border. Simplifying
+# each polygon individually collapses that jitter back onto one line without
+# visibly coarsening state/coastline shape at this map's scale (this render
+# is ~65px/degree, so 0.05 degrees is ~3px).
+BORDER_SIMPLIFY_TOLERANCE_DEG = 0.05
+
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
@@ -504,7 +514,8 @@ def fetch_source(cfg, override_path):
 def load_land():
     with open(LAND_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
+    return [shape(feat["geometry"]).simplify(BORDER_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+            for feat in data["features"] if feat.get("geometry")]
 
 
 def load_states_lakes_and_countries():
@@ -513,7 +524,12 @@ def load_states_lakes_and_countries():
     (rather than a separately-sourced country layer) so the international
     border lines up exactly with the state/province borders drawn on top
     of it -- two independently-simplified datasets of the same border
-    otherwise drift apart and leave a visible seam."""
+    otherwise drift apart and leave a visible seam.
+
+    Each polygon is simplified before the per-country union so borders
+    shared between countries (not fixed by the union, which only aligns
+    a country's outline with its own states) collapse onto one line too --
+    see BORDER_SIMPLIFY_TOLERANCE_DEG."""
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
     state_geoms, lake_geoms = [], []
@@ -526,7 +542,7 @@ def load_states_lakes_and_countries():
             continue
         admin = props.get("admin")
         if admin in TARGET_COUNTRIES:
-            geom = shape(feat["geometry"])
+            geom = shape(feat["geometry"]).simplify(BORDER_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
             state_geoms.append(geom)
             by_country[admin].append(geom)
     country_geoms = [unary_union(geoms) for geoms in by_country.values() if geoms]
