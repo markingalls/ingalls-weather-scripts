@@ -260,8 +260,9 @@ for tags, geom in combo_geoms.items():
                            linewidth=1.2, alpha=1.0, zorder=4.6)
         continue
 
-    # Overlap region: fill with alternating full-opacity stripes, one
-    # band per contributing event, clipped to the region's exact shape.
+    # Overlap region: fill with alternating stripes, one band per
+    # contributing event, clipped to the region's exact shape. Same
+    # alpha as the single-event fill so overlap zones don't read darker.
     colors = [NWS_COLORS.get(e, "#e8a33d") for e in sorted(tags)]
     stripe_img = make_stripe_image(colors, AX_W_PX, AX_H_PX)
     proj_geom = ax.projection.project_geometry(geom, pc)
@@ -270,7 +271,7 @@ for tags, geom in combo_geoms.items():
     # GeoAxes overrides imshow to require a CRS transform; we're placing
     # this in plain axes-fraction space, so call the base Axes.imshow.
     im = Axes.imshow(ax, stripe_img, extent=(0, 1, 0, 1), transform=ax.transAxes,
-                      origin="upper", interpolation="nearest", zorder=4.5)
+                      origin="upper", interpolation="nearest", alpha=0.55, zorder=4.5)
     im.set_clip_path(clip_patch)
     ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
                        linewidth=1.2, alpha=1.0, zorder=4.6)
