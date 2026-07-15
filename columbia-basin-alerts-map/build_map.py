@@ -9,7 +9,7 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 import cartopy.crs as ccrs
 from shapely.geometry import shape, box
-from shapely.ops import transform as shp_transform
+from shapely.ops import transform as shp_transform, unary_union
 import numpy as np
 from datetime import datetime
 
@@ -170,33 +170,48 @@ ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_C
                    linewidth=1.3, zorder=6)
 
 # ---------- alerts ----------
+# Hatch-stripe alert zones instead of alpha-stacking solid fills, so
+# overlapping alert types (e.g. a Red Flag Warning inside a Heat Advisory)
+# show both patterns layered together instead of blending into a color
+# that matches neither alert.
+HATCH_PATTERNS = ["//", "\\\\", "xx", "..", "++", "oo", "**", "||", "--"]
+
 alerts = json.load(open("alerts_with_zones.json"))
 extent_box = box(EXTENT[0], EXTENT[2], EXTENT[1], EXTENT[3])
-active_event_types = []
-plotted_zones = set()  # (event, zone_id) -- NWS sometimes has multiple
-                        # active products covering the exact same zone,
-                        # which would otherwise double-stack the alpha
-                        # fill and read as a darker/different color there.
+
+# Union every zone geometry per event type -- this both merges adjacent
+# same-event zones into one clean outline and naturally de-duplicates
+# NWS products that cover the exact same zone twice.
+event_geoms = {}
+plotted_zones = set()  # (event, zone_id)
 for a in alerts:
     event = a["event"]
-    fill = NWS_COLORS.get(event, "#e8a33d")
-    edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
     for z in a["zones"]:
         zone_key = (event, z.get("zone_id"))
         if zone_key in plotted_zones:
             continue
         plotted_zones.add(zone_key)
-        geom = shape(z["geometry"])
-        # Only reflect this alert in the title/legend if it's actually
-        # visible somewhere in the current map domain -- NWS returns
-        # every active alert for the queried states, some of which can
-        # sit far outside whatever extent we're currently showing.
-        if geom.intersects(extent_box) and event not in active_event_types:
-            active_event_types.append(event)
-        ax.add_geometries([geom], crs=pc, facecolor=fill, edgecolor=edge,
-                           alpha=0.55, linewidth=1.2, zorder=4.5)
-        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=edge,
-                           linewidth=1.2, alpha=1.0, zorder=4.6)
+        event_geoms.setdefault(event, []).append(shape(z["geometry"]))
+
+# Only reflect an event in the title/legend if it's actually visible
+# somewhere in the current map domain -- NWS returns every active alert
+# for the queried states, some of which can sit far outside whatever
+# extent we're currently showing.
+active_event_types = [event for event, geoms in event_geoms.items()
+                       if any(g.intersects(extent_box) for g in geoms)]
+
+# Assign hatch patterns alphabetically by event name so a given event
+# keeps the same pattern across runs regardless of NWS response order.
+hatch_for_event = {event: HATCH_PATTERNS[i % len(HATCH_PATTERNS)]
+                    for i, event in enumerate(sorted(event_geoms))}
+
+for event, geoms in event_geoms.items():
+    fill = NWS_COLORS.get(event, "#e8a33d")
+    edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
+    union_geom = unary_union(geoms)
+    draw_geoms = list(union_geom.geoms) if hasattr(union_geom, "geoms") else [union_geom]
+    ax.add_geometries(draw_geoms, crs=pc, facecolor="none", edgecolor=edge,
+                       hatch=hatch_for_event[event], linewidth=1.2, zorder=4.5)
 
 # ---------- city labels ----------
 cities = [
@@ -288,7 +303,8 @@ legend_handles = []
 for event in active_event_types:
     fill = NWS_COLORS.get(event, "#e8a33d")
     edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
-    legend_handles.append(Patch(facecolor=fill, edgecolor=edge, alpha=0.85, label=event))
+    legend_handles.append(Patch(facecolor="none", edgecolor=edge,
+                                 hatch=hatch_for_event[event], label=event))
 
 leg = fig.legend(handles=legend_handles, loc="lower left",
                   bbox_to_anchor=(left_x + 0.012, map_pos.y0 + 0.012),
