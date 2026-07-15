@@ -89,13 +89,19 @@ python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetc
   domain's lon/lat span ratio — change one, re-check the other, or cartopy
   shrinks one dimension to preserve the projection's aspect and leaves
   empty gutters on the sides.
-- Uses `PlateCarree`, not `NearsidePerspective` (used by the other scripts
-  in this repo): a prior, taller version of this domain hit a real
-  rendering gap with both NearsidePerspective and Lambert Conformal (they
-  fit the axes to a rectangle bounding the *projected*, curved shape of
-  the requested lon/lat box, and on a tall-enough box that rectangle's
-  corners fall outside the box itself). PlateCarree has no such gap
-  regardless of domain shape, at the cost of some east-west compression
-  toward the domain's north end versus its south end — a standard
-  tradeoff for a wide-latitude-range map, though a smaller one now that
-  the domain is more square than the original BC-to-OR framing.
+- Uses `NearsidePerspective` (satellite view, showing Earth's curvature),
+  like the other scripts in this repo. NearsidePerspective fits the axes
+  to a rectangle bounding the *projected*, curved shape of the requested
+  lon/lat box, so the rendered frame always shows a bit more area at the
+  corners than `LON_MIN`/`MAX`/`LAT_MIN`/`MAX` — on an earlier, much
+  taller version of this domain that slack was large enough to leave
+  visible blank corners and duplicated border lines. Two things tame it
+  at this domain's size: `satellite_height` set generously high
+  (flattening the curvature just enough to shrink that slack to a
+  sliver) and `FETCH_PAD_DEG`/`RESAMPLE_PAD_DEG` wide enough that real
+  data covers the sliver instead of it rendering blank. If the domain
+  changes shape again and blank corners or doubled border lines
+  reappear, raise `satellite_height` and/or the pad constants first.
+- No lakes are shaded — `load_states()` drops lake features from the
+  states/provinces dataset entirely (not just leaving them unfilled) so
+  they don't get drawn as a false state/province border either.

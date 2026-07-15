@@ -113,12 +113,17 @@ LON_MIN, LON_MAX = -128.2, -108.8
 LAT_MIN, LAT_MAX = 39.7, 55.2
 CENTER_LON, CENTER_LAT = -118.5, 47.45
 
-FETCH_PAD_DEG = 2.0
+# Both pads are wider than a PlateCarree map would need -- NearsidePerspective
+# (see proj below) fits the axes to a rectangle bounding the *projected*,
+# curved shape of the requested lon/lat box, so the rendered frame shows a
+# bit more area than LON_MIN/MAX/LAT_MIN/MAX at the corners. Real data has
+# to reach that far too, or those corners render blank.
+FETCH_PAD_DEG = 5.0
 # Resampled onto a grid sized to this domain's span (see build_dpd_colormap
 # call site) at roughly the same pixel density as the original BC/WA/OR/ID
 # framing.
 RESAMPLE_NX, RESAMPLE_NY = 440, 360
-RESAMPLE_PAD_DEG = 1.5
+RESAMPLE_PAD_DEG = 4.0
 RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAMPLE_PAD_DEG
 RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAMPLE_PAD_DEG
 
@@ -305,17 +310,20 @@ def load_land():
     return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
 
 
-def load_states_lakes():
+def load_states():
+    """State/province polygons -- lake features in this dataset are
+    dropped entirely (not just left unshaded) so they don't get drawn as
+    if they were a state/province border."""
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
-    state_geoms, lake_geoms = [], []
+    state_geoms = []
     for feat in data["features"]:
         props = feat["properties"]
         if "Lake" in props.get("featurecla", ""):
-            lake_geoms.append(shape(feat["geometry"]))
-        elif props.get("admin") in TARGET_COUNTRIES:
+            continue
+        if props.get("admin") in TARGET_COUNTRIES:
             state_geoms.append(shape(feat["geometry"]))
-    return state_geoms, lake_geoms
+    return state_geoms
 
 
 def load_boundary_lines(path):
@@ -354,21 +362,25 @@ def build_map(date, output_path, override_path=None):
 
     print("Loading basemap layers...")
     land_geoms = load_land()
-    state_geoms, lake_geoms = load_states_lakes()
+    state_geoms = load_states()
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
-    # PlateCarree (not NearsidePerspective, used by the other scripts in
-    # this repo) -- this domain is unusually tall north-south (BC down to
-    # OR/ID). Both NearsidePerspective and Lambert Conformal fit the axes to
-    # a rectangle bounding the *projected* (curved) shape of the requested
-    # lon/lat box; on a box this tall, that bounding rectangle's corners
-    # fall outside the box itself, leaving a real gap no amount of data
-    # padding fixes (confirmed by testing plain PlateCarree, which has no
-    # such gap, against the same data). PlateCarree does compress east-west
-    # distance somewhat near the domain's north end (~60N) versus its south
-    # end, a standard, acceptable tradeoff for a wide-latitude-range map.
+    # NearsidePerspective (satellite view, showing Earth's curvature), like
+    # the other scripts in this repo -- not PlateCarree, which has no
+    # curvature at all. NearsidePerspective fits the axes to a rectangle
+    # bounding the *projected*, curved shape of the requested lon/lat box,
+    # so the rendered frame always shows a bit more area at the corners
+    # than LON_MIN/MAX/LAT_MIN/MAX; on a tall enough domain (an earlier,
+    # much taller version of this map) that slack was big enough to leave
+    # visible blank corners and duplicated border lines. Two things tame it
+    # here: satellite_height set generously high (flattening the curvature
+    # just enough to shrink that slack to a sliver) and FETCH_PAD_DEG/
+    # RESAMPLE_PAD_DEG wide enough that real data actually covers the
+    # sliver instead of it rendering blank. Confirmed clean by inspecting
+    # all four corners after rendering.
     pc = ccrs.PlateCarree()
-    proj = pc
+    proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
+                                     satellite_height=20_000_000)
 
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
@@ -418,7 +430,6 @@ def build_map(date, output_path, override_path=None):
 
     ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
-    ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#5a4632", linewidth=0.6, zorder=2.1)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
     if storm_smooth.max() >= 0.5:
@@ -488,7 +499,7 @@ def build_map(date, output_path, override_path=None):
     # strip between the map frame and the colorbar's Celsius ticks. The
     # swatch line gets the same white-outline treatment as the map contour.
     storm_handle = Line2D([0], [0], color="#e6231e", linestyle="--", linewidth=1.8,
-                           label=f"ECMWF thunderstorm signal (MUCAPE ≥ {MUCAPE_THRESHOLD_JKG:.0f} J/kg)",
+                           label="ECMWF thunderstorm signal",
                            path_effects=[pe.withStroke(linewidth=3.2, foreground="white")])
     legend_y = 0.155
     leg = fig.legend(handles=[storm_handle], loc="center", frameon=False, fontsize=8.75,
@@ -498,11 +509,11 @@ def build_map(date, output_path, override_path=None):
         text.set_color("#2b2a26")
 
     # Title & subtitle above the map
-    fig.text(0.03, 0.978, f"{date.strftime('%A, %B %-d')} — Max Dew Point Depression", fontsize=19,
+    fig.text(0.03, 0.978, f"{date.strftime('%A')} Dry Thunderstorm Parameters", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.943, "Prince George to Winnemucca • Bella Coola to Yellowstone", fontsize=12.5,
-              fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
-    fig.text(0.03, 0.914, f"ECMWF IFS 0.25° • Init {run_init.strftime('%Y-%m-%d %H')}z",
+    fig.text(0.03, 0.943, f"Max Dew Point Depression + {MUCAPE_THRESHOLD_JKG:.0f} J/kg CAPE Threshold",
+              fontsize=12.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
+    fig.text(0.03, 0.914, f"ECMWF IFS • Init {run_init.strftime('%Y-%m-%d %H')}z",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
     fig.text(0.5, 0.012, "ECMWF IFS — Ingalls Weather", fontsize=9,
