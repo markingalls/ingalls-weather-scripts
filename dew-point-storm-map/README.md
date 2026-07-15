@@ -47,18 +47,30 @@ python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetc
   free Open Data feed this script uses by checking today's `oper`, `enfo`,
   and `aifs` index files directly, no `lit*` param in any of them. Instead,
   a grid cell is flagged if, in any 3-hourly window today, most-unstable
-  CAPE reaches `MUCAPE_THRESHOLD_JKG` (150 J/kg by default, tuned low for
+  CAPE reaches `MUCAPE_THRESHOLD_JKG` (200 J/kg by default, tuned low for
   the Pacific Northwest/BC interior's generally modest summertime
   instability, not Great Plains-scale severe setups). This is CAPE alone,
   with no precipitation check, so it flags convective *potential* —
   airmass instability consistent with thunderstorms — not confirmation
   that a storm actually fired; adjust the constant near the top of
-  `build_map.py` if a run looks over- or under-flagged. The contour is
-  drawn twice (a thick white pass under a thin red pass, both sharing an
-  explicit dash pattern so they stay in phase) for a white-outlined look
-  that reads against dark DPD colors, and everything outside the >=0.5
-  contour level gets a translucent gray overlay so the flagged area stands
-  out.
+  `build_map.py` if a run looks over- or under-flagged. Before contouring,
+  the flagged mask goes through a morphological opening + closing pass
+  (`clean_small_features()`, radius `MIN_FEATURE_CELLS`) that drops
+  isolated single-cell-scale specks in both directions — lone flagged
+  cells and lone unflagged holes — so the boundary reads as a handful of
+  coherent regions instead of a speckled mess; this can also bridge
+  nearby separate patches into one contiguous area, which is usually the
+  desired effect but is worth knowing about if the shape looks broader
+  than expected. The contour is drawn twice (a thick white pass under a
+  thin red pass, both sharing an explicit dash pattern so they stay in
+  phase) for a white-outlined look that reads against dark DPD colors,
+  and everything outside the >=0.5 contour level gets a translucent gray
+  overlay so the flagged area stands out.
+- **Color table** runs wet-to-dry: green (near-saturated) through yellow
+  (comfortable) through gray (transitional) to brown (very dry — the
+  fire-weather-relevant end of the scale), fixed Fahrenheit control points
+  in `DPD_COLOR_TABLE_F` (not rescaled per map, so a given shade always
+  means the same DPD across runs).
 - The colorbar's primary (bottom) axis is Fahrenheit; a secondary (top)
   axis mirrors it in Celsius via a *difference* conversion (`f_diff_to_c`
   /`c_diff_to_f` — no -32/+32 offset, since DPD is already a delta, not an

@@ -16,12 +16,16 @@ today's oper/enfo/aifs index files, no lit* param in any of them). The
 outline is therefore a proxy: a grid cell is flagged for any 3-hourly
 window today where most-unstable CAPE (mucape) reaches
 MUCAPE_THRESHOLD_JKG, i.e. the airmass is unstable enough to support
-convection. The threshold is tuned low (150 J/kg by default) for the
+convection. The threshold is tuned low (200 J/kg by default) for the
 Pacific Northwest/BC interior's generally modest summertime instability,
 not Great Plains-scale severe setups -- and since this is CAPE alone (no
 precipitation check), it flags convective *potential*, not confirmation
 that a storm actually fired. Treat the outline as "where ECMWF's fields
 are consistent with thunderstorms," not an official convective outlook.
+The flagged region is also cleaned up before contouring -- small isolated
+flagged/unflagged specks (below MIN_FEATURE_CELLS) are removed via
+morphological opening/closing so the outline reads as a handful of
+coherent areas instead of a speckled mess.
 
 USAGE
 -----
@@ -58,7 +62,7 @@ from matplotlib.lines import Line2D
 from matplotlib.transforms import offset_copy
 import numpy as np
 from scipy.interpolate import griddata
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, binary_opening, binary_closing, generate_binary_structure
 from herbie import Herbie
 
 import cartopy.crs as ccrs
@@ -114,7 +118,13 @@ RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAM
 STEP_HOURS = 3
 
 # Thunderstorm proxy threshold (see module docstring).
-MUCAPE_THRESHOLD_JKG = 150.0
+MUCAPE_THRESHOLD_JKG = 200.0
+
+# Morphological opening/closing radius (in native 0.25 deg grid cells)
+# applied to the flagged mask before contouring, to drop isolated
+# single-cell specks in both directions -- lone flagged cells inside a
+# mostly-clear area, and lone unflagged holes inside a mostly-flagged one.
+MIN_FEATURE_CELLS = 2
 
 CITIES = [
     ("Vancouver", -123.1207, 49.2827, "left"),
@@ -145,27 +155,21 @@ CITIES = [
 
 # ---------------------------------------------------------------------------
 # Dew point depression color table -- fixed Fahrenheit-to-RGB control points
-# (not rescaled per map), running from near-saturated (blue/teal) through
-# green/yellow (comfortable) to orange/red/maroon (very dry -- the fire-
-# weather-relevant end of the scale).
+# (not rescaled per map), running wet-to-dry: green (near-saturated) through
+# yellow (comfortable) through gray (transitional) to brown (very dry --
+# the fire-weather-relevant end of the scale).
 # ---------------------------------------------------------------------------
 DPD_COLOR_TABLE_F = [
-    (0,   [8, 48, 107]),
-    (5,   [33, 102, 172]),
-    (10,  [67, 147, 195]),
-    (15,  [146, 197, 222]),
-    (20,  [199, 233, 192]),
-    (25,  [161, 217, 155]),
-    (30,  [116, 196, 118]),
-    (35,  [255, 255, 191]),
-    (40,  [254, 217, 118]),
-    (45,  [254, 178, 76]),
-    (50,  [253, 141, 60]),
-    (55,  [252, 78, 42]),
-    (60,  [227, 26, 28]),
-    (70,  [177, 0, 38]),
-    (80,  [128, 0, 38]),
-    (100, [73, 0, 46]),
+    (0,   [23, 84, 54]),
+    (10,  [58, 132, 76]),
+    (20,  [130, 179, 92]),
+    (30,  [206, 205, 116]),
+    (35,  [226, 210, 130]),
+    (45,  [211, 197, 160]),
+    (55,  [176, 172, 164]),
+    (65,  [163, 143, 118]),
+    (80,  [138, 101, 65]),
+    (100, [92, 62, 38]),
 ]
 DPD_FMIN = DPD_COLOR_TABLE_F[0][0]
 DPD_FMAX = DPD_COLOR_TABLE_F[-1][0]
@@ -282,6 +286,17 @@ def resample_to_regular_grid(lat, lon, values, method="linear"):
     return regridded
 
 
+def clean_small_features(mask, iterations=MIN_FEATURE_CELLS):
+    """Drop isolated single-cell-scale specks from a binary mask: opening
+    (erode then dilate) removes small flagged blobs, closing (dilate then
+    erode) fills small unflagged holes. 8-connected structure so a diagonal
+    chain of cells still counts as connected."""
+    struct = generate_binary_structure(2, 2)
+    cleaned = binary_opening(mask, structure=struct, iterations=iterations)
+    cleaned = binary_closing(cleaned, structure=struct, iterations=iterations)
+    return cleaned
+
+
 # ---------------------------------------------------------------------------
 # Basemap layers
 # ---------------------------------------------------------------------------
@@ -326,6 +341,7 @@ def build_map(date, output_path, override_path=None):
 
     print("Resampling onto a regular grid...")
     dpd_max_k = resample_to_regular_grid(lat, lon, dpd_max_k, method="linear")
+    storm_mask = clean_small_features(storm_mask)
     storm_mask_f = resample_to_regular_grid(lat, lon, storm_mask.astype(np.float32), method="linear")
 
     dpd_f = k_diff_to_f(dpd_max_k)
@@ -388,7 +404,7 @@ def build_map(date, output_path, override_path=None):
     # default "dashed" style, whose dash/gap length scales with linewidth)
     # so the thick white line and thin red line dash in lockstep, giving a
     # clean halo instead of two independently-phased dashed lines.
-    storm_smooth = gaussian_filter(storm_mask_f, sigma=1.8)
+    storm_smooth = gaussian_filter(storm_mask_f, sigma=2.6)
     if storm_smooth.max() >= 0.5:
         outside_storm = np.ma.masked_where(storm_smooth >= 0.5, np.ones_like(storm_smooth))
         ax.pcolormesh(reg_lon, reg_lat, outside_storm, transform=pc, cmap=ListedColormap(["#8a8a8a"]),
@@ -435,7 +451,7 @@ def build_map(date, output_path, override_path=None):
     frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
     cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.016
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
-    cbar_bottom = 0.104
+    cbar_bottom = 0.075
 
     vmin_disp = 5 * np.floor(max(visible.min(), DPD_FMIN) / 5)
     vmax_disp = 5 * np.ceil(min(visible.max(), DPD_FMAX) / 5)
