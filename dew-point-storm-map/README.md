@@ -9,7 +9,7 @@ fetched live via Herbie.
 
 ## Files
 
-- `build_map.py` — fetches ECMWF IFS 2t/2d/mucape/tp for today and renders
+- `build_map.py` — fetches ECMWF IFS 2t/2d/mucape for today and renders
   the map. Also saves a `.npz` snapshot of the fetched data to `output/`
   each run, so `--file` can re-render without re-fetching.
 - `requirements.txt` / `setup.sh` — Python + system dependencies (cartopy
@@ -40,17 +40,19 @@ python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetc
   every 3 hours across the local (Pacific time) day, at ECMWF IFS's native
   0.25° resolution, then linearly resampled onto a finer regular grid for
   smoother shading.
-- **Thunderstorm outline** is a proxy, not an official product: ECMWF's
-  Open Data distribution has no convective-precipitation or
-  lightning/thunder field on its own. A grid cell is flagged if, in any
-  3-hourly window today, most-unstable CAPE reaches `MUCAPE_THRESHOLD_JKG`
-  (300 J/kg by default) *and* precipitation actually fell in that window
-  (`PRECIP_THRESHOLD_MM`, 1.0 mm by default) — i.e. the airmass was
-  unstable enough to convect, and that instability actually released as a
-  shower/storm rather than being capped. Both thresholds are tuned for the
-  Pacific Northwest/BC interior's generally modest summertime instability,
-  not Great Plains-scale severe setups; adjust the constants near the top
-  of `build_map.py` if a run looks over- or under-flagged.
+- **Thunderstorm outline** is a proxy, not an official product. ECMWF does
+  define an instantaneous lightning flash density parameter (`litoti`),
+  but it's only in ECMWF's paid MARS archive — confirmed absent from the
+  free Open Data feed this script uses by checking today's `oper`, `enfo`,
+  and `aifs` index files directly, no `lit*` param in any of them. Instead,
+  a grid cell is flagged if, in any 3-hourly window today, most-unstable
+  CAPE reaches `MUCAPE_THRESHOLD_JKG` (150 J/kg by default, tuned low for
+  the Pacific Northwest/BC interior's generally modest summertime
+  instability, not Great Plains-scale severe setups). This is CAPE alone,
+  with no precipitation check, so it flags convective *potential* —
+  airmass instability consistent with thunderstorms — not confirmation
+  that a storm actually fired; adjust the constant near the top of
+  `build_map.py` if a run looks over- or under-flagged.
 - The map domain is the bounding box of BC + WA + OR + ID, padded slightly
   (`LON_MIN`/`LON_MAX`/`LAT_MIN`/`LAT_MAX` near the top of `build_map.py`).
 - Uses `PlateCarree`, not `NearsidePerspective` (used by the other scripts

@@ -9,19 +9,19 @@ Styled map covering British Columbia, Washington, Oregon, and Idaho:
     likely thunderstorms today.
 
 ECMWF's free Open Data distribution (what Herbie pulls IFS from) has no
-single "thunderstorm" field -- no convective precipitation split out from
-total precip, no lightning/thunder flag. The outline is therefore a proxy,
-built the way forecasters read the same two fields by eye: a grid cell is
-flagged for any 3-hourly window today where
-  - most-unstable CAPE (mucape) reaches MUCAPE_THRESHOLD_JKG, i.e. the
-    airmass is unstable enough to support convection, AND
-  - precipitation actually fell in that window (>= PRECIP_THRESHOLD_MM),
-    i.e. the instability actually released as a shower/storm rather than
-    being capped.
-Both thresholds are tuned for the Pacific Northwest/BC interior's generally
-modest summertime instability (see constants below), not Great Plains-scale
-severe setups. Treat the outline as "where ECMWF's fields are consistent
-with thunderstorms," not an official convective outlook.
+single "thunderstorm" field -- no lightning/thunder flag (ECMWF's own
+"Instantaneous total lightning flash density" parameter, litoti, exists
+only in the paid MARS archive, not Open Data -- checked directly against
+today's oper/enfo/aifs index files, no lit* param in any of them). The
+outline is therefore a proxy: a grid cell is flagged for any 3-hourly
+window today where most-unstable CAPE (mucape) reaches
+MUCAPE_THRESHOLD_JKG, i.e. the airmass is unstable enough to support
+convection. The threshold is tuned low (150 J/kg by default) for the
+Pacific Northwest/BC interior's generally modest summertime instability,
+not Great Plains-scale severe setups -- and since this is CAPE alone (no
+precipitation check), it flags convective *potential*, not confirmation
+that a storm actually fired. Treat the outline as "where ECMWF's fields
+are consistent with thunderstorms," not an official convective outlook.
 
 USAGE
 -----
@@ -113,9 +113,8 @@ RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAM
 # ---------------------------------------------------------------------------
 STEP_HOURS = 3
 
-# Thunderstorm proxy thresholds (see module docstring).
-MUCAPE_THRESHOLD_JKG = 300.0
-PRECIP_THRESHOLD_MM = 1.0
+# Thunderstorm proxy threshold (see module docstring).
+MUCAPE_THRESHOLD_JKG = 150.0
 
 CITIES = [
     ("Vancouver", -123.1207, 49.2827, "left"),
@@ -219,7 +218,7 @@ def snap_fxx_list(valid_times, run_init):
 
 
 def fetch_day(date):
-    """Fetch ECMWF IFS 2t/2d/mucape/tp across today's local-hour steps,
+    """Fetch ECMWF IFS 2t/2d/mucape across today's local-hour steps,
     cropped to the map bbox. Returns (lat_2d, lon_2d, dpd_k_max_2d,
     storm_mask_2d, run_init)."""
     valid_times = local_window_valid_times(date, 0, 23)
@@ -229,10 +228,9 @@ def fetch_day(date):
     lat = lon = None
     dpd_max_k = None
     storm_mask = None
-    prev_tp = None
 
     for fxx in fxxs:
-        print(f"Fetching ECMWF IFS {run_init:%Y-%m-%d %H}z F{fxx:03d} (2t, 2d, mucape, tp) ...")
+        print(f"Fetching ECMWF IFS {run_init:%Y-%m-%d %H}z F{fxx:03d} (2t, 2d, mucape) ...")
         H = Herbie(run_init.replace(tzinfo=None), model="ifs", product="oper", fxx=fxx, verbose=False)
         # Anchored on colons -- Herbie's plain-substring search would also
         # match e.g. "mx2t3"/"mn2t3" against "2t", or return multiple
@@ -240,7 +238,6 @@ def fetch_day(date):
         ds_t = H.xarray(":2t:")
         ds_d = H.xarray(":2d:")
         ds_cape = H.xarray(":mucape:")
-        ds_tp = H.xarray(":tp:")
 
         if lat is None:
             lat_1d, lon_1d = ds_t.latitude.values, ds_t.longitude.values
@@ -254,14 +251,9 @@ def fetch_day(date):
         t2m = ds_t["t2m"].values[np.ix_(lat_idx, lon_idx)]
         d2m = ds_d["d2m"].values[np.ix_(lat_idx, lon_idx)]
         mucape = ds_cape["mucape"].values[np.ix_(lat_idx, lon_idx)]
-        tp = ds_tp["tp"].values[np.ix_(lat_idx, lon_idx)]
 
         dpd_max_k = np.maximum(dpd_max_k, t2m - d2m)
-
-        if prev_tp is not None:
-            interval_precip_mm = np.maximum(tp - prev_tp, 0.0) * 1000.0
-            storm_mask |= (interval_precip_mm >= PRECIP_THRESHOLD_MM) & (mucape >= MUCAPE_THRESHOLD_JKG)
-        prev_tp = tp
+        storm_mask |= mucape >= MUCAPE_THRESHOLD_JKG
 
     return lat, lon, dpd_max_k, storm_mask, run_init
 
@@ -438,7 +430,7 @@ def build_map(date, output_path, override_path=None):
     # Legend entry for the thunderstorm-signal outline -- a thin unboxed
     # strip in the gap between the map frame and the colorbar.
     storm_handle = Line2D([0], [0], color="#e6231e", linestyle="--", linewidth=1.8,
-                           label="ECMWF thunderstorm signal (MUCAPE + precip)")
+                           label=f"ECMWF thunderstorm signal (MUCAPE ≥ {MUCAPE_THRESHOLD_JKG:.0f} J/kg)")
     legend_y = (AXES_RECT[1] + cbar_bottom + cbar_height) / 2
     leg = fig.legend(handles=[storm_handle], loc="center", frameon=False, fontsize=8.75,
                       prop=poppins_reg, handlelength=2.4,
