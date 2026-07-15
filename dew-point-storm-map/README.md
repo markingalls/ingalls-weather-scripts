@@ -1,12 +1,14 @@
-# BC / WA / OR / ID Dew Point Depression + Thunderstorm Map
+# Pacific Northwest Dew Point Depression + Thunderstorm Map
 
-A one-off styled map covering British Columbia, Washington, Oregon, and
-Idaho: today's maximum dew point depression (2m temperature minus 2m
-dewpoint) as shading, with a white-outlined dashed red contour around
-where ECMWF IFS's fields are consistent with thunderstorms today, and a
-gray shade over everything outside that contour so the flagged area pops.
-Everything comes from a single source, ECMWF's free Open Data IFS
-distribution (0.25°, 3-hourly), fetched live via Herbie.
+A one-off styled map zoomed to Prince George BC (N), Bella Coola BC (W),
+Winnemucca NV (S), and Yellowstone WY (E) — covering southern/central BC,
+WA, OR, ID, and slivers of NV/MT/WY: today's maximum dew point depression
+(2m temperature minus 2m dewpoint) as shading, with a white-outlined
+dashed red contour around where ECMWF IFS's fields are consistent with
+thunderstorms today, and a translucent gray shade over everything outside
+that contour so the flagged area pops. Everything comes from a single
+source, ECMWF's free Open Data IFS distribution (0.25°, 3-hourly),
+fetched live via Herbie.
 
 ## Files
 
@@ -30,7 +32,7 @@ The Ingalls Weather logo (bottom-left on the map) lives in
 
 ```bash
 bash setup.sh                          # first time / fresh environment only
-python3 build_map.py                   # today, BC/WA/OR/ID
+python3 build_map.py                   # today
 python3 build_map.py --date 2026-07-16
 python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetch
 ```
@@ -53,19 +55,24 @@ python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetc
   with no precipitation check, so it flags convective *potential* —
   airmass instability consistent with thunderstorms — not confirmation
   that a storm actually fired; adjust the constant near the top of
-  `build_map.py` if a run looks over- or under-flagged. Before contouring,
-  the flagged mask goes through a morphological opening + closing pass
-  (`clean_small_features()`, radius `MIN_FEATURE_CELLS`) that drops
-  isolated single-cell-scale specks in both directions — lone flagged
-  cells and lone unflagged holes — so the boundary reads as a handful of
-  coherent regions instead of a speckled mess; this can also bridge
-  nearby separate patches into one contiguous area, which is usually the
-  desired effect but is worth knowing about if the shape looks broader
-  than expected. The contour is drawn twice (a thick white pass under a
-  thin red pass, both sharing an explicit dash pattern so they stay in
-  phase) for a white-outlined look that reads against dark DPD colors,
-  and everything outside the >=0.5 contour level gets a translucent gray
-  overlay so the flagged area stands out.
+  `build_map.py` if a run looks over- or under-flagged.
+- The flagged mask is heavily gaussian-smoothed (`sigma=7.0` on the
+  resampled grid) before contouring, rather than cleaned up with binary
+  morphology first — a binary opening/closing pass's square structuring
+  element produces visible right-angle steps at the native 0.25° grid's
+  scale, which read as "blocky." Smoothing the continuous (pre-threshold)
+  field does double duty: it rounds the boundary into a natural curve, and
+  it washes out minor single-cell-scale specks on its own (their
+  contribution gets diluted below the 0.5 contour level by the
+  surrounding opposite-signed area), no separate cleanup pass needed. This
+  can also merge nearby separate patches into one contiguous area, which
+  is usually the desired effect but is worth knowing about if the shape
+  looks broader than expected — reduce `sigma` if a run looks over-smoothed.
+- The contour is drawn twice (a thick white pass under a thin red pass,
+  both sharing an explicit dash pattern so they stay in phase) for a
+  white-outlined look that reads against dark DPD colors, and everything
+  outside the >=0.5 contour level gets a translucent gray overlay
+  (`alpha=0.55`) so the flagged area stands out.
 - **Color table** runs wet-to-dry: green (near-saturated) through yellow
   (comfortable) through gray (transitional) to brown (very dry — the
   fire-weather-relevant end of the scale), fixed Fahrenheit control points
@@ -75,14 +82,20 @@ python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetc
   axis mirrors it in Celsius via a *difference* conversion (`f_diff_to_c`
   /`c_diff_to_f` — no -32/+32 offset, since DPD is already a delta, not an
   absolute temperature).
-- The map domain is the bounding box of BC + WA + OR + ID, padded slightly
+- The map domain is the bounding box of the four named landmarks, padded
+  so each sits clearly inside the frame rather than right at the edge
   (`LON_MIN`/`LON_MAX`/`LAT_MIN`/`LAT_MAX` near the top of `build_map.py`).
+  `FIG_WIDTH_IN` is chosen so the axes box's aspect ratio matches the
+  domain's lon/lat span ratio — change one, re-check the other, or cartopy
+  shrinks one dimension to preserve the projection's aspect and leaves
+  empty gutters on the sides.
 - Uses `PlateCarree`, not `NearsidePerspective` (used by the other scripts
-  in this repo): this domain is unusually tall north-south, and both
-  NearsidePerspective and Lambert Conformal fit the axes to a rectangle
-  bounding the *projected* (curved) shape of the requested lon/lat box —
-  on a box this tall, that bounding rectangle's corners fall outside the
-  box itself, leaving a real gap near the NW corner no amount of data
-  padding fixes. PlateCarree has no such gap, at the cost of some
-  east-west compression near the domain's north end (~60N) versus its
-  south end — a standard tradeoff for a wide-latitude-range map.
+  in this repo): a prior, taller version of this domain hit a real
+  rendering gap with both NearsidePerspective and Lambert Conformal (they
+  fit the axes to a rectangle bounding the *projected*, curved shape of
+  the requested lon/lat box, and on a tall-enough box that rectangle's
+  corners fall outside the box itself). PlateCarree has no such gap
+  regardless of domain shape, at the cost of some east-west compression
+  toward the domain's north end versus its south end — a standard
+  tradeoff for a wide-latitude-range map, though a smaller one now that
+  the domain is more square than the original BC-to-OR framing.

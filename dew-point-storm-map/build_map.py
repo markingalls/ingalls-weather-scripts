@@ -1,8 +1,10 @@
 """
-BC / WA / OR / ID Dew Point Depression + Thunderstorm Map -- one-off builder
+Pacific Northwest Dew Point Depression + Thunderstorm Map -- one-off builder
 Ingalls Weather
 
-Styled map covering British Columbia, Washington, Oregon, and Idaho:
+Styled map zoomed to Prince George BC (N), Bella Coola BC (W), Winnemucca
+NV (S), and Yellowstone WY (E) -- covering southern/central BC, WA, OR,
+ID, and slivers of NV/MT/WY:
   - Shading: today's maximum dew point depression (2m temperature minus 2m
     dewpoint), sampled across the local day from ECMWF IFS.
   - Outline: a dashed red contour around where ECMWF IFS's own fields flag
@@ -22,10 +24,10 @@ not Great Plains-scale severe setups -- and since this is CAPE alone (no
 precipitation check), it flags convective *potential*, not confirmation
 that a storm actually fired. Treat the outline as "where ECMWF's fields
 are consistent with thunderstorms," not an official convective outlook.
-The flagged region is also cleaned up before contouring -- small isolated
-flagged/unflagged specks (below MIN_FEATURE_CELLS) are removed via
-morphological opening/closing so the outline reads as a handful of
-coherent areas instead of a speckled mess.
+The flagged region is heavily gaussian-smoothed before contouring (see the
+build_map() comment above the contour calls), which both rounds the
+boundary into a natural curve and washes out minor single-cell-scale
+specks, rather than a separate binary-morphology cleanup pass.
 
 USAGE
 -----
@@ -62,7 +64,7 @@ from matplotlib.lines import Line2D
 from matplotlib.transforms import offset_copy
 import numpy as np
 from scipy.interpolate import griddata
-from scipy.ndimage import gaussian_filter, binary_opening, binary_closing, generate_binary_structure
+from scipy.ndimage import gaussian_filter
 from herbie import Herbie
 
 import cartopy.crs as ccrs
@@ -92,22 +94,30 @@ POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 # ---------------------------------------------------------------------------
-# Figure geometry
+# Figure geometry -- FIG_WIDTH_IN chosen so the axes box's aspect ratio
+# (width_in / height_in, given AXES_RECT's fractions below) matches the
+# domain's lon/lat span ratio (~1.25); otherwise cartopy shrinks one
+# dimension to preserve the projection's aspect and leaves empty gutters.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 11.0, 9.0
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.4, 9.0
 FIG_DPI = 200
 AXES_RECT = [0.03, 0.17, 0.94, 0.70]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
-# Map domain -- bounding box of BC + WA + OR + ID, padded slightly.
+# Map domain -- zoomed to Prince George BC (N), Bella Coola BC (W),
+# Winnemucca NV (S), and Yellowstone WY (E), each padded so it's clearly
+# visible rather than sitting right at the frame edge.
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -140.0, -110.5
-LAT_MIN, LAT_MAX = 41.5, 60.5
-CENTER_LON, CENTER_LAT = -123.5, 51.3
+LON_MIN, LON_MAX = -128.2, -108.8
+LAT_MIN, LAT_MAX = 39.7, 55.2
+CENTER_LON, CENTER_LAT = -118.5, 47.45
 
 FETCH_PAD_DEG = 2.0
-RESAMPLE_NX, RESAMPLE_NY = 460, 560
+# Resampled onto a grid sized to this domain's span (see build_dpd_colormap
+# call site) at roughly the same pixel density as the original BC/WA/OR/ID
+# framing.
+RESAMPLE_NX, RESAMPLE_NY = 440, 360
 RESAMPLE_PAD_DEG = 1.5
 RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAMPLE_PAD_DEG
 RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAMPLE_PAD_DEG
@@ -120,13 +130,8 @@ STEP_HOURS = 3
 # Thunderstorm proxy threshold (see module docstring).
 MUCAPE_THRESHOLD_JKG = 200.0
 
-# Morphological opening/closing radius (in native 0.25 deg grid cells)
-# applied to the flagged mask before contouring, to drop isolated
-# single-cell specks in both directions -- lone flagged cells inside a
-# mostly-clear area, and lone unflagged holes inside a mostly-flagged one.
-MIN_FEATURE_CELLS = 2
-
 CITIES = [
+    ("Bella Coola", -126.7659, 52.3728, "right"),
     ("Vancouver", -123.1207, 49.2827, "left"),
     ("Victoria", -123.3656, 48.4284, "left"),
     ("Kelowna", -119.4960, 49.8880, "right"),
@@ -151,6 +156,11 @@ CITIES = [
     ("Coeur d'Alene", -116.7805, 47.6777, "right"),
     ("Lewiston", -117.0177, 46.4165, "right"),
     ("Twin Falls", -114.4609, 42.5629, "left"),
+    ("Idaho Falls", -112.0362, 43.4917, "right"),
+    ("Pocatello", -112.4455, 42.8713, "right"),
+    ("Winnemucca", -117.7357, 40.9730, "left"),
+    ("Bozeman", -111.0429, 45.6770, "right"),
+    ("West Yellowstone", -111.1044, 44.6621, "left"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -286,17 +296,6 @@ def resample_to_regular_grid(lat, lon, values, method="linear"):
     return regridded
 
 
-def clean_small_features(mask, iterations=MIN_FEATURE_CELLS):
-    """Drop isolated single-cell-scale specks from a binary mask: opening
-    (erode then dilate) removes small flagged blobs, closing (dilate then
-    erode) fills small unflagged holes. 8-connected structure so a diagonal
-    chain of cells still counts as connected."""
-    struct = generate_binary_structure(2, 2)
-    cleaned = binary_opening(mask, structure=struct, iterations=iterations)
-    cleaned = binary_closing(cleaned, structure=struct, iterations=iterations)
-    return cleaned
-
-
 # ---------------------------------------------------------------------------
 # Basemap layers
 # ---------------------------------------------------------------------------
@@ -341,7 +340,6 @@ def build_map(date, output_path, override_path=None):
 
     print("Resampling onto a regular grid...")
     dpd_max_k = resample_to_regular_grid(lat, lon, dpd_max_k, method="linear")
-    storm_mask = clean_small_features(storm_mask)
     storm_mask_f = resample_to_regular_grid(lat, lon, storm_mask.astype(np.float32), method="linear")
 
     dpd_f = k_diff_to_f(dpd_max_k)
@@ -394,21 +392,29 @@ def build_map(date, output_path, override_path=None):
     ax.pcolormesh(reg_lon, reg_lat, dpd_max_k, transform=pc, cmap=dpd_cmap, norm=dpd_k_norm,
                   shading="gouraud", zorder=1)
 
-    # Thunderstorm-signal outline -- smoothed lightly so the contour reads as
-    # a clean boundary rather than the raw grid's stair-steps. Areas outside
-    # the flagged region get a translucent gray shade (drawn between the DPD
-    # shading and the basemap lines, so borders/labels stay legible) to make
-    # the flagged region pop; the dashed red boundary line itself is drawn
-    # with a white outline underneath for visibility against dark DPD colors
-    # -- both contour calls share an explicit dash pattern (rather than the
-    # default "dashed" style, whose dash/gap length scales with linewidth)
-    # so the thick white line and thin red line dash in lockstep, giving a
-    # clean halo instead of two independently-phased dashed lines.
-    storm_smooth = gaussian_filter(storm_mask_f, sigma=2.6)
+    # Thunderstorm-signal outline -- heavily smoothed so the contour reads as
+    # a clean, naturally-curved boundary. A large gaussian sigma (applied to
+    # the resampled *continuous* mask, not a binary opened/closed one --
+    # binary morphology's square structuring element produces right-angle
+    # steps at the native 0.25 deg grid's scale, which is what was reading
+    # as "blocky") does double duty: it rounds off the boundary, and it
+    # washes out minor single-cell-scale flagged/unflagged specks on its own
+    # (their contribution gets diluted below the 0.5 level by the surrounding
+    # opposite-signed area), no separate small-feature-removal pass needed.
+    # Areas outside the flagged region get a translucent gray shade (drawn
+    # between the DPD shading and the basemap lines, so borders/labels stay
+    # legible) to make the flagged region pop; the dashed red boundary line
+    # itself is drawn with a white outline underneath for visibility against
+    # dark DPD colors -- both contour calls share an explicit dash pattern
+    # (rather than the default "dashed" style, whose dash/gap length scales
+    # with linewidth) so the thick white line and thin red line dash in
+    # lockstep, giving a clean halo instead of two independently-phased
+    # dashed lines.
+    storm_smooth = gaussian_filter(storm_mask_f, sigma=7.0)
     if storm_smooth.max() >= 0.5:
         outside_storm = np.ma.masked_where(storm_smooth >= 0.5, np.ones_like(storm_smooth))
         ax.pcolormesh(reg_lon, reg_lat, outside_storm, transform=pc, cmap=ListedColormap(["#8a8a8a"]),
-                      vmin=0, vmax=1, shading="auto", alpha=0.72, zorder=1.3)
+                      vmin=0, vmax=1, shading="auto", alpha=0.55, zorder=1.3)
 
     ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
@@ -494,7 +500,7 @@ def build_map(date, output_path, override_path=None):
     # Title & subtitle above the map
     fig.text(0.03, 0.978, f"{date.strftime('%A, %B %-d')} — Max Dew Point Depression", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.943, "British Columbia • Washington • Oregon • Idaho", fontsize=12.5,
+    fig.text(0.03, 0.943, "Prince George to Winnemucca • Bella Coola to Yellowstone", fontsize=12.5,
               fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
     fig.text(0.03, 0.914, f"ECMWF IFS 0.25° • Init {run_init.strftime('%Y-%m-%d %H')}z",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
