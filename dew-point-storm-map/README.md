@@ -2,10 +2,11 @@
 
 A one-off styled map covering British Columbia, Washington, Oregon, and
 Idaho: today's maximum dew point depression (2m temperature minus 2m
-dewpoint) as shading, with a dashed red outline around where ECMWF IFS's
-fields are consistent with thunderstorms today. Everything comes from a
-single source, ECMWF's free Open Data IFS distribution (0.25°, 3-hourly),
-fetched live via Herbie.
+dewpoint) as shading, with a white-outlined dashed red contour around
+where ECMWF IFS's fields are consistent with thunderstorms today, and a
+gray shade over everything outside that contour so the flagged area pops.
+Everything comes from a single source, ECMWF's free Open Data IFS
+distribution (0.25°, 3-hourly), fetched live via Herbie.
 
 ## Files
 
@@ -22,7 +23,7 @@ Shared basemap data lives one level up in [`../maps/`](../maps/):
 `admin0_boundary_lines.json` — already clipped to US/Canada/Mexico,
 including British Columbia.
 
-The Ingalls Weather logo (bottom-right on the map) lives in
+The Ingalls Weather logo (bottom-left on the map) lives in
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
 
 ## Usage
@@ -52,7 +53,16 @@ python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetc
   with no precipitation check, so it flags convective *potential* —
   airmass instability consistent with thunderstorms — not confirmation
   that a storm actually fired; adjust the constant near the top of
-  `build_map.py` if a run looks over- or under-flagged.
+  `build_map.py` if a run looks over- or under-flagged. The contour is
+  drawn twice (a thick white pass under a thin red pass, both sharing an
+  explicit dash pattern so they stay in phase) for a white-outlined look
+  that reads against dark DPD colors, and everything outside the >=0.5
+  contour level gets a translucent gray overlay so the flagged area stands
+  out.
+- The colorbar's primary (bottom) axis is Fahrenheit; a secondary (top)
+  axis mirrors it in Celsius via a *difference* conversion (`f_diff_to_c`
+  /`c_diff_to_f` — no -32/+32 offset, since DPD is already a delta, not an
+  absolute temperature).
 - The map domain is the bounding box of BC + WA + OR + ID, padded slightly
   (`LON_MIN`/`LON_MAX`/`LAT_MIN`/`LAT_MAX` near the top of `build_map.py`).
 - Uses `PlateCarree`, not `NearsidePerspective` (used by the other scripts

@@ -53,7 +53,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-from matplotlib.colors import Normalize, LinearSegmentedColormap
+from matplotlib.colors import Normalize, LinearSegmentedColormap, ListedColormap
 from matplotlib.lines import Line2D
 from matplotlib.transforms import offset_copy
 import numpy as np
@@ -92,7 +92,7 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN, FIG_HEIGHT_IN = 11.0, 9.0
 FIG_DPI = 200
-AXES_RECT = [0.03, 0.14, 0.94, 0.73]  # [left, bottom, width, height], figure fraction
+AXES_RECT = [0.03, 0.17, 0.94, 0.70]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
@@ -181,6 +181,17 @@ def k_diff_to_f(dk):
     """Convert a temperature *difference* (Kelvin/Celsius) to Fahrenheit --
     no +32 offset, since a delta scales directly by 9/5."""
     return dk * 9 / 5
+
+
+def f_diff_to_c(df):
+    """Convert a temperature *difference* in Fahrenheit to Celsius -- no
+    -32 offset, since a delta scales directly by 5/9 (inverse of
+    k_diff_to_f)."""
+    return df * 5 / 9
+
+
+def c_diff_to_f(dc):
+    return dc * 9 / 5
 
 
 # ---------------------------------------------------------------------------
@@ -367,18 +378,33 @@ def build_map(date, output_path, override_path=None):
     ax.pcolormesh(reg_lon, reg_lat, dpd_max_k, transform=pc, cmap=dpd_cmap, norm=dpd_k_norm,
                   shading="gouraud", zorder=1)
 
+    # Thunderstorm-signal outline -- smoothed lightly so the contour reads as
+    # a clean boundary rather than the raw grid's stair-steps. Areas outside
+    # the flagged region get a translucent gray shade (drawn between the DPD
+    # shading and the basemap lines, so borders/labels stay legible) to make
+    # the flagged region pop; the dashed red boundary line itself is drawn
+    # with a white outline underneath for visibility against dark DPD colors
+    # -- both contour calls share an explicit dash pattern (rather than the
+    # default "dashed" style, whose dash/gap length scales with linewidth)
+    # so the thick white line and thin red line dash in lockstep, giving a
+    # clean halo instead of two independently-phased dashed lines.
+    storm_smooth = gaussian_filter(storm_mask_f, sigma=1.8)
+    if storm_smooth.max() >= 0.5:
+        outside_storm = np.ma.masked_where(storm_smooth >= 0.5, np.ones_like(storm_smooth))
+        ax.pcolormesh(reg_lon, reg_lat, outside_storm, transform=pc, cmap=ListedColormap(["#8a8a8a"]),
+                      vmin=0, vmax=1, shading="auto", alpha=0.72, zorder=1.3)
+
     ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#5a4632", linewidth=0.6, zorder=2.1)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
-    # Thunderstorm-signal outline -- smoothed lightly so the contour reads as
-    # a clean boundary rather than the raw grid's stair-steps, then drawn as
-    # a dashed red line around the >=0.5 (i.e. "flagged") region.
-    storm_smooth = gaussian_filter(storm_mask_f, sigma=1.4)
     if storm_smooth.max() >= 0.5:
+        storm_dashes = (0, (6, 4))
+        ax.contour(reg_lon, reg_lat, storm_smooth, levels=[0.5], colors="white",
+                    linewidths=3.6, linestyles=[storm_dashes], transform=pc, zorder=3)
         ax.contour(reg_lon, reg_lat, storm_smooth, levels=[0.5], colors="#e6231e",
-                    linewidths=1.8, linestyles="dashed", transform=pc, zorder=3)
+                    linewidths=1.8, linestyles=[storm_dashes], transform=pc, zorder=3.1)
     else:
         print("No grid cells cleared the thunderstorm-signal threshold today -- no outline drawn.")
 
@@ -399,14 +425,17 @@ def build_map(date, output_path, override_path=None):
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
 
-    # Colorbar -- below the map, centered on the rendered map frame.
+    # Colorbar -- below the map, centered on the rendered map frame. Primary
+    # (bottom) axis is Fahrenheit; a secondary (top) axis mirrors it in
+    # Celsius, converted as a temperature *difference* (no -32/*5/9 offset,
+    # since DPD is already a delta) via f_diff_to_c/c_diff_to_f.
     fig.canvas.draw()
     frame_px = ax.get_window_extent()
     frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
     frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
-    cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.018
+    cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.016
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
-    cbar_bottom = 0.075
+    cbar_bottom = 0.104
 
     vmin_disp = 5 * np.floor(max(visible.min(), DPD_FMIN) / 5)
     vmax_disp = 5 * np.ceil(min(visible.max(), DPD_FMAX) / 5)
@@ -427,11 +456,19 @@ def build_map(date, output_path, override_path=None):
     for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
 
+    cax_c = cax.secondary_xaxis("top", functions=(f_diff_to_c, c_diff_to_f))
+    cax_c.xaxis.set_major_formatter(lambda c, _: f"{c:.0f}°C")
+    cax_c.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
+    for label in cax_c.get_xticklabels():
+        label.set_fontproperties(poppins_reg)
+
     # Legend entry for the thunderstorm-signal outline -- a thin unboxed
-    # strip in the gap between the map frame and the colorbar.
+    # strip between the map frame and the colorbar's Celsius ticks. The
+    # swatch line gets the same white-outline treatment as the map contour.
     storm_handle = Line2D([0], [0], color="#e6231e", linestyle="--", linewidth=1.8,
-                           label=f"ECMWF thunderstorm signal (MUCAPE ≥ {MUCAPE_THRESHOLD_JKG:.0f} J/kg)")
-    legend_y = (AXES_RECT[1] + cbar_bottom + cbar_height) / 2
+                           label=f"ECMWF thunderstorm signal (MUCAPE ≥ {MUCAPE_THRESHOLD_JKG:.0f} J/kg)",
+                           path_effects=[pe.withStroke(linewidth=3.2, foreground="white")])
+    legend_y = 0.155
     leg = fig.legend(handles=[storm_handle], loc="center", frameon=False, fontsize=8.75,
                       prop=poppins_reg, handlelength=2.4,
                       bbox_to_anchor=(0.5, legend_y))
@@ -454,7 +491,7 @@ def build_map(date, output_path, override_path=None):
     plt.close(fig)
     print(f"Saved base map to {output_path}")
 
-    # ---- Composite logo, bottom-right, snug inside the frame ----
+    # ---- Composite logo, bottom-left, snug inside the frame ----
     if LOGO_FILE.exists():
         base = Image.open(output_path).convert("RGB")
         bw, bh = base.size
@@ -463,7 +500,7 @@ def build_map(date, output_path, override_path=None):
         black_cols = [x for x in range(bw) if arr[y, x][0] < 40 and arr[y, x][1] < 40 and arr[y, x][2] < 40]
         x = bw // 2
         black_rows = [yy for yy in range(bh) if arr[yy, x][0] < 40 and arr[yy, x][1] < 40 and arr[yy, x][2] < 40]
-        frame_right = max(black_cols) if black_cols else bw - 20
+        frame_left = min(black_cols) if black_cols else 20
         frame_bottom = max(black_rows) if black_rows else bh - 20
 
         logo = Image.open(LOGO_FILE).convert("RGB")
@@ -472,7 +509,7 @@ def build_map(date, output_path, override_path=None):
         target_h = int(logo.height * scale)
         logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
 
-        pos = (frame_right - MAP_FRAME_INSET_PX - target_w, frame_bottom - MAP_FRAME_INSET_PX - target_h)
+        pos = (frame_left + MAP_FRAME_INSET_PX, frame_bottom - MAP_FRAME_INSET_PX - target_h)
         base.paste(logo_resized, pos)
         base.save(output_path)
         print(f"Composited logo at {pos}")
