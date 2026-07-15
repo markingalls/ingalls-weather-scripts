@@ -18,7 +18,7 @@ today's oper/enfo/aifs index files, no lit* param in any of them). The
 outline is therefore a proxy: a grid cell is flagged for any 3-hourly
 window today where most-unstable CAPE (mucape) reaches
 MUCAPE_THRESHOLD_JKG, i.e. the airmass is unstable enough to support
-convection. The threshold is tuned low (200 J/kg by default) for the
+convection. The threshold is tuned low (150 J/kg by default) for the
 Pacific Northwest/BC interior's generally modest summertime instability,
 not Great Plains-scale severe setups -- and since this is CAPE alone (no
 precipitation check), it flags convective *potential*, not confirmation
@@ -128,39 +128,39 @@ RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAM
 STEP_HOURS = 3
 
 # Thunderstorm proxy threshold (see module docstring).
-MUCAPE_THRESHOLD_JKG = 200.0
+MUCAPE_THRESHOLD_JKG = 150.0
 
 CITIES = [
     ("Bella Coola", -126.7659, 52.3728, "right"),
+    ("Wells", -121.5589, 53.1058, "right"),
     ("Vancouver", -123.1207, 49.2827, "left"),
     ("Victoria", -123.3656, 48.4284, "left"),
     ("Kelowna", -119.4960, 49.8880, "right"),
     ("Kamloops", -120.3273, 50.6745, "right"),
     ("Prince George", -122.7497, 53.9171, "right"),
-    ("Nelson", -117.2948, 49.4928, "right"),
     ("Cranbrook", -115.7697, 49.5097, "right"),
     ("Williams Lake", -122.1417, 52.1417, "left"),
-    ("Whistler", -122.9574, 50.1163, "left"),
     ("Seattle", -122.3321, 47.6062, "left"),
     ("Spokane", -117.4260, 47.6588, "left"),
-    ("Tacoma", -122.4443, 47.2529, "left"),
-    ("Wenatchee", -120.3103, 47.4235, "right"),
-    ("Yakima", -120.5059, 46.6021, "right"),
-    ("Walla Walla", -118.3430, 46.0646, "right"),
+    ("Tri-Cities", -119.2781, 46.2565, "right"),
     ("Portland", -122.6784, 45.5152, "left"),
     ("Bend", -121.3153, 44.0582, "left"),
     ("Eugene", -123.0868, 44.0521, "left"),
     ("Medford", -122.8756, 42.3265, "left"),
-    ("Pendleton", -118.7879, 45.6721, "right"),
+    ("Redding", -122.3917, 40.5865, "left"),
+    ("Burns", -119.0541, 43.5866, "right"),
     ("Boise", -116.2023, 43.6150, "left"),
-    ("Coeur d'Alene", -116.7805, 47.6777, "right"),
-    ("Lewiston", -117.0177, 46.4165, "right"),
     ("Twin Falls", -114.4609, 42.5629, "left"),
     ("Idaho Falls", -112.0362, 43.4917, "right"),
-    ("Pocatello", -112.4455, 42.8713, "right"),
     ("Winnemucca", -117.7357, 40.9730, "left"),
+    ("Salt Lake City", -111.8910, 40.7608, "right"),
     ("Bozeman", -111.0429, 45.6770, "right"),
-    ("West Yellowstone", -111.1044, 44.6621, "left"),
+    ("Missoula", -113.9940, 46.8721, "left"),
+    ("Great Falls", -111.3008, 47.5053, "right"),
+    ("Calgary", -114.0719, 51.0447, "right"),
+    ("Red Deer", -113.8112, 52.2681, "right"),
+    ("Edmonton", -113.4938, 53.5461, "right"),
+    ("Lethbridge", -112.8418, 49.6935, "right"),
 ]
 
 # ---------------------------------------------------------------------------

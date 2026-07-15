@@ -49,7 +49,7 @@ python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetc
   free Open Data feed this script uses by checking today's `oper`, `enfo`,
   and `aifs` index files directly, no `lit*` param in any of them. Instead,
   a grid cell is flagged if, in any 3-hourly window today, most-unstable
-  CAPE reaches `MUCAPE_THRESHOLD_JKG` (200 J/kg by default, tuned low for
+  CAPE reaches `MUCAPE_THRESHOLD_JKG` (150 J/kg by default, tuned low for
   the Pacific Northwest/BC interior's generally modest summertime
   instability, not Great Plains-scale severe setups). This is CAPE alone,
   with no precipitation check, so it flags convective *potential* —
