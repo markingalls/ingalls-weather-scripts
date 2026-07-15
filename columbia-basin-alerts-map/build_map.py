@@ -5,13 +5,16 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, PathPatch
 from matplotlib.lines import Line2D
+from matplotlib.axes import Axes
 import cartopy.crs as ccrs
+from cartopy.mpl.path import shapely_to_path
 from shapely.geometry import shape, box
 from shapely.ops import transform as shp_transform, unary_union
 import numpy as np
 from datetime import datetime
+from collections import defaultdict
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -88,6 +91,22 @@ def darken(hexcolor, factor=0.6):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def hex_to_rgb(hexcolor):
+    hexcolor = hexcolor.lstrip("#")
+    return tuple(int(hexcolor[i:i+2], 16) for i in (0, 2, 4))
+
+
+def make_stripe_image(colors, width_px, height_px, stripe_px=20):
+    """Diagonal candy-stripe raster alternating full-opacity bands of
+    each color in `colors`, sized to cover width_px x height_px."""
+    yy, xx = np.mgrid[0:height_px, 0:width_px]
+    band = ((xx + yy) // stripe_px) % len(colors)
+    img = np.zeros((height_px, width_px, 3), dtype=np.uint8)
+    for i, c in enumerate(colors):
+        img[band == i] = hex_to_rgb(c)
+    return img
+
+
 # ---------- extent / projection ----------
 # Zoomed view: North Bend, WA down to Baker City, OR corridor
 EXTENT = [-122.5, -117.0, 44.4, 48.0]
@@ -103,6 +122,12 @@ fig.patch.set_facecolor("#f7f6f2")
 ax = fig.add_axes([0.04, 0.045, 0.92, 0.80], projection=proj)
 ax.set_facecolor("white")
 ax.set_extent(EXTENT, crs=pc)
+
+# Pixel size of the map's plotted area, used later to render candy-stripe
+# fills at a consistent on-screen stripe width regardless of map extent.
+fig.canvas.draw()
+ax_bbox = ax.get_window_extent()
+AX_W_PX, AX_H_PX = int(ax_bbox.width), int(ax_bbox.height)
 
 MAPS_DIR = "../maps"
 
@@ -170,12 +195,6 @@ ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_C
                    linewidth=1.3, zorder=6)
 
 # ---------- alerts ----------
-# Hatch-stripe alert zones instead of alpha-stacking solid fills, so
-# overlapping alert types (e.g. a Red Flag Warning inside a Heat Advisory)
-# show both patterns layered together instead of blending into a color
-# that matches neither alert.
-HATCH_PATTERNS = ["//", "\\\\", "xx", "..", "++", "oo", "**", "||", "--"]
-
 alerts = json.load(open("alerts_with_zones.json"))
 extent_box = box(EXTENT[0], EXTENT[2], EXTENT[1], EXTENT[3])
 
@@ -192,26 +211,69 @@ for a in alerts:
             continue
         plotted_zones.add(zone_key)
         event_geoms.setdefault(event, []).append(shape(z["geometry"]))
+event_geoms = {event: unary_union(geoms) for event, geoms in event_geoms.items()}
 
 # Only reflect an event in the title/legend if it's actually visible
 # somewhere in the current map domain -- NWS returns every active alert
 # for the queried states, some of which can sit far outside whatever
 # extent we're currently showing.
-active_event_types = [event for event, geoms in event_geoms.items()
-                       if any(g.intersects(extent_box) for g in geoms)]
+active_event_types = [event for event, geom in event_geoms.items()
+                       if geom.intersects(extent_box)]
 
-# Assign hatch patterns alphabetically by event name so a given event
-# keeps the same pattern across runs regardless of NWS response order.
-hatch_for_event = {event: HATCH_PATTERNS[i % len(HATCH_PATTERNS)]
-                    for i, event in enumerate(sorted(event_geoms))}
+# Split the events into a partition of disjoint regions, each tagged with
+# the set of events covering it, so overlapping alerts (e.g. a Red Flag
+# Warning inside a Heat Advisory) can be drawn as their own region instead
+# of alpha-stacking into a color that matches neither alert.
+partition = []  # list of (geom, frozenset(events))
+for event, geom in event_geoms.items():
+    next_partition = []
+    remaining = geom
+    for cell_geom, cell_events in partition:
+        overlap = cell_geom.intersection(remaining)
+        if not overlap.is_empty:
+            next_partition.append((overlap, cell_events | {event}))
+        rest = cell_geom.difference(remaining)
+        if not rest.is_empty:
+            next_partition.append((rest, cell_events))
+        remaining = remaining.difference(cell_geom)
+    if not remaining.is_empty:
+        next_partition.append((remaining, frozenset({event})))
+    partition = next_partition
 
-for event, geoms in event_geoms.items():
-    fill = NWS_COLORS.get(event, "#e8a33d")
-    edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
-    union_geom = unary_union(geoms)
-    draw_geoms = list(union_geom.geoms) if hasattr(union_geom, "geoms") else [union_geom]
-    ax.add_geometries(draw_geoms, crs=pc, facecolor="none", edgecolor=edge,
-                       hatch=hatch_for_event[event], linewidth=1.2, zorder=4.5)
+# Merge same-tagged cells back together so each distinct combination of
+# overlapping events is drawn (and clipped) once.
+combo_geoms = defaultdict(list)
+for geom, tags in partition:
+    combo_geoms[tags].append(geom)
+combo_geoms = {tags: unary_union(geoms) for tags, geoms in combo_geoms.items()}
+
+OVERLAP_EDGE = "#4a4a4a"
+
+for tags, geom in combo_geoms.items():
+    if len(tags) == 1:
+        event = next(iter(tags))
+        fill = NWS_COLORS.get(event, "#e8a33d")
+        edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
+        ax.add_geometries([geom], crs=pc, facecolor=fill, edgecolor=edge,
+                           alpha=0.55, linewidth=1.2, zorder=4.5)
+        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=edge,
+                           linewidth=1.2, alpha=1.0, zorder=4.6)
+        continue
+
+    # Overlap region: fill with alternating full-opacity stripes, one
+    # band per contributing event, clipped to the region's exact shape.
+    colors = [NWS_COLORS.get(e, "#e8a33d") for e in sorted(tags)]
+    stripe_img = make_stripe_image(colors, AX_W_PX, AX_H_PX)
+    proj_geom = ax.projection.project_geometry(geom, pc)
+    clip_path = shapely_to_path(proj_geom)
+    clip_patch = PathPatch(clip_path, transform=ax.transData)
+    # GeoAxes overrides imshow to require a CRS transform; we're placing
+    # this in plain axes-fraction space, so call the base Axes.imshow.
+    im = Axes.imshow(ax, stripe_img, extent=(0, 1, 0, 1), transform=ax.transAxes,
+                      origin="upper", interpolation="nearest", zorder=4.5)
+    im.set_clip_path(clip_patch)
+    ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
+                       linewidth=1.2, alpha=1.0, zorder=4.6)
 
 # ---------- city labels ----------
 cities = [
@@ -303,8 +365,7 @@ legend_handles = []
 for event in active_event_types:
     fill = NWS_COLORS.get(event, "#e8a33d")
     edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
-    legend_handles.append(Patch(facecolor="none", edgecolor=edge,
-                                 hatch=hatch_for_event[event], label=event))
+    legend_handles.append(Patch(facecolor=fill, edgecolor=edge, alpha=0.85, label=event))
 
 leg = fig.legend(handles=legend_handles, loc="lower left",
                   bbox_to_anchor=(left_x + 0.012, map_pos.y0 + 0.012),
