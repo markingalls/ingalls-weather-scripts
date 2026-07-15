@@ -113,17 +113,12 @@ LON_MIN, LON_MAX = -128.2, -108.8
 LAT_MIN, LAT_MAX = 39.7, 55.2
 CENTER_LON, CENTER_LAT = -118.5, 47.45
 
-# Both pads are wider than a PlateCarree map would need -- NearsidePerspective
-# (see proj below) fits the axes to a rectangle bounding the *projected*,
-# curved shape of the requested lon/lat box, so the rendered frame shows a
-# bit more area than LON_MIN/MAX/LAT_MIN/MAX at the corners. Real data has
-# to reach that far too, or those corners render blank.
-FETCH_PAD_DEG = 5.0
+FETCH_PAD_DEG = 2.0
 # Resampled onto a grid sized to this domain's span (see build_dpd_colormap
 # call site) at roughly the same pixel density as the original BC/WA/OR/ID
 # framing.
 RESAMPLE_NX, RESAMPLE_NY = 440, 360
-RESAMPLE_PAD_DEG = 4.0
+RESAMPLE_PAD_DEG = 1.5
 RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAMPLE_PAD_DEG
 RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAMPLE_PAD_DEG
 
@@ -365,22 +360,18 @@ def build_map(date, output_path, override_path=None):
     state_geoms = load_states()
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
-    # NearsidePerspective (satellite view, showing Earth's curvature), like
-    # the other scripts in this repo -- not PlateCarree, which has no
-    # curvature at all. NearsidePerspective fits the axes to a rectangle
+    # PlateCarree (not NearsidePerspective, used by the other scripts in
+    # this repo) -- NearsidePerspective fits the axes to a rectangle
     # bounding the *projected*, curved shape of the requested lon/lat box,
-    # so the rendered frame always shows a bit more area at the corners
-    # than LON_MIN/MAX/LAT_MIN/MAX; on a tall enough domain (an earlier,
-    # much taller version of this map) that slack was big enough to leave
-    # visible blank corners and duplicated border lines. Two things tame it
-    # here: satellite_height set generously high (flattening the curvature
-    # just enough to shrink that slack to a sliver) and FETCH_PAD_DEG/
-    # RESAMPLE_PAD_DEG wide enough that real data actually covers the
-    # sliver instead of it rendering blank. Confirmed clean by inspecting
-    # all four corners after rendering.
+    # which leaves the rendered frame's corners showing a bit more area
+    # than LON_MIN/MAX/LAT_MIN/MAX; at this domain's shape that slack was
+    # big enough to produce visible blank corners and duplicated border
+    # lines that a merely-generous satellite_height + data padding
+    # couldn't fully tame. PlateCarree has no such gap, at the cost of the
+    # visible curvature that projection gives -- straight rectangle, no
+    # satellite-view tilt.
     pc = ccrs.PlateCarree()
-    proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
-                                     satellite_height=20_000_000)
+    proj = pc
 
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")

@@ -89,19 +89,16 @@ python3 build_map.py --file output/snapshot_2026-07-15.npz  # re-render, no fetc
   domain's lon/lat span ratio — change one, re-check the other, or cartopy
   shrinks one dimension to preserve the projection's aspect and leaves
   empty gutters on the sides.
-- Uses `NearsidePerspective` (satellite view, showing Earth's curvature),
-  like the other scripts in this repo. NearsidePerspective fits the axes
-  to a rectangle bounding the *projected*, curved shape of the requested
-  lon/lat box, so the rendered frame always shows a bit more area at the
-  corners than `LON_MIN`/`MAX`/`LAT_MIN`/`MAX` — on an earlier, much
-  taller version of this domain that slack was large enough to leave
-  visible blank corners and duplicated border lines. Two things tame it
-  at this domain's size: `satellite_height` set generously high
-  (flattening the curvature just enough to shrink that slack to a
-  sliver) and `FETCH_PAD_DEG`/`RESAMPLE_PAD_DEG` wide enough that real
-  data covers the sliver instead of it rendering blank. If the domain
-  changes shape again and blank corners or doubled border lines
-  reappear, raise `satellite_height` and/or the pad constants first.
+- Uses `PlateCarree`, not `NearsidePerspective` (used by the other scripts
+  in this repo): NearsidePerspective fits the axes to a rectangle bounding
+  the *projected*, curved shape of the requested lon/lat box, so the
+  rendered frame's corners always show a bit more area than
+  `LON_MIN`/`MAX`/`LAT_MIN`/`MAX` — at this domain's shape that slack was
+  big enough to produce visible blank corners and duplicated border lines
+  that a merely-generous `satellite_height` and wider data padding
+  couldn't fully tame. PlateCarree has no such gap, at the cost of the
+  visible Earth curvature/satellite-view tilt that projection gives —
+  straight rectangle instead.
 - No lakes are shaded — `load_states()` drops lake features from the
   states/provinces dataset entirely (not just leaving them unfilled) so
   they don't get drawn as a false state/province border either.
