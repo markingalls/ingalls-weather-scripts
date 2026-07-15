@@ -20,6 +20,10 @@ workflows. Each project lives in its own directory with its own README.
   meteogram of the WindBorne WM-6 ensemble spread for a pressure-level
   temperature at a point (defaults to KPSC / 850 mb), compared against
   long-term climatology.
+- [`dew-point-storm-map/`](dew-point-storm-map/) — one-off map of today's
+  maximum dew point depression across British Columbia, Washington,
+  Oregon, and Idaho, with a dashed red outline where ECMWF IFS's fields
+  are consistent with thunderstorms today.
 
 ## Shared resources
 
