@@ -25,9 +25,9 @@ workflows. Each project lives in its own directory with its own README.
   Oregon, and Idaho, with a dashed red outline where ECMWF IFS's fields
   are consistent with thunderstorms today.
 - [`wildcad-fires-map/`](wildcad-fires-map/) — one-off map of currently
-  active wildfires (sourced from WildCAD-E) across the same domain as
-  `dew-point-storm-map/`. US dispatch centers only — no BC/Alberta
-  coverage.
+  active wildfires across the same domain as `dew-point-storm-map/`,
+  merged from WildCAD-E (US dispatch centers), BC Wildfire Service, and
+  Alberta Wildfire.
 
 ## Shared resources
 

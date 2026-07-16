@@ -1,39 +1,64 @@
 """
-Current Wildfires (WildCAD-E) Map -- one-off builder
+Current Wildfires Map -- one-off builder
 Ingalls Weather
 
 Same domain as ../dew-point-storm-map/ (Prince George BC to Winnemucca NV,
 Bella Coola BC to Yellowstone WY), plotting currently active wildfires
-sourced from WildCAD-E -- the interagency dispatch CAD system used by
-essentially every US wildland fire dispatch center. There is no single
-national WildCAD feed; each dispatch center publishes its own incident
-list, so this script queries every dispatch center whose area of
-responsibility falls inside (or close to) the map domain and merges the
-results. WildCAD has no Canadian coverage -- BC/Alberta dispatch centers
-use separate systems (BC Wildfire Service, Alberta Wildfire), so fires in
-that part of the domain are not represented here; the map says so.
+from three separate government sources, merged into one map since none of
+them individually covers the whole domain:
 
-DATA SOURCE
------------
+  US (WA/OR/ID/w.MT/n.NV/n.UT/nw.WY): WildCAD-E, the interagency dispatch
+    CAD system used by essentially every US wildland fire dispatch center.
+    There's no single national feed -- each dispatch center publishes its
+    own incident list, so this queries every center whose area overlaps
+    the domain and merges the results.
+  British Columbia: BC Wildfire Service's public "Fire Locations - Current"
+    ArcGIS feature service.
+  Alberta: Alberta Wildfire's public "wildfire_location_active" ArcGIS
+    feature service (pre-filtered to active fires by the service itself).
+
+DATA SOURCES
+------------
 WildCAD-E's public web app (wildwebe.net) calls a REST API at
     https://snknmqmon6.execute-api.us-west-2.amazonaws.com/centers/<DC>/incidents?fromDate=...&toDate=...
 (found by inspecting the app's JS bundle -- there's no published API doc).
 Each dispatch center returns every incident of every type (Wildfire, Smoke
 Check, False Alarm, Debris Fire, Vehicle Fire, Structure Fire, etc.) it
 logged in the date window, each with a fire_status JSON blob carrying
-out/contain/control timestamps.
+out/contain/control timestamps. "Currently active" is inferred, not an
+explicit flag: type == "Wildfire" and fire_status.control is null (not yet
+declared controlled). WildCAD's "out" timestamp turns out to be
+essentially never populated even for fires contained/controlled weeks ago,
+so it's useless as an activity filter -- "control" is the more reliable
+signal that suppression is effectively over. The API also has a bug: it
+returns longitude as a bare positive magnitude with no western-hemisphere
+sign, worked around by negating unconditionally (safe since every US
+dispatch center queried here is west of the prime meridian).
 
-"Currently active" is inferred, not an explicit flag: type == "Wildfire"
-and fire_status.control is null (not yet declared controlled). WildCAD's
-"out" timestamp turns out to be essentially never populated even for
-fires contained/controlled weeks ago, so it's useless as an activity
-filter -- "control" is the more reliable signal that suppression is
-effectively over.
+BC Wildfire Service (found via its ArcGIS Hub listing, "Fire Locations -
+Current"):
+    https://services6.arcgis.com/ubm4tcTYICKBpist/arcgis/rest/services/BCWS_ActiveFires_PublicView/FeatureServer/0
+Every fire this season is a point in this layer, active or not, each with
+an explicit FIRE_STATUS ("Out", "Out of Control", "Being Held", "Under
+Control", "Fire of Note"). "Currently active" here = FIRE_STATUS != "Out"
+-- a different (looser) definition than WildCAD's "not yet controlled"
+because BC's status model doesn't map cleanly onto WildCAD's, and BC's own
+"Out" is a clean, explicit signal WildCAD's field of the same name isn't.
+Size (CURRENT_SIZE) is in hectares; converted to acres (x2.47105) for a
+consistent legend with the US side.
+
+Alberta Wildfire (found via its public Experience Builder app's embedded
+data sources, "wildfire_location_active"):
+    https://services.arcgis.com/Eb8P5h4CJk8utIBz/arcgis/rest/services/wildfire_location_active/FeatureServer/0
+This layer is already curated to active fires only (its name says so, and
+querying it shows no "Out"-equivalent status among its ~9 current
+records), so no extra activity filtering is applied. Size (AREA_ESTIMATE)
+is in hectares, converted to acres the same way as BC's.
 
 USAGE
 -----
     python build_map.py                        # current wildfires
-    python build_map.py --lookback-days 45      # widen the incident window
+    python build_map.py --lookback-days 45      # widen the WildCAD-E query window
     python build_map.py --file snapshot.json    # render from a saved fetch
 
 REQUIRES (already checked into /maps at repo root, shared across all
@@ -167,6 +192,14 @@ DISPATCH_CENTERS = [
 INCLUDED_TYPES = {"Wildfire"}
 
 # ---------------------------------------------------------------------------
+# Canadian sources (see module docstring for how these URLs were found and
+# how each one's activity/status field is interpreted).
+# ---------------------------------------------------------------------------
+BC_FIRES_URL = "https://services6.arcgis.com/ubm4tcTYICKBpist/arcgis/rest/services/BCWS_ActiveFires_PublicView/FeatureServer/0/query"
+AB_FIRES_URL = "https://services.arcgis.com/Eb8P5h4CJk8utIBz/arcgis/rest/services/wildfire_location_active/FeatureServer/0/query"
+HECTARES_TO_ACRES = 2.47105
+
+# ---------------------------------------------------------------------------
 # Marker sizing -- area (not radius) scales with acres so the *visual*
 # footprint reads proportionally, log-scaled since fire size spans several
 # orders of magnitude (0.1 to 10,000+ acres) in the same dataset.
@@ -177,10 +210,6 @@ def marker_size_pts2(acres):
 
 
 SIZE_LEGEND_ACRES = [1, 25, 500, 5000]
-
-LABEL_MIN_ACRES = 1000  # only label fires at/above this size, to avoid clutter
-LABEL_MIN_SEPARATION_DEG = 1.2  # min lon/lat gap between two labeled fires
-LABEL_MAX_COUNT = 20  # hard cap regardless of how many clear LABEL_MIN_ACRES
 
 
 def load_land():
@@ -228,12 +257,14 @@ def fetch_center_incidents(dc, from_date, to_date):
     return []
 
 
-def fetch_all_fires(lookback_days):
-    now = datetime.now(timezone.utc)
+def fetch_wildcad_fires(lookback_days, now):
+    """US fires from every WildCAD-E dispatch center in DISPATCH_CENTERS,
+    keyed by inc_num/uuid (namespaced so they can't collide with the
+    Canadian sources' own ID spaces)."""
     from_date = (now - timedelta(days=lookback_days)).strftime("%Y-%m-%dT00:00:00.000Z")
     to_date = now.strftime("%Y-%m-%dT23:59:59.000Z")
 
-    by_inc_num = {}
+    by_key = {}
     for dc in DISPATCH_CENTERS:
         print(f"Fetching {dc} ...")
         for rec in fetch_center_incidents(dc, from_date, to_date):
@@ -262,14 +293,95 @@ def fetch_all_fires(lookback_days):
                 acres = float(rec["acres"]) if rec.get("acres") not in (None, "") else None
             except (TypeError, ValueError):
                 acres = None
-            key = rec.get("inc_num") or rec.get("uuid")
-            by_inc_num[key] = {
+            key = "WC:" + (rec.get("inc_num") or rec.get("uuid") or "")
+            by_key[key] = {
                 "name": (rec.get("name") or "UNNAMED").strip(),
                 "lat": lat, "lon": lon, "acres": acres,
-                "date": rec.get("date"), "dc": dc,
+                "date": rec.get("date"), "source": dc,
             }
+    return by_key
 
-    fires = sorted(by_inc_num.values(), key=lambda f: -(f["acres"] or 0))
+
+def fetch_bc_fires():
+    """BC Wildfire Service's public 'Fire Locations - Current' layer --
+    every fire this season, active or not, so filtered here to
+    FIRE_STATUS != 'Out' (see module docstring for why that's a looser
+    definition of "active" than the WildCAD/Alberta sides use)."""
+    print("Fetching BC Wildfire Service ...")
+    by_key = {}
+    try:
+        resp = requests.get(BC_FIRES_URL, params={
+            "where": "1=1",
+            "outFields": "FIRE_ID,FIRE_STATUS,LATITUDE,LONGITUDE,CURRENT_SIZE,INCIDENT_NAME,GEOGRAPHIC_DESCRIPTION",
+            "f": "geojson",
+        }, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        resp.raise_for_status()
+        features = resp.json().get("features", [])
+    except Exception as e:
+        print(f"  WARNING: BC Wildfire Service fetch failed ({e}), skipping.")
+        return by_key
+
+    for feat in features:
+        p = feat["properties"]
+        if p.get("FIRE_STATUS") == "Out":
+            continue
+        try:
+            lat, lon = float(p["LATITUDE"]), float(p["LONGITUDE"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not (LON_MIN <= lon <= LON_MAX and LAT_MIN <= lat <= LAT_MAX):
+            continue
+        acres = p["CURRENT_SIZE"] * HECTARES_TO_ACRES if p.get("CURRENT_SIZE") is not None else None
+        name = p.get("INCIDENT_NAME") or p.get("GEOGRAPHIC_DESCRIPTION") or "UNNAMED"
+        by_key[f"BC:{p.get('FIRE_ID')}"] = {
+            "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
+            "date": None, "source": "BCWS",
+        }
+    return by_key
+
+
+def fetch_ab_fires():
+    """Alberta Wildfire's public 'wildfire_location_active' layer -- already
+    curated to active fires only, so no extra status filtering here."""
+    print("Fetching Alberta Wildfire ...")
+    by_key = {}
+    try:
+        resp = requests.get(AB_FIRES_URL, params={
+            "where": "1=1",
+            "outFields": "FIRE_NUMBER,LATITUDE,LONGITUDE,AREA_ESTIMATE,LABEL",
+            "f": "geojson",
+        }, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        resp.raise_for_status()
+        features = resp.json().get("features", [])
+    except Exception as e:
+        print(f"  WARNING: Alberta Wildfire fetch failed ({e}), skipping.")
+        return by_key
+
+    for feat in features:
+        p = feat["properties"]
+        try:
+            lat, lon = float(p["LATITUDE"]), float(p["LONGITUDE"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not (LON_MIN <= lon <= LON_MAX and LAT_MIN <= lat <= LAT_MAX):
+            continue
+        acres = p["AREA_ESTIMATE"] * HECTARES_TO_ACRES if p.get("AREA_ESTIMATE") is not None else None
+        name = p.get("FIRE_NUMBER") or p.get("LABEL") or "UNNAMED"
+        by_key[f"AB:{p.get('FIRE_NUMBER')}"] = {
+            "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
+            "date": None, "source": "ABWildfire",
+        }
+    return by_key
+
+
+def fetch_all_fires(lookback_days):
+    now = datetime.now(timezone.utc)
+    by_key = {}
+    by_key.update(fetch_wildcad_fires(lookback_days, now))
+    by_key.update(fetch_bc_fires())
+    by_key.update(fetch_ab_fires())
+
+    fires = sorted(by_key.values(), key=lambda f: -(f["acres"] or 0))
     print(f"{len(fires)} active wildfires in domain after filtering/dedup.")
     return fires, now
 
@@ -291,7 +403,7 @@ def build_map(fires, fetched_at, output_path):
 
     ax = fig.add_axes(AXES_RECT, projection=proj)
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
-    ax.patch.set_facecolor("#eef1ea")
+    ax.patch.set_facecolor("#bfe1ef")  # pastel ocean -- shows through wherever land_geoms doesn't cover
 
     ax.add_geometries(land_geoms, crs=pc, facecolor="#d7dcd0", edgecolor="#4a6b7a", linewidth=0.8, zorder=1)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#8a8578", linewidth=0.8, zorder=2)
@@ -313,47 +425,15 @@ def build_map(fires, fetched_at, output_path):
 
     # Fire markers -- filled circle, area scaled (log) by acres, drawn
     # largest-first (zorder by size) so small fires never get buried under
-    # a big one's marker.
-    fire_stroke = [pe.withStroke(linewidth=2.2, foreground="white")]
+    # a big one's marker. No name labels -- with ~300+ fires active across
+    # this domain in a typical mid-season snapshot, any label-density
+    # threshold worth using still reads as clutter; the size/color alone
+    # (plus the acreage legend) carries the useful signal.
     fires_by_size = sorted(fires, key=lambda f: -(f["acres"] or 0))
     for f in fires_by_size:
         size = marker_size_pts2(f["acres"])
         ax.scatter(f["lon"], f["lat"], s=size, color="#e6231e", edgecolor="#7a0e0a",
                    linewidth=0.7, alpha=0.85, zorder=50, transform=pc)
-
-    # Labels (name + acres) -- greedy declutter: largest fires first, each
-    # only labeled if it isn't within LABEL_MIN_SEPARATION_DEG of an
-    # already-labeled fire, so a tight cluster of big fires (there's often
-    # one mid-fire-season across this domain) gets one label per cluster
-    # instead of a wall of overlapping text. Capped at LABEL_MAX_COUNT
-    # regardless, so a widely-scattered active season doesn't turn into
-    # text soup either.
-    labeled_points = []
-    labeled_count = 0
-    for f in fires_by_size:
-        if (f["acres"] or 0) < LABEL_MIN_ACRES or labeled_count >= LABEL_MAX_COUNT:
-            continue
-        too_close = any(abs(f["lon"] - lo) < LABEL_MIN_SEPARATION_DEG and
-                         abs(f["lat"] - la) < LABEL_MIN_SEPARATION_DEG for lo, la in labeled_points)
-        if too_close:
-            continue
-        labeled_points.append((f["lon"], f["lat"]))
-        labeled_count += 1
-        # Label extends away from the nearer domain edge (like the city
-        # labels), so a fire near the frame's right edge doesn't spill its
-        # label out past the black border.
-        on_right_half = f["lon"] > CENTER_LON
-        # Clear the marker's own radius (points) before adding a fixed pad,
-        # so a big fire's label doesn't render on top of its own circle --
-        # marker_size_pts2 returns an area in points^2, so radius = sqrt(area/pi).
-        clearance_pt = np.sqrt(marker_size_pts2(f["acres"]) / np.pi) + 4
-        dx_pt = -clearance_pt if on_right_half else clearance_pt
-        ha = "right" if on_right_half else "left"
-        label = f"{f['name'].title()} ({f['acres']:,.0f} ac)"
-        txt = ax.text(f["lon"], f["lat"], label, fontsize=8.0, fontproperties=poppins_semibold,
-                       color="#7a0e0a", ha=ha, va="center", zorder=51, clip_on=True,
-                       transform=offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points"))
-        txt.set_path_effects(fire_stroke)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
@@ -379,12 +459,12 @@ def build_map(fires, fetched_at, output_path):
     now_local = fetched_at.astimezone(LOCAL_TZ)
     fig.text(0.03, 0.978, f"{now_local.strftime('%A')} Active Wildfires", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.943, f"{len(fires)} fires • WildCAD-E, US dispatch centers only (not BC/AB)",
+    fig.text(0.03, 0.943, f"{len(fires)} fires • WildCAD-E (US) + BC Wildfire Service + Alberta Wildfire",
               fontsize=12.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
     fig.text(0.03, 0.914, f"Fetched {now_local.strftime('%Y-%m-%d %H:%M')} Pacific",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.012, "WildCAD-E — Ingalls Weather", fontsize=9,
+    fig.text(0.5, 0.012, "WildCAD-E, BC Wildfire Service, Alberta Wildfire — Ingalls Weather", fontsize=9,
               fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
