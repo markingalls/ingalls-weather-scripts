@@ -1,11 +1,13 @@
 # Current Wildfires Map
 
-A one-off map of currently active wildfires across the same domain as
+The canonical map of currently active wildfires across the same domain as
 [`../dew-point-storm-map/`](../dew-point-storm-map/) (Prince George BC to
 Winnemucca NV, Bella Coola BC to Yellowstone WY), merged from three
 government sources since none of them alone covers the whole domain:
 WildCAD-E (US dispatch centers), BC Wildfire Service, and Alberta
-Wildfire. Markers are sized (log scale, no name labels) by acreage.
+Wildfire. Markers are sized (log scale, no name labels) by acreage and
+colored by age (red if first reported within the last 24 hours, orange
+otherwise).
 
 ## Files
 

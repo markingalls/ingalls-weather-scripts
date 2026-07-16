@@ -1,5 +1,5 @@
 """
-Current Wildfires Map -- one-off builder
+Current Wildfires Map -- canonical map builder
 Ingalls Weather
 
 Same domain as ../dew-point-storm-map/ (Prince George BC to Winnemucca NV,
