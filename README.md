@@ -20,6 +20,9 @@ workflows. Each project lives in its own directory with its own README.
   meteogram of the WindBorne WM-6 ensemble spread for a pressure-level
   temperature at a point (defaults to KPSC / 850 mb), compared against
   long-term climatology.
+- [`columbia-basin-lightning-map/`](columbia-basin-lightning-map/) — the
+  last 24 hours of GLM lightning flashes over the Columbia Basin (same
+  domain as `columbia-basin-alerts-map/`), sourced from GOES-18.
 
 ## Shared resources
 

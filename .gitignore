@@ -49,3 +49,10 @@ columbia-basin-temps/output/*.png
 850-700-temp-chart/forecast.json
 850-700-temp-chart/climatology.json
 850-700-temp-chart/wm6_ensemble_spread*.png
+
+# --- columbia-basin-lightning-map ---
+# lightning_last24h.json is live data fetch_lightning.py regenerates every
+# run, and the rendered map image is an output too -- neither is source, so
+# don't track them.
+columbia-basin-lightning-map/lightning_last24h.json
+columbia-basin-lightning-map/columbia_basin_lightning*.png
