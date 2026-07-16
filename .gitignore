@@ -56,3 +56,10 @@ columbia-basin-temps/output/*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 dew-point-storm-map/output/*.npz
 dew-point-storm-map/output/*.png
+
+# --- wildcad-fires-map ---
+# build_map.py fetches live fire data; output/ only holds saved snapshots
+# for a --file override (testing / avoiding re-fetching), and the rendered
+# PNGs are outputs -- neither is source, so don't track them.
+wildcad-fires-map/output/*.json
+wildcad-fires-map/output/*.png
