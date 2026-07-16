@@ -113,12 +113,16 @@ POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 # ---------------------------------------------------------------------------
-# Figure geometry / map domain -- identical to ../dew-point-storm-map/
-# build_map.py, so the two products read as a matched pair.
+# Figure geometry / map domain -- same LON/LAT domain and axes box size
+# (in inches) as ../dew-point-storm-map/build_map.py, so the two products
+# read as a matched pair, but a shorter FIG_HEIGHT_IN/taller AXES_RECT
+# fraction: this map's bottom area only needs two compact legend rows, not
+# a colorbar with two tick axes, so it doesn't need as much room below the
+# map frame.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.4, 9.0
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.4, 8.5
 FIG_DPI = 200
-AXES_RECT = [0.03, 0.17, 0.94, 0.70]
+AXES_RECT = [0.03, 0.124, 0.94, 0.741]
 MAP_FRAME_INSET_PX = 22
 
 LON_MIN, LON_MAX = -128.2, -108.8
@@ -499,7 +503,7 @@ def build_map(fires, fetched_at, output_path):
     ]
     age_leg = fig.legend(handles=age_handles, loc="center", frameon=False, fontsize=8.75,
                           prop=poppins_reg, ncol=len(age_handles), handletextpad=0.6, columnspacing=1.4,
-                          bbox_to_anchor=(frame_center, 0.145))
+                          bbox_to_anchor=(frame_center, 0.100))
     for text in age_leg.get_texts():
         text.set_color("#2b2a26")
 
@@ -511,20 +515,20 @@ def build_map(fires, fetched_at, output_path):
     ]
     size_leg = fig.legend(handles=size_handles, loc="center", frameon=False, fontsize=8.75,
                            prop=poppins_reg, ncol=len(size_handles), handletextpad=0.6, columnspacing=1.4,
-                           bbox_to_anchor=(frame_center, 0.095))
+                           bbox_to_anchor=(frame_center, 0.059))
     for text in size_leg.get_texts():
         text.set_color("#2b2a26")
 
     # Title & subtitle above the map
     now_local = fetched_at.astimezone(LOCAL_TZ)
-    fig.text(0.03, 0.978, f"{now_local.strftime('%A')} Active Wildfires", fontsize=19,
+    fig.text(0.03, 0.977, f"{now_local.strftime('%A')} Active Wildfires", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.943, f"{len(fires)} fires • WildCAD-E (US) + BC Wildfire Service + Alberta Wildfire",
+    fig.text(0.03, 0.940, f"{len(fires)} fires • WildCAD-E (US) + BC Wildfire Service + Alberta Wildfire",
               fontsize=12.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
-    fig.text(0.03, 0.914, f"Fetched {now_local.strftime('%Y-%m-%d %H:%M')} Pacific",
+    fig.text(0.03, 0.909, f"Fetched {now_local.strftime('%Y-%m-%d %H:%M')} Pacific",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.012, "WildCAD-E, BC Wildfire Service, Alberta Wildfire — Ingalls Weather", fontsize=9,
+    fig.text(0.5, 0.014, "WildCAD-E, BC Wildfire Service, Alberta Wildfire — Ingalls Weather", fontsize=9,
               fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
