@@ -10,16 +10,19 @@ needed. GLM-L2-LCFA files are produced every 20 seconds (~4,320/day);
 flash centroid lat/lon/energy are already provided in each file, so no
 satellite-projection math is needed.
 """
-import io
+import argparse
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import boto3
 import netCDF4
 import numpy as np
 from botocore import UNSIGNED
 from botocore.config import Config
+
+PACIFIC = ZoneInfo("America/Los_Angeles")
 
 BUCKET = "noaa-goes18"  # GOES-18 is the current operational GOES-West satellite
 PRODUCT = "GLM-L2-LCFA"
@@ -97,9 +100,10 @@ def extract_flashes(key, blob):
     return records
 
 
-def fetch_last_24h():
+def fetch_last_24h(end=None):
     s3 = boto3.client("s3", config=Config(signature_version=UNSIGNED, max_pool_connections=32))
-    end = datetime.now(timezone.utc)
+    if end is None:
+        end = datetime.now(timezone.utc)
     start = end - timedelta(hours=LOOKBACK_HOURS)
 
     keys = list_keys_in_window(s3, start, end)
@@ -117,8 +121,26 @@ def fetch_last_24h():
     return records, start, end
 
 
+def parse_end_pt(value):
+    """Accepts 'HH:MM' (assumed to be today, Pacific time) or
+    'YYYY-MM-DD HH:MM' (Pacific time)."""
+    try:
+        naive = datetime.strptime(value, "%Y-%m-%d %H:%M")
+    except ValueError:
+        today_pt = datetime.now(PACIFIC).date()
+        naive = datetime.combine(today_pt, datetime.strptime(value, "%H:%M").time())
+    return naive.replace(tzinfo=PACIFIC)
+
+
 if __name__ == "__main__":
-    records, start, end = fetch_last_24h()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--end-pt",
+                         help="End of the 24-hour lookback window, Pacific time -- "
+                              "'HH:MM' (today) or 'YYYY-MM-DD HH:MM'. Defaults to now.")
+    args = parser.parse_args()
+
+    end = parse_end_pt(args.end_pt).astimezone(timezone.utc) if args.end_pt else None
+    records, start, end = fetch_last_24h(end=end)
     print(f"Flashes within the Columbia Basin domain: {len(records)}")
     out = {
         "window_start": start.isoformat(),

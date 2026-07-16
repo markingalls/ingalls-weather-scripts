@@ -31,9 +31,11 @@ Run from inside this directory (paths to `../maps/` and `../assets/` are
 relative to it):
 
 ```bash
-bash setup.sh                 # first time / fresh environment only
-python3 fetch_lightning.py    # pull the last 24h of GLM flashes
-python3 build_map.py          # render columbia_basin_lightning.png
+bash setup.sh                        # first time / fresh environment only
+python3 fetch_lightning.py           # pull the 24h of GLM flashes ending now
+python3 fetch_lightning.py --end-pt "14:00"               # ... ending 14:00 PT today
+python3 fetch_lightning.py --end-pt "2026-07-16 14:00"    # ... ending 14:00 PT on a given date
+python3 build_map.py                 # render columbia_basin_lightning.png
 ```
 
 ## Notes
