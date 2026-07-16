@@ -21,8 +21,9 @@ workflows. Each project lives in its own directory with its own README.
   temperature at a point (defaults to KPSC / 850 mb), compared against
   long-term climatology.
 - [`columbia-basin-lightning-map/`](columbia-basin-lightning-map/) — the
-  last 24 hours of GLM lightning flashes over the Columbia Basin (same
-  domain as `columbia-basin-alerts-map/`), sourced from GOES-18.
+  canonical Columbia Basin lightning map (same domain as
+  `columbia-basin-alerts-map/`): the last 24 hours of GLM flash detections,
+  sourced from GOES-18.
 
 ## Shared resources
 

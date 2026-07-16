@@ -1,7 +1,7 @@
 # Columbia Basin GLM Lightning Map
 
-Generates a styled map of the last 24 hours of lightning flashes across
-the Columbia Basin (same domain as
+The canonical Columbia Basin lightning map: a styled map of the last 24
+hours of lightning flashes across the Columbia Basin (same domain as
 [`../columbia-basin-alerts-map/`](../columbia-basin-alerts-map/) and
 [`../columbia-basin-temps/`](../columbia-basin-temps/): North Bend, WA
 down to the Baker City, OR corridor), sourced from the GLM (Geostationary
