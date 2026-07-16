@@ -208,9 +208,9 @@ else:
 # ---------- title / subtitle ----------
 subtitle_y = top_y + 0.018
 title_y = subtitle_y + 0.035
-fig.text(left_x, title_y, "Columbia Basin: GOES-18 GLM Lightning (Last 24 Hours)",
+fig.text(left_x, title_y, "Columbia Basin: Lightning (Last 24 Hours)",
           fontproperties=f_bold, fontsize=22, color="#2b2a26")
-subtitle = (f"{len(flashes):,} flashes detected — "
+subtitle = (f"{len(flashes):,} flashes detected — GOES-18 GLM, "
             f"{window_end.strftime('%b %d %H:%M UTC')} lookback")
 fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 
