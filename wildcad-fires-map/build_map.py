@@ -211,6 +211,14 @@ def marker_size_pts2(acres):
 
 SIZE_LEGEND_ACRES = [1, 25, 500, 5000]
 
+# ---------------------------------------------------------------------------
+# Age coloring -- red for a fire first reported within NEW_FIRE_HOURS,
+# orange otherwise (including unknown age -- see fetch_all_fires callers).
+# ---------------------------------------------------------------------------
+NEW_FIRE_HOURS = 24.0
+NEW_COLOR, NEW_EDGE = "#e6231e", "#7a0e0a"
+EXISTING_COLOR, EXISTING_EDGE = "#f2892b", "#8a4b0a"
+
 
 def load_land():
     with open(LAND_FILE) as f:
@@ -293,16 +301,28 @@ def fetch_wildcad_fires(lookback_days, now):
                 acres = float(rec["acres"]) if rec.get("acres") not in (None, "") else None
             except (TypeError, ValueError):
                 acres = None
+            # rec["date"] is the incident's initial report timestamp (it's
+            # what fromDate/toDate filter on), naive with no offset -- WildCAD
+            # dispatch centers log in local (Pacific/Mountain) time, not UTC,
+            # so treating it as UTC here is off by a few hours. Acceptable
+            # imprecision for a coarse 24-hour new-vs-existing bucket.
+            age_hours = None
+            if rec.get("date"):
+                try:
+                    ignition = datetime.fromisoformat(rec["date"]).replace(tzinfo=timezone.utc)
+                    age_hours = (now - ignition).total_seconds() / 3600
+                except ValueError:
+                    pass
             key = "WC:" + (rec.get("inc_num") or rec.get("uuid") or "")
             by_key[key] = {
                 "name": (rec.get("name") or "UNNAMED").strip(),
                 "lat": lat, "lon": lon, "acres": acres,
-                "date": rec.get("date"), "source": dc,
+                "age_hours": age_hours, "source": dc,
             }
     return by_key
 
 
-def fetch_bc_fires():
+def fetch_bc_fires(now):
     """BC Wildfire Service's public 'Fire Locations - Current' layer --
     every fire this season, active or not, so filtered here to
     FIRE_STATUS != 'Out' (see module docstring for why that's a looser
@@ -312,7 +332,8 @@ def fetch_bc_fires():
     try:
         resp = requests.get(BC_FIRES_URL, params={
             "where": "1=1",
-            "outFields": "FIRE_ID,FIRE_STATUS,LATITUDE,LONGITUDE,CURRENT_SIZE,INCIDENT_NAME,GEOGRAPHIC_DESCRIPTION",
+            "outFields": "FIRE_ID,FIRE_STATUS,LATITUDE,LONGITUDE,CURRENT_SIZE,"
+                          "INCIDENT_NAME,GEOGRAPHIC_DESCRIPTION,IGNITION_DATE",
             "f": "geojson",
         }, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
         resp.raise_for_status()
@@ -333,14 +354,19 @@ def fetch_bc_fires():
             continue
         acres = p["CURRENT_SIZE"] * HECTARES_TO_ACRES if p.get("CURRENT_SIZE") is not None else None
         name = p.get("INCIDENT_NAME") or p.get("GEOGRAPHIC_DESCRIPTION") or "UNNAMED"
+        # IGNITION_DATE is epoch milliseconds UTC (standard Esri date field).
+        age_hours = None
+        if p.get("IGNITION_DATE") is not None:
+            ignition = datetime.fromtimestamp(p["IGNITION_DATE"] / 1000, tz=timezone.utc)
+            age_hours = (now - ignition).total_seconds() / 3600
         by_key[f"BC:{p.get('FIRE_ID')}"] = {
             "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
-            "date": None, "source": "BCWS",
+            "age_hours": age_hours, "source": "BCWS",
         }
     return by_key
 
 
-def fetch_ab_fires():
+def fetch_ab_fires(now):
     """Alberta Wildfire's public 'wildfire_location_active' layer -- already
     curated to active fires only, so no extra status filtering here."""
     print("Fetching Alberta Wildfire ...")
@@ -348,7 +374,7 @@ def fetch_ab_fires():
     try:
         resp = requests.get(AB_FIRES_URL, params={
             "where": "1=1",
-            "outFields": "FIRE_NUMBER,LATITUDE,LONGITUDE,AREA_ESTIMATE,LABEL",
+            "outFields": "FIRE_NUMBER,LATITUDE,LONGITUDE,AREA_ESTIMATE,LABEL,FIRE_STATUS_DATE",
             "f": "geojson",
         }, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
         resp.raise_for_status()
@@ -367,9 +393,24 @@ def fetch_ab_fires():
             continue
         acres = p["AREA_ESTIMATE"] * HECTARES_TO_ACRES if p.get("AREA_ESTIMATE") is not None else None
         name = p.get("FIRE_NUMBER") or p.get("LABEL") or "UNNAMED"
+        # Alberta's service exposes no true ignition/discovery date field --
+        # FIRE_STATUS_DATE (last status change, "YYYY/MM/DD HH:MM:SS", no
+        # offset -- treated as UTC here, actually Alberta local time, so off
+        # by a few hours) is the best available proxy. For a genuinely new
+        # fire this is usually close to its actual start time since the
+        # first status is set on initial report; for an old fire that just
+        # had a status change, it can understate age. Documented caveat, not
+        # correctable without a better field.
+        age_hours = None
+        if p.get("FIRE_STATUS_DATE"):
+            try:
+                status_dt = datetime.strptime(p["FIRE_STATUS_DATE"], "%Y/%m/%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                age_hours = (now - status_dt).total_seconds() / 3600
+            except ValueError:
+                pass
         by_key[f"AB:{p.get('FIRE_NUMBER')}"] = {
             "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
-            "date": None, "source": "ABWildfire",
+            "age_hours": age_hours, "source": "ABWildfire",
         }
     return by_key
 
@@ -378,8 +419,8 @@ def fetch_all_fires(lookback_days):
     now = datetime.now(timezone.utc)
     by_key = {}
     by_key.update(fetch_wildcad_fires(lookback_days, now))
-    by_key.update(fetch_bc_fires())
-    by_key.update(fetch_ab_fires())
+    by_key.update(fetch_bc_fires(now))
+    by_key.update(fetch_ab_fires(now))
 
     fires = sorted(by_key.values(), key=lambda f: -(f["acres"] or 0))
     print(f"{len(fires)} active wildfires in domain after filtering/dedup.")
@@ -428,31 +469,50 @@ def build_map(fires, fetched_at, output_path):
     # a big one's marker. No name labels -- with ~300+ fires active across
     # this domain in a typical mid-season snapshot, any label-density
     # threshold worth using still reads as clutter; the size/color alone
-    # (plus the acreage legend) carries the useful signal.
+    # (plus the legends) carries the useful signal. Color flags age: red
+    # for a fire first reported within the last NEW_FIRE_HOURS, orange for
+    # everything else, including any fire whose age can't be determined
+    # (safer default than implying "new" on missing data).
     fires_by_size = sorted(fires, key=lambda f: -(f["acres"] or 0))
     for f in fires_by_size:
         size = marker_size_pts2(f["acres"])
-        ax.scatter(f["lon"], f["lat"], s=size, color="#e6231e", edgecolor="#7a0e0a",
+        is_new = f["age_hours"] is not None and f["age_hours"] <= NEW_FIRE_HOURS
+        color, edge = (NEW_COLOR, NEW_EDGE) if is_new else (EXISTING_COLOR, EXISTING_EDGE)
+        ax.scatter(f["lon"], f["lat"], s=size, color=color, edgecolor=edge,
                    linewidth=0.7, alpha=0.85, zorder=50, transform=pc)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
 
-    # Size legend -- below the map, matching bubble scale to marker_size_pts2.
+    # Legends -- below the map: age/color on top, size/acreage below it.
     fig.canvas.draw()
     frame_px = ax.get_window_extent()
     frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
     frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
-    legend_handles = [
-        Line2D([0], [0], marker="o", linestyle="none", color="#e6231e", markeredgecolor="#7a0e0a",
+    frame_center = (frame_left + frame_right) / 2
+
+    age_handles = [
+        Line2D([0], [0], marker="o", linestyle="none", color=NEW_COLOR, markeredgecolor=NEW_EDGE,
+               markeredgewidth=0.7, alpha=0.85, markersize=7, label=f"New (<{NEW_FIRE_HOURS:.0f}h)"),
+        Line2D([0], [0], marker="o", linestyle="none", color=EXISTING_COLOR, markeredgecolor=EXISTING_EDGE,
+               markeredgewidth=0.7, alpha=0.85, markersize=7, label="Existing"),
+    ]
+    age_leg = fig.legend(handles=age_handles, loc="center", frameon=False, fontsize=8.75,
+                          prop=poppins_reg, ncol=len(age_handles), handletextpad=0.6, columnspacing=1.4,
+                          bbox_to_anchor=(frame_center, 0.145))
+    for text in age_leg.get_texts():
+        text.set_color("#2b2a26")
+
+    size_handles = [
+        Line2D([0], [0], marker="o", linestyle="none", color=EXISTING_COLOR, markeredgecolor=EXISTING_EDGE,
                markeredgewidth=0.7, alpha=0.85, markersize=np.sqrt(marker_size_pts2(a)),
                label=f"{a:,} ac")
         for a in SIZE_LEGEND_ACRES
     ]
-    leg = fig.legend(handles=legend_handles, loc="center", frameon=False, fontsize=8.75,
-                      prop=poppins_reg, ncol=len(legend_handles), handletextpad=0.6, columnspacing=1.4,
-                      bbox_to_anchor=((frame_left + frame_right) / 2, 0.115))
-    for text in leg.get_texts():
+    size_leg = fig.legend(handles=size_handles, loc="center", frameon=False, fontsize=8.75,
+                           prop=poppins_reg, ncol=len(size_handles), handletextpad=0.6, columnspacing=1.4,
+                           bbox_to_anchor=(frame_center, 0.095))
+    for text in size_leg.get_texts():
         text.set_color("#2b2a26")
 
     # Title & subtitle above the map

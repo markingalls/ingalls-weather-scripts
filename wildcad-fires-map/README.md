@@ -91,7 +91,10 @@ data sources ("wildfire_location_active"):
 This layer is already curated to active fires only (its name says so, and
 querying it shows no `Out`-equivalent status among its handful of current
 records), so no extra activity filtering is applied. Size
-(`AREA_ESTIMATE`) is in hectares, converted the same way as BC's.
+(`AREA_ESTIMATE`) is in hectares, converted the same way as BC's. It also
+exposes no true ignition/discovery date field -- `FIRE_STATUS_DATE` (last
+status change) is used as the age proxy instead (see "Age coloring"
+below), a known imperfection.
 
 ### Merging
 
@@ -104,9 +107,24 @@ with each other, then flattened and sorted by acreage.
 - **Marker sizing**: area (not radius) scales log-scale with acres, since
   fire size spans several orders of magnitude (0.1 to 10,000+ acres) in
   the combined dataset -- `marker_size_pts2()`.
+- **Age coloring**: red if a fire was first reported within
+  `NEW_FIRE_HOURS` (24 by default), orange otherwise -- including any fire
+  whose age can't be determined, a safer default than implying "new" on
+  missing data (in practice this never happens: every source currently
+  supplies *some* date field). Each source's notion of "first reported"
+  differs in reliability:
+  - WildCAD: the incident's initial-report timestamp. It's naive (no UTC
+    offset) and dispatch centers log in local time, not UTC -- treated as
+    UTC here, so up to ~7 hours off depending on the center's time zone.
+  - BC: `IGNITION_DATE`, a real Esri epoch-ms field -- exact.
+  - Alberta: no true ignition field exists in the public service, so
+    `FIRE_STATUS_DATE` (last status change) stands in. For a genuinely new
+    fire this is usually close to its actual start (the first status is
+    set on initial report); for an old fire that just had a status
+    change, it can understate age and wrongly read as "new."
 - **No name labels.** With 300+ active fires typically on the map at once,
   no label-density threshold reads as anything but clutter -- size/color
-  plus the acreage legend carries the useful signal instead.
+  plus the legends carry the useful signal instead.
 - **Ocean** is shaded a flat pastel blue (`ax.patch`, since land geometries
   are drawn on top and don't cover water) rather than left the neutral
   basemap tone the rest of this repo's scripts use, since there's no
