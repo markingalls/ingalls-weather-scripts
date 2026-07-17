@@ -55,8 +55,9 @@ python3 build_chart.py
 - **Y-axis** is fixed to `0 .. max(all series) * 1.25` (with a 10 µg/m³
   floor so a quiet/smoke-free run doesn't get visually amplified into
   noise), not autoscaled tightly to the data.
-- **Layering** (back to front): per-location shading, then gridlines, then
-  the lines on top.
+- **X-axis** is rendered in Pacific time (`America/Los_Angeles`, so it
+  follows PDT/PST automatically), even though the run itself is fetched
+  and labeled by init time in UTC/z per meteorological convention.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `850-700-temp-chart/build_chart.py` -- edit `build_chart.py` directly to
   adjust. Reuses that project's same two accents (forest green `#164f29`

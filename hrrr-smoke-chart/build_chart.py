@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import matplotlib
 matplotlib.use("Agg")
@@ -27,11 +28,11 @@ AXIS_COLOR = "#000000"
 # (the logo's pine tree) for the first location, climatology orange for
 # the second, so a multi-line chart still reads as this brand's palette.
 LINE_COLORS = ["#164f29", "#c9531c"]
-FILL_ALPHA = 0.14
 
-Z_SHADING = 1
 Z_GRID = 2
 Z_LINE = 3
+
+PACIFIC = ZoneInfo("America/Los_Angeles")
 
 
 def parse_args():
@@ -62,7 +63,6 @@ def main():
     for i, loc in enumerate(locations):
         color = LINE_COLORS[i % len(LINE_COLORS)]
         vals = series[loc["label"]]
-        ax.fill_between(times, 0, vals, color=color, alpha=FILL_ALPHA, linewidth=0, zorder=Z_SHADING)
         ax.plot(times, vals, color=color, linewidth=2.4, zorder=Z_LINE, label=loc["label"])
 
     ax.set_ylim(0, y_max)
@@ -77,8 +77,8 @@ def main():
         ax.spines[spine].set_color(AXIS_COLOR)
         ax.spines[spine].set_linewidth(1.0)
 
-    ax.xaxis.set_major_locator(mdates.HourLocator(interval=6))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%-d %Hz"))
+    ax.xaxis.set_major_locator(mdates.HourLocator(interval=6, tz=PACIFIC))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%-m/%-d %-I%p", tz=PACIFIC))
     ax.set_xlim(times[0], times[-1])
     ax.tick_params(axis="both", colors=AXIS_COLOR, labelsize=10, length=4)
     for tick in ax.get_xticklabels():
@@ -131,11 +131,10 @@ def main():
     # ---------- title / subtitle ----------
     subtitle_y = top_y + 0.058
     title_y = subtitle_y + 0.035
-    loc_names = " & ".join(loc["label"].split(",")[0] for loc in locations)
-    title = f"Near-Surface Smoke: {loc_names}"
+    title = "Near-Surface Smoke"
     fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     subtitle = (f"NOAA HRRR Init {init_time.strftime('%Y-%m-%d')} {init_time.strftime('%H')}z"
-                f" • 48-hour forecast")
+                f" • 48-hour forecast • Times Pacific")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
