@@ -28,8 +28,9 @@ AXIS_COLOR = "#000000"
 # Same two accents as ../850-700-temp-chart/build_chart.py: forest green
 # (the logo's pine tree) for the first location, climatology orange for
 # the second, so a multi-line chart still reads as this brand's palette.
-# Both lines get a white halo (see LINE_HALO below) since they now sit on
-# top of colored AQI bands, some of which are close in hue to these two.
+# Both lines always get a white halo since the plot area is always shaded
+# (AQI bands or the NOAA smoke-concentration scale below), some of which
+# are close in hue to these two.
 LINE_COLORS = ["#164f29", "#c9531c"]
 LINE_HALO = [pe.withStroke(linewidth=4, foreground="white")]
 
@@ -41,8 +42,12 @@ Z_BAND_LABEL = 4
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
 # --variable choices: smoke.json key, chart title, raw-units y-label, whether
-# AQI is a meaningful transform for this field, and a floor for the raw
-# y-axis so a quiet run doesn't get visually amplified into noise.
+# AQI is a meaningful transform for this field, a floor for the raw y-axis
+# so a quiet run doesn't get visually amplified into noise, and the raw-mode
+# concentration bins (left edges; see NOAA_SMOKE_COLORS below), lifted
+# directly off the legends of NOAA's own HRRR-Smoke graphics at
+# rapidrefresh.noaa.gov/hrrr/HRRRsmoke/ -- near-surface in ug/m3, column in
+# mg/m2 (matching the units NOAA plots each field in).
 VARIABLES = {
     "near_surface": {
         "key": "near_surface_smoke",
@@ -50,15 +55,26 @@ VARIABLES = {
         "raw_ylabel": "Near-Surface Smoke (µg/m³)",
         "supports_aqi": True,
         "raw_floor": 10.0,
+        "raw_bins": [1, 2, 4, 6, 8, 12, 16, 20, 25, 30, 40, 60, 100, 200],
     },
     "column": {
         "key": "vertically_integrated_smoke",
         "title": "Vertically Integrated Smoke",
-        "raw_ylabel": "Vertically Integrated Smoke (µg/m²)",
+        "raw_ylabel": "Vertically Integrated Smoke (mg/m²)",
         "supports_aqi": False,
-        "raw_floor": 5000.0,
+        "raw_floor": 20.0,
+        "raw_bins": [1, 4, 7, 11, 15, 20, 25, 30, 40, 50, 75, 150, 250, 500],
     },
 }
+
+# NOAA's HRRR-Smoke color scale (13 bins + an unbounded top arrow), sampled
+# directly off the legend swatches of their published graphics. Values below
+# the first bin's edge (1) are left unshaded, same as NOAA's own maps.
+NOAA_SMOKE_COLORS = [
+    "#d0e1f2", "#94c4df", "#4a98c9", "#1764ab", "#0f8446", "#54b45f", "#a2d76a",
+    "#fff6b0", "#fcaa5f", "#f7844e", "#ed5f3c", "#c21c27", "#a50026",
+]
+NOAA_SMOKE_OVERFLOW = "#9900fa"
 
 # EPA AQI breakpoints for PM2.5 (24-hr, ug/m3), per the May 2024 revised
 # table. HRRR's near-surface smoke field is a smoke mass density, not a
@@ -124,11 +140,12 @@ def main():
     ax = fig.add_axes([0.075, 0.14, 0.87, 0.65])
     ax.set_facecolor("white")
 
-    # ---------- AQI category bands, back to front (near-surface + aqi only) ----------
+    # ---------- background shading, back to front ----------
     if use_aqi:
-        # Drawn edge-to-edge (next band's aqi_lo, not this band's own aqi_hi)
-        # so the 1-point gaps baked into the official breakpoints (e.g. 50
-        # vs. 51) don't show up as stray white seams between bands.
+        # AQI category bands. Drawn edge-to-edge (next band's aqi_lo, not
+        # this band's own aqi_hi) so the 1-point gaps baked into the
+        # official breakpoints (e.g. 50 vs. 51) don't show up as stray
+        # white seams between bands.
         for i, (conc_lo, conc_hi, aqi_lo, aqi_hi, label, color) in enumerate(AQI_BREAKPOINTS):
             if aqi_lo > y_max:
                 break
@@ -143,12 +160,27 @@ def main():
                      fontproperties=f_med, fontsize=9, color=INK, alpha=0.8,
                      path_effects=[pe.withStroke(linewidth=2.5, foreground="white")],
                      zorder=Z_BAND_LABEL)
+    else:
+        # NOAA's own HRRR-Smoke concentration scale. Unlabeled -- 13 bins is
+        # too fine-grained to direct-label without cluttering a time series
+        # (NOAA's own maps only label the separate colorbar legend, not the
+        # shaded field itself), so this is just a light gradient for context.
+        bins = meta["raw_bins"]
+        for i in range(len(bins) - 1):
+            lo, hi = bins[i], bins[i + 1]
+            if lo > y_max:
+                break
+            ax.axhspan(lo, min(hi, y_max), color=NOAA_SMOKE_COLORS[i], alpha=0.4,
+                       linewidth=0, zorder=Z_BANDS, antialiased=False)
+        if bins[-1] <= y_max:
+            ax.axhspan(bins[-1], y_max, color=NOAA_SMOKE_OVERFLOW, alpha=0.4,
+                       linewidth=0, zorder=Z_BANDS, antialiased=False)
 
     for i, loc in enumerate(locations):
         color = LINE_COLORS[i % len(LINE_COLORS)]
         vals = series[loc["label"]]
         ax.plot(times, vals, color=color, linewidth=2.4, zorder=Z_LINE,
-                 path_effects=LINE_HALO if use_aqi else None, label=loc["label"])
+                 path_effects=LINE_HALO, label=loc["label"])
 
     ax.set_ylim(0, y_max)
 

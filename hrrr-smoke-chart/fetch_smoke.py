@@ -7,7 +7,8 @@ time you want the chart to reflect the latest run.
 Pulls both smoke fields HRRR publishes, so a single fetch covers every
 build_chart.py --variable/--units combination:
   - near_surface_smoke      MASSDEN @ 8 m above ground, kg/m^3 -> ug/m3
-  - vertically_integrated_smoke   COLMD @ entire atmosphere, kg/m^2 -> ug/m2
+  - vertically_integrated_smoke   COLMD @ entire atmosphere, kg/m^2 -> mg/m2
+  (units match what NOAA's own HRRR-Smoke graphics use for each field)
 
 No API key needed -- pulls HRRR's own free GRIB2 distribution directly
 (NOAA's AWS Open Data bucket, falling back to NOMADS) via Herbie, one
@@ -27,7 +28,7 @@ from herbie import Herbie
 # search string -> (variable key, output units, kg -> output-unit multiplier)
 FIELDS = {
     "MASSDEN:8 m above ground": ("near_surface_smoke", "ug/m3", 1e9),
-    "COLMD:entire atmosphere": ("vertically_integrated_smoke", "ug/m2", 1e9),
+    "COLMD:entire atmosphere": ("vertically_integrated_smoke", "mg/m2", 1e6),
 }
 MAX_FORECAST_HOUR = 48
 
