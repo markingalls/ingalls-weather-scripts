@@ -1,13 +1,17 @@
 """
-Fetches NOAA HRRR near-surface smoke (mass density at 8 m above ground,
-converted from kg/m^3 to ug/m3) for one or more points, across a full
-00/06/12/18z HRRR cycle (the only cycles that run out to 48h -- the other
-hourly cycles stop at 18h), and writes smoke.json. Run this before
-build_chart.py any time you want the chart to reflect the latest run.
+Fetches NOAA HRRR smoke for one or more points, across a full 00/06/12/18z
+HRRR cycle (the only cycles that run out to 48h -- the other hourly cycles
+stop at 18h), and writes smoke.json. Run this before build_chart.py any
+time you want the chart to reflect the latest run.
+
+Pulls both smoke fields HRRR publishes, so a single fetch covers every
+build_chart.py --variable/--units combination:
+  - near_surface_smoke      MASSDEN @ 8 m above ground, kg/m^3 -> ug/m3
+  - vertically_integrated_smoke   COLMD @ entire atmosphere, kg/m^2 -> ug/m2
 
 No API key needed -- pulls HRRR's own free GRIB2 distribution directly
 (NOAA's AWS Open Data bucket, falling back to NOMADS) via Herbie, one
-byte-range subset request per forecast hour.
+byte-range subset request per field per forecast hour.
 """
 import argparse
 import json
@@ -20,7 +24,11 @@ warnings.filterwarnings("ignore", message="In a future version of xarray.*compat
 import numpy as np
 from herbie import Herbie
 
-SMOKE_SEARCH = "MASSDEN:8 m above ground"
+# search string -> (variable key, output units, kg -> output-unit multiplier)
+FIELDS = {
+    "MASSDEN:8 m above ground": ("near_surface_smoke", "ug/m3", 1e9),
+    "COLMD:entire atmosphere": ("vertically_integrated_smoke", "ug/m2", 1e9),
+}
 MAX_FORECAST_HOUR = 48
 
 # Default points
@@ -51,28 +59,31 @@ def nearest_index(lat_grid, lon_grid, lat_pt, lon_pt):
 
 def fetch(locations, run_init):
     times = []
-    series = {loc["label"]: [] for loc in locations}
+    variables = {var_key: {"units": units, "series": {loc["label"]: [] for loc in locations}}
+                 for var_key, units, _ in FIELDS.values()}
     indices = None
 
     for fxx in range(0, MAX_FORECAST_HOUR + 1):
-        print(f"Fetching HRRR {run_init:%Y-%m-%d %H}z F{fxx:02d} ...")
-        ds = Herbie(run_init.replace(tzinfo=None), model="hrrr", product="sfc",
-                    fxx=fxx, verbose=False).xarray(SMOKE_SEARCH)
-
-        if indices is None:
-            lat_grid = ds.latitude.values
-            lon_grid = np.where(ds.longitude.values > 180, ds.longitude.values - 360, ds.longitude.values)
-            indices = {loc["label"]: nearest_index(lat_grid, lon_grid, loc["lat"], loc["lon"])
-                       for loc in locations}
-
-        values_kgm3 = ds["unknown"].values
         valid_time = run_init + timedelta(hours=fxx)
         times.append(valid_time.strftime("%Y-%m-%dT%H:%M:%SZ"))
-        for loc in locations:
-            ug_m3 = float(values_kgm3[indices[loc["label"]]]) * 1e9
-            series[loc["label"]].append(ug_m3)
 
-    return times, series
+        for search, (var_key, units, scale) in FIELDS.items():
+            print(f"Fetching HRRR {run_init:%Y-%m-%d %H}z F{fxx:02d} -- {var_key} ...")
+            ds = Herbie(run_init.replace(tzinfo=None), model="hrrr", product="sfc",
+                        fxx=fxx, verbose=False).xarray(search)
+
+            if indices is None:
+                lat_grid = ds.latitude.values
+                lon_grid = np.where(ds.longitude.values > 180, ds.longitude.values - 360, ds.longitude.values)
+                indices = {loc["label"]: nearest_index(lat_grid, lon_grid, loc["lat"], loc["lon"])
+                           for loc in locations}
+
+            values = ds["unknown"].values
+            for loc in locations:
+                variables[var_key]["series"][loc["label"]].append(
+                    float(values[indices[loc["label"]]]) * scale)
+
+    return times, variables
 
 
 if __name__ == "__main__":
@@ -88,18 +99,16 @@ if __name__ == "__main__":
     run_init = select_latest_48h_run()
     print(f"Using HRRR {run_init:%Y-%m-%d %H}z (most recent complete 48h run)")
 
-    times, series = fetch(locations, run_init)
+    times, variables = fetch(locations, run_init)
 
     data = {
         "initialization_time": run_init.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "variable": "near_surface_smoke",
-        "units": "ug/m3",
         "locations": locations,
         "times": times,
-        "series": series,
+        "variables": variables,
     }
     with open(args.output, "w") as f:
         json.dump(data, f)
 
-    print(f"Saved {args.output}: {len(times)} timesteps for {len(locations)} location(s) "
-          f"(init {data['initialization_time']})")
+    print(f"Saved {args.output}: {len(times)} timesteps x {len(variables)} variable(s) "
+          f"for {len(locations)} location(s) (init {data['initialization_time']})")

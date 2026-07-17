@@ -54,4 +54,4 @@ columbia-basin-temps/output/*.png
 # smoke.json is live data fetch_smoke.py regenerates every run, and the
 # rendered chart is an output too -- neither is source, so don't track them.
 hrrr-smoke-chart/smoke.json
-hrrr-smoke-chart/hrrr_near_surface_smoke*.png
+hrrr-smoke-chart/hrrr_*_smoke_*.png

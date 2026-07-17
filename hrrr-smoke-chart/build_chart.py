@@ -40,6 +40,26 @@ Z_BAND_LABEL = 4
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
+# --variable choices: smoke.json key, chart title, raw-units y-label, whether
+# AQI is a meaningful transform for this field, and a floor for the raw
+# y-axis so a quiet run doesn't get visually amplified into noise.
+VARIABLES = {
+    "near_surface": {
+        "key": "near_surface_smoke",
+        "title": "Near-Surface Smoke",
+        "raw_ylabel": "Near-Surface Smoke (µg/m³)",
+        "supports_aqi": True,
+        "raw_floor": 10.0,
+    },
+    "column": {
+        "key": "vertically_integrated_smoke",
+        "title": "Vertically Integrated Smoke",
+        "raw_ylabel": "Vertically Integrated Smoke (µg/m²)",
+        "supports_aqi": False,
+        "raw_floor": 5000.0,
+    },
+}
+
 # EPA AQI breakpoints for PM2.5 (24-hr, ug/m3), per the May 2024 revised
 # table. HRRR's near-surface smoke field is a smoke mass density, not a
 # regulatory PM2.5 measurement -- treating it as PM2.5 to derive an AQI is
@@ -68,23 +88,35 @@ def pm25_to_aqi(conc_ugm3):
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Render the HRRR near-surface smoke chart.")
+    ap = argparse.ArgumentParser(description="Render an HRRR smoke chart.")
     ap.add_argument("--data", default="smoke.json")
-    ap.add_argument("--output", default="hrrr_near_surface_smoke.png")
+    ap.add_argument("--variable", choices=list(VARIABLES), default="near_surface",
+                     help="near_surface = MASSDEN @ 8m; column = vertically integrated smoke")
+    ap.add_argument("--units", choices=["aqi", "raw"], default="aqi",
+                     help="aqi only applies to --variable near_surface; column is always raw")
+    ap.add_argument("--output", default=None,
+                     help="defaults to hrrr_<variable>_smoke_<units>.png")
     return ap.parse_args()
 
 
 def main():
     args = parse_args()
+    meta = VARIABLES[args.variable]
+    use_aqi = args.units == "aqi" and meta["supports_aqi"]
+    if args.units == "aqi" and not meta["supports_aqi"]:
+        print(f"NOTE: --variable {args.variable} has no AQI equivalent -- rendering raw units instead.")
+
     data = json.load(open(args.data))
 
     times = [datetime.fromisoformat(t.replace("Z", "+00:00")) for t in data["times"]]
     init_time = datetime.fromisoformat(data["initialization_time"].replace("Z", "+00:00"))
     locations = data["locations"]
-    series = {label: [pm25_to_aqi(v) for v in vals] for label, vals in data["series"].items()}
+    raw_series = data["variables"][meta["key"]]["series"]
+    series = ({label: [pm25_to_aqi(v) for v in vals] for label, vals in raw_series.items()}
+              if use_aqi else raw_series)
 
     all_values = [v for vals in series.values() for v in vals]
-    y_max = max(max(all_values) * 1.25, 100.0)
+    y_max = max(max(all_values) * 1.25, 100.0 if use_aqi else meta["raw_floor"])
 
     # ---------- figure (same footprint as the alerts map / temp chart) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
@@ -92,35 +124,37 @@ def main():
     ax = fig.add_axes([0.075, 0.14, 0.87, 0.65])
     ax.set_facecolor("white")
 
-    # ---------- AQI category bands, back to front ----------
-    # Drawn edge-to-edge (next band's aqi_lo, not this band's own aqi_hi) so
-    # the 1-point gaps baked into the official breakpoints (e.g. 50 vs. 51)
-    # don't show up as stray white seams between bands.
-    for i, (conc_lo, conc_hi, aqi_lo, aqi_hi, label, color) in enumerate(AQI_BREAKPOINTS):
-        if aqi_lo > y_max:
-            break
-        draw_top = AQI_BREAKPOINTS[i + 1][2] if i + 1 < len(AQI_BREAKPOINTS) else aqi_hi
-        ax.axhspan(aqi_lo, draw_top, color=color, alpha=0.35, linewidth=0, zorder=Z_BANDS,
-                   antialiased=False)
-        band_top = min(aqi_hi, y_max)
-        if band_top - aqi_lo < 0.06 * y_max:
-            continue  # band sliver too thin at this scale to carry a label
-        ax.text(0.985, (aqi_lo + band_top) / 2, label, ha="right", va="center",
-                 transform=ax.get_yaxis_transform(),
-                 fontproperties=f_med, fontsize=9, color=INK, alpha=0.8,
-                 path_effects=[pe.withStroke(linewidth=2.5, foreground="white")],
-                 zorder=Z_BAND_LABEL)
+    # ---------- AQI category bands, back to front (near-surface + aqi only) ----------
+    if use_aqi:
+        # Drawn edge-to-edge (next band's aqi_lo, not this band's own aqi_hi)
+        # so the 1-point gaps baked into the official breakpoints (e.g. 50
+        # vs. 51) don't show up as stray white seams between bands.
+        for i, (conc_lo, conc_hi, aqi_lo, aqi_hi, label, color) in enumerate(AQI_BREAKPOINTS):
+            if aqi_lo > y_max:
+                break
+            draw_top = AQI_BREAKPOINTS[i + 1][2] if i + 1 < len(AQI_BREAKPOINTS) else aqi_hi
+            ax.axhspan(aqi_lo, draw_top, color=color, alpha=0.35, linewidth=0, zorder=Z_BANDS,
+                       antialiased=False)
+            band_top = min(aqi_hi, y_max)
+            if band_top - aqi_lo < 0.06 * y_max:
+                continue  # band sliver too thin at this scale to carry a label
+            ax.text(0.985, (aqi_lo + band_top) / 2, label, ha="right", va="center",
+                     transform=ax.get_yaxis_transform(),
+                     fontproperties=f_med, fontsize=9, color=INK, alpha=0.8,
+                     path_effects=[pe.withStroke(linewidth=2.5, foreground="white")],
+                     zorder=Z_BAND_LABEL)
 
     for i, loc in enumerate(locations):
         color = LINE_COLORS[i % len(LINE_COLORS)]
         vals = series[loc["label"]]
         ax.plot(times, vals, color=color, linewidth=2.4, zorder=Z_LINE,
-                 path_effects=LINE_HALO, label=loc["label"])
+                 path_effects=LINE_HALO if use_aqi else None, label=loc["label"])
 
     ax.set_ylim(0, y_max)
 
     # ---------- axes styling ----------
-    ax.set_ylabel("AQI (PM2.5-equivalent)", fontproperties=f_med, fontsize=12, color=INK)
+    ylabel = "AQI (PM2.5-equivalent)" if use_aqi else meta["raw_ylabel"]
+    ax.set_ylabel(ylabel, fontproperties=f_med, fontsize=12, color=INK)
     ax.set_xlabel("Date/Time (Pacific)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
@@ -160,8 +194,7 @@ def main():
     # ---------- title / subtitle ----------
     subtitle_y = top_y + 0.058
     title_y = subtitle_y + 0.035
-    title = "Near-Surface Smoke"
-    fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
+    fig.text(left_x, title_y, meta["title"], fontproperties=f_bold, fontsize=22, color=INK)
     subtitle = (f"NOAA HRRR Init {init_time.strftime('%Y-%m-%d')} {init_time.strftime('%H')}z"
                 f" • 48-hour forecast")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
@@ -196,8 +229,9 @@ def main():
     fig.text(center_x, 0.02, "NOAA HRRR — Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
-    plt.savefig(args.output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
-    print(f"saved {args.output}")
+    output = args.output or f"hrrr_{args.variable}_smoke_{'aqi' if use_aqi else 'raw'}.png"
+    plt.savefig(output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
+    print(f"saved {output}")
 
 
 if __name__ == "__main__":
