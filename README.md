@@ -20,6 +20,9 @@ workflows. Each project lives in its own directory with its own README.
   meteogram of the WindBorne WM-6 ensemble spread for a pressure-level
   temperature at a point (defaults to KPSC / 850 mb), compared against
   long-term climatology.
+- [`hrrr-smoke-chart/`](hrrr-smoke-chart/) — generates a styled meteogram
+  of NOAA HRRR near-surface smoke for one or more points over a full
+  48-hour HRRR cycle (defaults to Kennewick, WA and Hermiston, OR).
 
 ## Shared resources
 
