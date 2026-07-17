@@ -57,7 +57,7 @@ def main():
     # ---------- figure (same footprint as the alerts map / temp chart) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
-    ax = fig.add_axes([0.075, 0.10, 0.87, 0.65])
+    ax = fig.add_axes([0.075, 0.14, 0.87, 0.65])
     ax.set_facecolor("white")
 
     for i, loc in enumerate(locations):
@@ -69,6 +69,7 @@ def main():
 
     # ---------- axes styling ----------
     ax.set_ylabel("Near-Surface Smoke (µg/m³)", fontproperties=f_med, fontsize=12, color=INK)
+    ax.set_xlabel("Date/Time (Pacific)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
     for spine in ("top", "right"):
@@ -78,7 +79,7 @@ def main():
         ax.spines[spine].set_linewidth(1.0)
 
     ax.xaxis.set_major_locator(mdates.HourLocator(interval=6, tz=PACIFIC))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%-m/%-d %-I%p", tz=PACIFIC))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%-m/%-d %H:%M", tz=PACIFIC))
     ax.set_xlim(times[0], times[-1])
     ax.tick_params(axis="both", colors=AXIS_COLOR, labelsize=10, length=4)
     for tick in ax.get_xticklabels():
@@ -134,7 +135,7 @@ def main():
     title = "Near-Surface Smoke"
     fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     subtitle = (f"NOAA HRRR Init {init_time.strftime('%Y-%m-%d')} {init_time.strftime('%H')}z"
-                f" • 48-hour forecast • Times Pacific")
+                f" • 48-hour forecast")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
