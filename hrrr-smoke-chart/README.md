@@ -52,15 +52,28 @@ python3 build_chart.py
   until it finds a run whose F48 file actually exists on NOAA's servers
   (i.e. has finished processing), rather than assuming the most recent
   synoptic hour is already done.
-- **Y-axis** is fixed to `0 .. max(all series) * 1.25` (with a 10 µg/m³
-  floor so a quiet/smoke-free run doesn't get visually amplified into
-  noise), not autoscaled tightly to the data.
+- **Y-axis is AQI, not raw µg/m³.** `build_chart.py` converts each point's
+  smoke concentration to an AQI value via the EPA's piecewise-linear PM2.5
+  breakpoint table (`pm25_to_aqi()`, May 2024 revision). HRRR's near-surface
+  smoke field is a smoke mass density, not a regulatory PM2.5 measurement --
+  treating it as PM2.5 to derive an AQI is the same approximation
+  NOAA/AirNow smoke-forecast tools make, good for a "how smoky will it
+  feel" read rather than an official index. The plot area is shaded by AQI
+  category (Good/Moderate/USG/Unhealthy/Very Unhealthy/Hazardous, official
+  EPA colors, direct-labeled on the right edge) and fixed to
+  `0 .. max(all series) * 1.25` (with a 100 AQI floor so Good+Moderate are
+  always visible even on a quiet/smoke-free run), not autoscaled tightly to
+  the data. Both location lines get a white halo so they stay legible over
+  whichever band color they cross.
 - **X-axis** is rendered in Pacific time (`America/Los_Angeles`, so it
   follows PDT/PST automatically), even though the run itself is fetched
   and labeled by init time in UTC/z per meteorological convention.
-- Chart styling (fonts, colors, dimensions, logo placement) mirrors
+- Chart styling (fonts, colors, dimensions) mirrors
   `850-700-temp-chart/build_chart.py` -- edit `build_chart.py` directly to
   adjust. Reuses that project's same two accents (forest green `#164f29`
   for the first location, climatology orange `#c9531c` for the second) so
   a multi-line chart still reads as this brand's palette. Axis
-  spines/ticks are black.
+  spines/ticks are black. Logo sits top-right, spanning the title/subtitle/
+  legend header (the alerts-map/temp-chart projects place it bottom-right
+  instead, since those don't have a full-width band legend competing for
+  that corner).
