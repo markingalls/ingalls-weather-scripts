@@ -49,3 +49,10 @@ columbia-basin-temps/output/*.png
 850-700-temp-chart/forecast.json
 850-700-temp-chart/climatology.json
 850-700-temp-chart/wm6_ensemble_spread*.png
+
+# --- elida-moisture-pnw-map ---
+# build_map.py fetches WM-6 live and auto-saves a snapshot into output/ for
+# --file re-renders; the rendered PNGs are outputs too -- neither is source.
+elida-moisture-pnw-map/output/*.png
+elida-moisture-pnw-map/output/*.npz
+elida-moisture-pnw-map/data/*.npz
