@@ -5,60 +5,37 @@ Ingalls Weather
 Tracks the moisture plume moving north out of (post-)Tropical Storm Elida,
 currently churning in the open eastern Pacific ~985 mi west of southern
 Baja California, toward the Pacific Northwest: for every WM-6 (WindBorne
-WeatherMesh-6) forecast step over the next 10 days, computes the
-ensemble's chance of total column water vapor (TPW / precipitable water)
-exceeding 1 inch at each grid point, then takes the max across all of
-those steps -- so the map shows, per pixel, the best chance of a moist
-plume passing over that spot at any point in the window, regardless of
-which day it happens. Elida itself is forecast to weaken to a remnant low
-and dissipate within a few days (NHC, 200 AM PDT Jul 19 2026 advisory);
-this map tracks where its moisture ends up, not the storm's own track.
+WeatherMesh-6) forecast step over the next 10 days, reads the ensemble
+mean total column water vapor (TPW / precipitable water) at each grid
+point, then takes the max across all of those steps -- so the map shows,
+per pixel, the single highest TPW value forecast to pass over that spot
+at any point in the window, in inches, regardless of which day it
+happens. Elida itself is forecast to weaken to a remnant low and dissipate
+within a few days (NHC, 200 AM PDT Jul 19 2026 advisory); this map tracks
+where its moisture ends up, not the storm's own track.
 
-WHY A GAUSSIAN ESTIMATE, NOT A RAW MEMBER COUNT
--------------------------------------------------
-WM-6's gridded API exposes true per-grid-point ensemble stats (128 raw
-members, or a member count exceeding a fixed threshold) for several
-variables -- but total_column_water_vapour is not one of them; it only
-carries calibrated mean + standard deviation (confirmed via the API's
-`variables` endpoint, which lists each surface variable's available
-distribution stats). So "chance of TPW > 1 inch" here is computed
-analytically from that mean/std, assuming a normal distribution:
-
-    P(TPW > threshold) = 1 - CDF_normal(threshold; mean, std)
-
-via scipy.stats.norm.sf(). This is a real ensemble-derived estimate (mean
-and std are both calibrated from the full 128-member ensemble), just not a
-literal "N of 128 members exceeded it" count -- that count isn't available
-for this variable through the API. If WindBorne ever adds member-level or
-threshold-probability output for total_column_water_vapour, swap this for
-a direct count.
+This plots the actual forecast quantity (peak ensemble-mean TPW) rather
+than a derived exceedance probability -- an earlier version of this script
+computed "chance of TPW > 1 inch" via a Gaussian estimate from WM-6's
+mean/std (that variable has no raw-member or threshold-probability output
+via the API), but a statistical estimate on top of a forecast read as less
+trustworthy than just showing the forecast value itself.
 
 USAGE
 -----
     export WB_API_KEY=...              # https://app.windbornesystems.com/api_tokens
-    python build_map.py                              # latest WM-6 run, 10-day max, 1in threshold
+    python build_map.py                          # latest WM-6 run, 10-day peak TPW
     python build_map.py --max-hour 168 --step-hours 3  # 7-day window, finer time sampling
-    python build_map.py --threshold-in 0.75            # different TPW threshold
 
 Each grid point is fetched once per sampled forecast hour (default every 6h
-out to 240h/10 days -- 41 requests), each a small single-variable,
-CONUS-cropped zarr file. To re-render without re-fetching, pass
---file path/to/snapshot.npz (see save/load format in fetch_all() /
-build_map()).
+out to 240h/10 days -- 41 requests), each a small single-variable zarr
+file. To re-render without re-fetching, pass --file path/to/snapshot.npz
+(see save/load format in fetch_all() / build_map()).
 
 REQUIRES (already checked into /maps at repo root, shared across all
 Ingalls Weather map projects):
     admin1_boundary_lines.json, admin0_boundary_lines.json, land_slim.json
 Logo is read from /assets/ingalls_weather_logo.png at repo root.
-
-NOTE ON API SHAPE: WindBorne's docs describe include_distribution=true as
-adding "mean, std, ... where applicable" but don't publish the exact zarr
-key layout for those stats. extract_stat() below searches the returned
-zarr store's full tree for arrays named like "mean"/"std" rather than
-assuming a fixed path, and prints the whole tree if it can't find exactly
-one of each -- so if WindBorne's actual layout differs from that guess,
-the first run will fail with the real structure printed instead of a
-silent wrong answer.
 """
 
 import argparse
@@ -80,7 +57,6 @@ import numpy as np
 import requests
 import zarr
 from scipy.interpolate import griddata
-from scipy.stats import norm
 
 import cartopy.crs as ccrs
 from shapely.geometry import shape
@@ -105,40 +81,41 @@ POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
 # ---------------------------------------------------------------------------
 # Data source -- WM-6 global ensemble, gridded (not wm6-3km: that's a
-# CONUS-only deterministic 3km product with no distribution stats at all).
-# Runs 3-hourly out to 360h (15 days).
-#
-# The gridded endpoint's "domain" param (default "conus") is documented as
-# a regional crop for the regional-native products (wm6-3km, hrrr); it's
-# left unset here rather than assumed to also apply usefully to wm-6's own
-# global grid -- Elida's current position (21.4N 125.2W) sits well south
-# and west of a strict CONUS bounding box, so this deliberately fetches
-# whatever extent the API actually returns un-cropped and lets
+# CONUS-only deterministic 3km product). Runs 3-hourly out to 360h (15
+# days). The gridded endpoint's "domain" param (default "conus") is
+# documented as a regional crop for the regional-native products (wm6-3km,
+# hrrr); it's left unset here rather than assumed to also apply usefully to
+# wm-6's own global grid -- Elida's current position (21.4N 125.2W) sits
+# well south and west of a strict CONUS bounding box, so this deliberately
+# fetches whatever extent the API actually returns un-cropped and lets
 # crop_to_bbox() below pull out the map's bbox from that, instead of risking
 # a server-side "conus" crop silently cutting off the storm itself.
 # ---------------------------------------------------------------------------
 WB_BASE = "https://api.windbornesystems.com/forecasts/v1/wm-6"
 VARIABLE = "total_column_water_vapour"  # TPW / precipitable water, kg/m^2 (== mm liquid equivalent)
 KGM2_PER_INCH = 25.4
-MIN_STD_KGM2 = 0.1  # guards norm.sf() against a zero-std divide if WM-6 ever reports one
 
 # ---------------------------------------------------------------------------
-# Figure geometry -- same canvas/colorbar layout as columbia-basin-temps.
+# Figure geometry -- same canvas/colorbar layout as columbia-basin-temps
+# and the rest of this repo's maps.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 10, 14
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 10, 8.9
 FIG_DPI = 200
-AXES_RECT = [0.035, 0.10, 0.93, 0.80]  # [left, bottom, width, height], figure fraction
+AXES_RECT = [0.035, 0.15, 0.93, 0.75]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
-# Map domain -- Tropical Storm Elida's current position in the open eastern
-# Pacific (with a comfortable margin south/west) up through the CA/NV/OR
-# coastal and Great Basin corridor into the Pacific Northwest, tracking
-# where Elida's remnant moisture is forecast to get swept north.
+# Map domain -- zoomed out enough to show Elida's current position in the
+# open eastern Pacific with real context (not just a tight corridor) up
+# through the CA/NV/OR coastal and Great Basin corridor into the Pacific
+# Northwest. Wider than this repo's other (more regionally-compact) maps
+# since this domain is inherently more north-south elongated -- the extra
+# longitude span is what keeps it filling the same 10x8.9in canvas as
+# everything else here without heavy letterboxing.
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -130.0, -108.0
-LAT_MIN, LAT_MAX = 18.0, 49.5
-CENTER_LON, CENTER_LAT = -119.0, 34.0
+LON_MIN, LON_MAX = -132.0, -99.0
+LAT_MIN, LAT_MAX = 19.0, 50.5
+CENTER_LON, CENTER_LAT = -115.5, 34.75
 
 # Elida's center per NHC's 200 AM PDT Sun Jul 19 2026 advisory (0900 UTC):
 # 21.4N 125.2W, ~985 mi west of southern Baja California, moving NNW ~13
@@ -149,8 +126,8 @@ ELIDA_LON, ELIDA_LAT = -125.2, 21.4
 ELIDA_LABEL = "TS Elida (09Z Jul 19 position)"
 
 # Degrees beyond the plotted extent to keep when cropping the fetched
-# (regional) grid, so the padded resample grid below has real data to
-# interpolate from all the way to its own edges.
+# grid, so the padded resample grid below has real data to interpolate
+# from all the way to its own edges.
 FETCH_PAD_DEG = 1.5
 
 # Resampled onto a common regular lat/lon grid before rendering, padded past
@@ -167,13 +144,13 @@ RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAM
 # through the Great Basin into the Pacific Northwest.
 # ---------------------------------------------------------------------------
 CITIES = [
-    ("Cabo San Lucas", -109.9124, 22.8905, "right"),
+    ("Cabo San Lucas", -109.9124, 22.8905, "left"),
     ("San Diego", -117.1611, 32.7157, "left"),
     ("Los Angeles", -118.2437, 34.0522, "left"),
     ("Las Vegas", -115.1398, 36.1699, "right"),
     ("San Francisco", -122.4194, 37.7749, "left"),
     ("Reno", -119.8138, 39.5296, "right"),
-    ("Sacramento", -121.4944, 38.5816, "left"),
+    ("Sacramento", -121.4944, 38.5816, "right"),
     ("Eureka", -124.1637, 40.8021, "left"),
     ("Boise", -116.2023, 43.6150, "right"),
     ("Medford", -122.8756, 42.3265, "left"),
@@ -186,11 +163,12 @@ CITIES = [
 ]
 
 # ---------------------------------------------------------------------------
-# Probability color ramp -- tan (dry) -> green (moistening) -> blue
-# (saturated), a moisture-reads-as-wetness ramp distinct from the rainbow
-# temperature table used elsewhere in this repo.
+# TPW color ramp -- tan (dry) -> green (moistening) -> blue (saturated), a
+# fixed absolute inches-of-TPW scale (not rescaled per map, same spirit as
+# TEMP_COLOR_TABLE in columbia-basin-temps/build_map.py) so a given shade
+# always means the same TPW value across every run of this script.
 # ---------------------------------------------------------------------------
-PROB_COLOR_STOPS = [
+TPW_COLOR_STOPS = [
     (0.00, "#efe3bd"),
     (0.20, "#e1d89c"),
     (0.40, "#b7cf7c"),
@@ -198,10 +176,12 @@ PROB_COLOR_STOPS = [
     (0.80, "#4a93a0"),
     (1.00, "#215ea8"),
 ]
+TPW_VMIN_IN, TPW_VMAX_IN = 0.0, 3.0  # inches; the eastern Pacific tropical airmass near
+                                       # Elida itself can push TPW toward 2.5-3in.
 
 
-def build_prob_colormap():
-    return LinearSegmentedColormap.from_list("ingalls_prob", PROB_COLOR_STOPS, N=256)
+def build_tpw_colormap():
+    return LinearSegmentedColormap.from_list("ingalls_tpw", TPW_COLOR_STOPS, N=256)
 
 
 def resample_to_regular_grid(lat, lon, values):
@@ -231,7 +211,7 @@ def sample_grid_value(value_grid, lon_pt, lat_pt):
 
 
 # ---------------------------------------------------------------------------
-# WindBorne API (WM-6 global ensemble, gridded, CONUS domain)
+# WindBorne API (WM-6 global ensemble, gridded)
 # ---------------------------------------------------------------------------
 def wb_get(path, api_key, **params):
     resp = requests.get(f"{WB_BASE}/{path}", headers={"Authorization": f"Bearer {api_key}"},
@@ -278,21 +258,25 @@ def find_arrays_by_keyword(group, keyword, prefix=""):
     return hits
 
 
-def extract_stat(g, keyword):
-    """Find the single array in the zarr store whose name contains
-    `keyword` (e.g. "mean", "std") -- see the module docstring's note on
-    why this searches by name instead of assuming a fixed path."""
-    hits = find_arrays_by_keyword(g, keyword)
-    if len(hits) != 1:
-        tree = "\n".join(describe_zarr_tree(g))
-        sys.exit(
-            f"Expected exactly one array containing '{keyword}' for {VARIABLE} in the "
-            f"include_distribution response, found {len(hits)}: {[h[0] for h in hits]}\n"
-            f"Full zarr structure returned:\n{tree}\n"
-            f"WindBorne's response layout differs from what extract_stat() assumes -- "
-            f"update the keyword/path lookup above to match."
-        )
-    return np.asarray(hits[0][1][:])
+def fetch_deterministic_field(g):
+    """WM-6's plain (non-distribution) gridded response nests each variable
+    under a top-level "deterministic" group -- per WindBorne's own
+    documented code example (g["deterministic"]["temperature_2m"]). Falls
+    back to searching the whole tree by variable name, and prints the full
+    structure if neither finds it, rather than silently mis-reading."""
+    try:
+        return np.asarray(g["deterministic"][VARIABLE][:])
+    except KeyError:
+        pass
+    hits = find_arrays_by_keyword(g, VARIABLE.lower())
+    if len(hits) == 1:
+        return np.asarray(hits[0][1][:])
+    tree = "\n".join(describe_zarr_tree(g))
+    sys.exit(
+        f"Couldn't find {VARIABLE} under 'deterministic' or by name in the gridded "
+        f"response ({len(hits)} name matches). Full zarr structure returned:\n{tree}\n"
+        f"Update fetch_deterministic_field() to match."
+    )
 
 
 def crop_to_bbox(lat, lon, pad=FETCH_PAD_DEG):
@@ -315,11 +299,10 @@ def crop_to_bbox(lat, lon, pad=FETCH_PAD_DEG):
     return r0, r1, c0, c1, lat2d[r0:r1, c0:c1], lon2d[r0:r1, c0:c1]
 
 
-def fetch_all(max_hour, step_hours, threshold_kgm2, api_key):
-    """Fetch WM-6's TPW mean/std at every step_hours-spaced forecast hour
-    out to max_hour, convert each to a Gaussian exceedance probability, and
-    take the elementwise max across all steps. Returns
-    (lat_2d, lon_2d, prob_max_2d[0-1], init_time, hours_used)."""
+def fetch_all(max_hour, step_hours, api_key):
+    """Fetch WM-6's ensemble-mean TPW at every step_hours-spaced forecast
+    hour out to max_hour and take the elementwise max across all steps.
+    Returns (lat_2d, lon_2d, peak_tpw_in_2d, init_time, hours_used)."""
     run_info = wb_get("run_information", api_key)
     init_time = run_info["initialization_time"]
     available = {a["forecast_hour"] for a in run_info["available"]}
@@ -331,13 +314,12 @@ def fetch_all(max_hour, step_hours, threshold_kgm2, api_key):
         print(f"NOTE: run {init_time} currently only has data out to F{max(hours):03d} "
               f"(requested out to F{max_hour:03d}); using what's available so far.")
 
-    lat = lon = prob_max = None
+    lat = lon = peak_kgm2 = None
     r0 = r1 = c0 = c1 = None
     for i, fh in enumerate(hours):
         print(f"Fetching F{fh:03d} ({i + 1}/{len(hours)}) ...")
         url_info = wb_get("gridded", api_key, variable=VARIABLE, format="zarr",
-                           as_url="true", include_distribution="true",
-                           initialization_time=init_time, forecast_hour=fh)
+                           as_url="true", initialization_time=init_time, forecast_hour=fh)
         resp = requests.get(url_info["url"], timeout=60)
         resp.raise_for_status()
         # zarr's ZipStore wants a real file path (not an in-memory buffer --
@@ -360,14 +342,12 @@ def fetch_all(max_hour, step_hours, threshold_kgm2, api_key):
                           f"position) will be nearest-neighbor extrapolated, not real model data.")
                 r0, r1, c0, c1, lat, lon = crop_to_bbox(lat_raw, lon_raw)
 
-            mean_kgm2 = extract_stat(g, "mean")[r0:r1, c0:c1]
-            std_kgm2 = extract_stat(g, "std")[r0:r1, c0:c1]
+            field_kgm2 = fetch_deterministic_field(g)[r0:r1, c0:c1]
             store.close()
 
-        prob = norm.sf(threshold_kgm2, loc=mean_kgm2, scale=np.maximum(std_kgm2, MIN_STD_KGM2))
-        prob_max = prob if prob_max is None else np.maximum(prob_max, prob)
+        peak_kgm2 = field_kgm2 if peak_kgm2 is None else np.maximum(peak_kgm2, field_kgm2)
 
-    return lat, lon, prob_max, init_time, hours
+    return lat, lon, peak_kgm2 / KGM2_PER_INCH, init_time, hours
 
 
 # ---------------------------------------------------------------------------
@@ -385,34 +365,39 @@ def load_land():
     return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
 
 
-def build_map(max_hour, step_hours, threshold_in, output_path, override_path=None):
+def build_map(max_hour, step_hours, output_path, override_path=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
-    threshold_kgm2 = threshold_in * KGM2_PER_INCH
 
     if override_path:
         print(f"Using local snapshot: {override_path}")
         npz = np.load(override_path)
-        lat, lon, prob = npz["lat"], npz["lon"], npz["prob"]
+        lat, lon, peak_tpw_in = npz["lat"], npz["lon"], npz["peak_tpw_in"]
         init_time = str(npz["init_time"])
         hours = npz["hours"].tolist()
-        threshold_in = float(npz["threshold_in"])
     else:
         api_key = os.environ.get("WB_API_KEY")
         if not api_key:
             raise SystemExit("Set WB_API_KEY in your environment before running this script.")
-        lat, lon, prob, init_time, hours = fetch_all(max_hour, step_hours, threshold_kgm2, api_key)
+        lat, lon, peak_tpw_in, init_time, hours = fetch_all(max_hour, step_hours, api_key)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         snapshot_path = OUTPUT_DIR / f"elida_moisture_snapshot_{init_time.replace(':', '')}.npz"
-        np.savez(snapshot_path, lat=lat, lon=lon, prob=prob, init_time=init_time,
-                 hours=np.array(hours), threshold_in=threshold_in)
+        np.savez(snapshot_path, lat=lat, lon=lon, peak_tpw_in=peak_tpw_in, init_time=init_time,
+                 hours=np.array(hours))
         print(f"Saved raw grid to {snapshot_path} (re-render with --file).")
 
     print("Resampling onto a regular grid...")
-    prob_grid = resample_to_regular_grid(lat, lon, prob)
-    prob_pct = np.clip(prob_grid, 0.0, 1.0) * 100
+    tpw_grid = resample_to_regular_grid(lat, lon, peak_tpw_in)
 
-    print(f"Max chance of TPW > {threshold_in:g}in over the window: {np.nanmax(prob_pct):.0f}%")
+    # Slice off the resample padding (real data, but outside the visible
+    # frame) before reporting/scaling to the range actually shown.
+    lon_frac0 = (LON_MIN - RESAMPLE_LON_MIN) / (RESAMPLE_LON_MAX - RESAMPLE_LON_MIN)
+    lon_frac1 = (LON_MAX - RESAMPLE_LON_MIN) / (RESAMPLE_LON_MAX - RESAMPLE_LON_MIN)
+    lat_frac0 = (LAT_MIN - RESAMPLE_LAT_MIN) / (RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN)
+    lat_frac1 = (LAT_MAX - RESAMPLE_LAT_MIN) / (RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN)
+    visible = tpw_grid[round(lat_frac0 * RESAMPLE_NY):round(lat_frac1 * RESAMPLE_NY),
+                        round(lon_frac0 * RESAMPLE_NX):round(lon_frac1 * RESAMPLE_NX)]
+    print(f"Peak TPW over the window (visible frame): {np.nanmin(visible):.2f}in - {np.nanmax(visible):.2f}in")
 
     print("Loading basemap layers...")
     admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
@@ -430,9 +415,9 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
     ax.patch.set_facecolor("#f7f6f2")
 
-    prob_cmap = build_prob_colormap()
-    prob_norm = Normalize(vmin=0, vmax=100)
-    ax.imshow(prob_pct, transform=pc, cmap=prob_cmap, norm=prob_norm, origin="lower",
+    tpw_cmap = build_tpw_colormap()
+    tpw_norm = Normalize(vmin=TPW_VMIN_IN, vmax=TPW_VMAX_IN)
+    ax.imshow(tpw_grid, transform=pc, cmap=tpw_cmap, norm=tpw_norm, origin="lower",
               extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
 
     ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
@@ -448,14 +433,14 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
                          zorder=103, transform=pc)
     elida_txt.set_path_effects([pe.withStroke(linewidth=1.8, foreground=(0, 0, 0, 0.85))])
 
-    # City labels -- name plus that spot's max chance over the window,
+    # City labels -- name plus that spot's peak TPW over the window,
     # sampled from the resampled grid.
     geodetic_transform = pc._as_mpl_transform(ax)
     stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
     for name, lon_c, lat_c, pos in CITIES:
         ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
                 mec="black", mew=0.8, transform=pc)
-        city_pct = sample_grid_value(prob_pct, lon_c, lat_c)
+        city_val = sample_grid_value(tpw_grid, lon_c, lat_c)
         dx_pt = 6 if pos == "right" else -6
         ha = "left" if pos == "right" else "right"
 
@@ -464,11 +449,11 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
                             color="white", ha=ha, va="center", zorder=101, transform=name_transform)
         name_txt.set_path_effects(stroke)
 
-        pct_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-4, units="points")
-        pct_txt = ax.text(lon_c, lat_c, f"{city_pct:.0f}%", fontsize=9.75,
+        val_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-4, units="points")
+        val_txt = ax.text(lon_c, lat_c, f"{city_val:.1f}\"", fontsize=9.75,
                            fontproperties=poppins_semibold, color="white", ha=ha, va="top",
-                           zorder=101, transform=pct_transform)
-        pct_txt.set_path_effects(stroke)
+                           zorder=101, transform=val_transform)
+        val_txt.set_path_effects(stroke)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
@@ -482,17 +467,26 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
     frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
     cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.022
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
-    cbar_bottom = 0.045
+    cbar_bottom = 0.085
 
-    gradient = np.linspace(0, 100, 256).reshape(1, -1)
+    # Only draw the slice of the color table actually visible on the map
+    # today (rounded outward to a clean 0.25in step), same spirit as
+    # columbia-basin-temps' temperature colorbar -- but always sampled from
+    # the same fixed cmap+norm, so a given shade means the same TPW value
+    # across every run.
+    vmin_disp = max(TPW_VMIN_IN, 0.25 * np.floor(np.nanmin(visible) / 0.25))
+    vmax_disp = min(TPW_VMAX_IN, 0.25 * np.ceil(np.nanmax(visible) / 0.25))
+    gradient = np.linspace(vmin_disp, vmax_disp, 256).reshape(1, -1)
+
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
-    cax.imshow(gradient, aspect="auto", cmap=prob_cmap, norm=prob_norm, extent=[0, 100, 0, 1])
+    cax.imshow(gradient, aspect="auto", cmap=tpw_cmap, norm=tpw_norm, extent=[vmin_disp, vmax_disp, 0, 1])
     cax.set_yticks([])
     for spine in cax.spines.values():
         spine.set_edgecolor("#8a887e")
         spine.set_linewidth(0.6)
-    cax.set_xticks(range(0, 101, 20))
-    cax.set_xticklabels([f"{p}%" for p in range(0, 101, 20)])
+    ticks = np.arange(np.ceil(vmin_disp / 0.5) * 0.5, vmax_disp + 1e-9, 0.5)
+    cax.set_xticks(ticks)
+    cax.set_xticklabels([f'{t:g}"' for t in ticks])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
@@ -501,8 +495,8 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
     init_dt = datetime.fromisoformat(init_time.replace("Z", "+00:00"))
     fig.text(0.03, 0.975, "Moisture Surge: TS Elida → Pacific Northwest", fontsize=20,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.935, f"Chance of TPW > {threshold_in:g}\" • WindBorne WeatherMesh-6 Ensemble • "
-                          f"Init {init_dt.strftime('%Y-%m-%d %H')}z • max over 10 days (F000–F{max(hours):03d})",
+    fig.text(0.03, 0.935, f"Peak TPW over 10 days • WindBorne WeatherMesh-6 Ensemble • "
+                          f"Init {init_dt.strftime('%Y-%m-%d %H')}z • F000–F{max(hours):03d}",
               fontsize=12, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
     # Attribution
@@ -542,14 +536,12 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Build the Tropical Storm Elida -> Pacific Northwest moisture surge map.")
+        description="Build the Tropical Storm Elida -> Pacific Northwest peak TPW map.")
     parser.add_argument("--max-hour", type=int, default=240,
                          help="Forecast window in hours (default: 240 = 10 days).")
     parser.add_argument("--step-hours", type=int, default=6,
                          help="Sampling interval in hours across the window (default: 6). "
                               "WM-6 natively steps every 3h; halving this doubles the fetch count.")
-    parser.add_argument("--threshold-in", type=float, default=1.0,
-                         help="TPW exceedance threshold in inches (default: 1.0).")
     parser.add_argument("--file", type=Path, default=None,
                          help="Render from a previously saved snapshot (.npz) instead of fetching live.")
     parser.add_argument("--out", type=Path, default=None,
@@ -560,4 +552,4 @@ if __name__ == "__main__":
         sys.exit(f"--file {args.file} not found.")
 
     out_path = args.out or (OUTPUT_DIR / "elida_moisture_pnw.png")
-    build_map(args.max_hour, args.step_hours, args.threshold_in, out_path, override_path=args.file)
+    build_map(args.max_hour, args.step_hours, out_path, override_path=args.file)

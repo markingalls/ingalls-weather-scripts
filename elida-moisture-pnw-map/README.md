@@ -3,13 +3,20 @@
 A one-off styled map tracking the moisture plume moving north out of
 (post-)Tropical Storm Elida -- currently churning in the open eastern
 Pacific, ~985 mi west of southern Baja California -- toward the Pacific
-Northwest: WM-6's (WindBorne WeatherMesh-6) ensemble chance of total
-precipitable water (TPW) exceeding 1 inch, taken as the max across every
-forecast step over the next 10 days -- so each pixel shows the best chance
-of the plume passing over that spot at any point in the window, not just
-on one particular day. Elida itself is forecast to weaken to a remnant low
-and dissipate within a few days (NHC, 200 AM PDT Jul 19 2026 advisory);
-this map tracks where its moisture ends up, not the storm's own track.
+Northwest: WM-6's (WindBorne WeatherMesh-6) ensemble-mean total
+precipitable water (TPW), taken as the max across every forecast step over
+the next 10 days -- so each pixel shows the single highest TPW value
+forecast to pass over that spot at any point in the window, in inches, not
+just on one particular day. Elida itself is forecast to weaken to a
+remnant low and dissipate within a few days (NHC, 200 AM PDT Jul 19 2026
+advisory); this map tracks where its moisture ends up, not the storm's own
+track.
+
+This plots the actual forecast quantity (peak ensemble-mean TPW) rather
+than a derived exceedance probability. An earlier version computed "chance
+of TPW > 1 inch" via a Gaussian estimate from WM-6's mean/std (that
+variable has no raw-member or threshold-probability output via the API) --
+dropped in favor of just showing the forecast value itself.
 
 ## Usage
 
@@ -17,25 +24,24 @@ this map tracks where its moisture ends up, not the storm's own track.
 bash setup.sh                      # first time / fresh environment only
 export WB_API_KEY=...              # https://app.windbornesystems.com/api_tokens
 
-python3 build_map.py                              # latest run, 10-day max, 1in threshold
+python3 build_map.py                                # latest run, 10-day peak TPW
 python3 build_map.py --max-hour 168 --step-hours 3   # 7-day window, finer time sampling
-python3 build_map.py --threshold-in 0.75             # different TPW threshold
 ```
 
 Output PNG lands in `output/elida_moisture_pnw.png`. Every live fetch also
-auto-saves the raw probability grid to `output/elida_moisture_snapshot_<init>.npz`
--- pass that to `--file` to re-render (different threshold, style tweaks,
-etc.) without re-fetching WM-6.
+auto-saves the raw grid to `output/elida_moisture_snapshot_<init>.npz` --
+pass that to `--file` to re-render (style tweaks, etc.) without re-fetching
+WM-6.
 
 ## Files
 
-- `build_map.py` -- fetches WM-6's gridded TPW mean/std at every
-  `--step-hours`-spaced forecast hour out to `--max-hour`, converts each
-  step to an exceedance probability, takes the max across all steps, and
-  renders the map. Map domain, city labels, Elida's marked position, and
-  color ramp are all defined near the top -- edit directly to adjust (in
-  particular, `ELIDA_LON`/`ELIDA_LAT`/`ELIDA_LABEL` are a snapshot of the
-  NHC advisory at the time this was written, not live-updating).
+- `build_map.py` -- fetches WM-6's gridded ensemble-mean TPW at every
+  `--step-hours`-spaced forecast hour out to `--max-hour`, takes the max
+  across all steps, and renders the map. Map domain, city labels, Elida's
+  marked position, and color ramp are all defined near the top -- edit
+  directly to adjust (in particular, `ELIDA_LON`/`ELIDA_LAT`/`ELIDA_LABEL`
+  are a snapshot of the NHC advisory at the time this was written, not
+  live-updating).
 - `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
   needs GDAL, which only installs via apt, not pip).
 
@@ -47,25 +53,18 @@ Weather logo lives in
 
 ## Notes
 
-- **Why a Gaussian estimate, not a raw ensemble-member count.** WM-6's
-  gridded API exposes true per-grid-point ensemble stats (128 raw members,
-  or counts exceeding fixed thresholds) for several variables -- but
-  `total_column_water_vapour` isn't one of them; the API's `variables`
-  endpoint lists it as carrying only calibrated mean + standard deviation,
-  no percentiles/members/thresholds. So "chance of TPW > 1 inch" here is
-  computed analytically via `scipy.stats.norm.sf()`, assuming a normal
-  distribution around that mean/std. Both moments are genuinely
-  ensemble-calibrated, so this is a real probability estimate -- just not
-  a literal "N of 128 members exceeded it" count, which the API doesn't
-  expose for this variable. If WindBorne adds member-level or
-  threshold-probability output for TPW, swap this for a direct count.
-- **Map domain** (`LON_MIN`/`LAT_MIN`/etc.) runs from Elida's current
-  position in the open Pacific (with a comfortable margin south/west) up
+- **Map domain** (`LON_MIN`/`LAT_MIN`/etc.) is zoomed out to show Elida's
+  current position in the open Pacific with real geographic context, up
   through the CA/NV/OR coastal and Great Basin corridor into the Pacific
   Northwest -- a fixed box matching *today's* storm position, not detected
   live each run. Re-running this script later (once Elida has moved, or
   for a different storm) means updating `LON_MIN`/`LAT_MIN`/`ELIDA_LON`/
-  `ELIDA_LAT` to match.
+  `ELIDA_LAT` to match. It's noticeably wider (east-west) than this repo's
+  other, more regionally-compact maps -- that's deliberate: the
+  storm-to-PNW domain is far more north-south elongated than
+  columbia-basin-temps/western-us-noaa-outlooks' domains, and the extra
+  longitude is what lets it fill the same 10x8.9in canvas as every other
+  map here without heavy letterboxing on the sides.
 - **No `domain=conus` crop.** The gridded endpoint's `domain` param
   (regional crop, default `"conus"`) is documented for the regional-native
   products (wm6-3km, hrrr); this script deliberately leaves it unset for
@@ -77,33 +76,32 @@ Weather logo lives in
   reach the map's SW corner (in which case that corner is nearest-neighbor
   extrapolated in the render, not real model data -- watch the console
   output on first run).
-- **Color ramp** is tan (0%, dry) -> green -> blue (100%, saturated) --
-  `PROB_COLOR_STOPS` in `build_map.py`.
-- **API response shape uncertainty.** WindBorne's docs describe
-  `include_distribution=true` as adding "mean, std, ... where applicable"
-  but don't publish the exact zarr key layout for those stats, and no
-  code sample in their docs demonstrates it. `extract_stat()` searches the
-  returned zarr store's full tree for arrays named like "mean"/"std"
-  rather than assuming a fixed path, and exits with the whole tree printed
-  if it can't find exactly one of each -- so if WindBorne's actual layout
-  doesn't match that guess, the fix is a one-line update to
-  `extract_stat()`'s keyword lookup, not a silent wrong answer. This
-  hasn't been exercised against a live API key; the fetch/crop/probability
-  math and the zarr-tree search were unit-tested against synthetic data,
-  and the render path was smoke-tested end to end via `--file` with a
-  synthetic snapshot, but the real `total_column_water_vapour` +
-  `include_distribution` response has not been.
+- **Color ramp** is a fixed absolute TPW scale (`TPW_VMIN_IN`/`TPW_VMAX_IN`
+  = 0-3in), tan (dry) -> green -> blue (saturated) -- `TPW_COLOR_STOPS` in
+  `build_map.py`. Fixed rather than rescaled per run, same spirit as the
+  temperature color table in `columbia-basin-temps/build_map.py`, so a
+  given shade always means the same TPW value across every map this script
+  renders. The colorbar itself only draws the slice of that table actually
+  visible in the current frame.
+- **`fetch_deterministic_field()`** reads WM-6's plain gridded response
+  (no `include_distribution`) via the path WindBorne's own docs show in a
+  code example -- `g["deterministic"][variable]` -- with a fallback that
+  searches the whole zarr tree by variable name and prints the structure
+  if that path doesn't exist, rather than silently mis-reading. This is a
+  much more solidly-documented code path than the earlier
+  `include_distribution=true` version used (WindBorne doesn't publish the
+  exact zarr layout for the distribution stats, only prose describing what
+  fields it adds).
 - **zarr version.** zarr's `ZipStore` takes a real file path in zarr v3 but
   accepted an in-memory buffer in v2 -- `fetch_all()` writes each
   downloaded `.zarr.zip` to a temp file before opening it so this works
   either way, since `requirements.txt` doesn't pin a zarr major version.
-- **Canvas** is a taller portrait (10x14in) than the rest of this repo's
-  maps (10x8.9in) -- Elida's current position to the PNW is a much more
-  north-south-elongated domain than the other, more regionally-compact
-  maps here, so the shared square-ish canvas left large empty margins on
-  either side.
 - Fetching the full 10-day window at the default 6-hour step is 41
-  requests (one small single-variable grid each, and larger than the
-  CONUS-cropped versions of this script since no `domain` filter is
-  applied); `--step-hours 3` doubles that for finer time resolution,
-  `--step-hours 12` halves it.
+  requests (one small single-variable grid each, larger than a
+  domain-cropped fetch would be since no `domain` filter is applied);
+  `--step-hours 3` doubles that for finer time resolution, `--step-hours
+  12` halves it.
+- Hasn't been exercised against a live API key -- the fetch/crop math and
+  the zarr-tree search were unit-tested against synthetic data, and the
+  render path was smoke-tested end to end via `--file` with a synthetic
+  snapshot, but the real API response has not been.
