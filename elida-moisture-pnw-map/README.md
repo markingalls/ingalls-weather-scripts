@@ -24,8 +24,8 @@ dropped in favor of just showing the forecast value itself.
 bash setup.sh                      # first time / fresh environment only
 export WB_API_KEY=...              # https://app.windbornesystems.com/api_tokens
 
-python3 build_map.py                                # latest run, 10-day peak TPW
-python3 build_map.py --max-hour 168 --step-hours 3   # 7-day window, finer time sampling
+python3 build_map.py                                 # latest run, 10-day peak TPW, daily steps
+python3 build_map.py --max-hour 168 --step-hours 12   # 7-day window, twice-daily sampling
 ```
 
 Output PNG lands in `output/elida_moisture_pnw.png`. Every live fetch also
@@ -96,12 +96,27 @@ Weather logo lives in
   accepted an in-memory buffer in v2 -- `fetch_all()` writes each
   downloaded `.zarr.zip` to a temp file before opening it so this works
   either way, since `requirements.txt` doesn't pin a zarr major version.
-- Fetching the full 10-day window at the default 6-hour step is 41
-  requests (one small single-variable grid each, larger than a
-  domain-cropped fetch would be since no `domain` filter is applied);
-  `--step-hours 3` doubles that for finer time resolution, `--step-hours
-  12` halves it.
-- Hasn't been exercised against a live API key -- the fetch/crop math and
-  the zarr-tree search were unit-tested against synthetic data, and the
-  render path was smoke-tested end to end via `--file` with a synthetic
-  snapshot, but the real API response has not been.
+- **Every fetch downloads ~1.9 GB, confirmed against the live API.**
+  WM-6's gridded endpoint rejects `variable=total_column_water_vapour` for
+  *every* forecast hour of the current run with "Variable filtering is not
+  available for archived forecasts" -- not just hours whose valid time has
+  already passed, which is what that error message implies. The only way
+  to pull any data at all is `variable=all`, which returns the complete
+  global grid with all 163 `deterministic` variables (plus ensemble
+  percentiles/members/etc.) at 0.25 deg resolution, ~1.9 GB per forecast
+  hour, instead of the small single-variable slice this script was
+  originally written assuming. At good bandwidth that's ~20-30s/fetch; it
+  was considerably slower (and appeared to hang) the one time this was
+  tried as a backgrounded process, possibly rate-limiting on sustained
+  long-lived connections -- foreground runs so far have been reliable.
+  Because of this, `--step-hours` now defaults to 24 (11 fetches, one/day)
+  rather than a finer native-cadence sampling; the first real run used
+  `--step-hours 48` (6 fetches, ~6.5 min total) to keep it well within a
+  single command's timeout. Finer sampling directly multiplies both fetch
+  count and total download time -- `--step-hours 12` is ~22 fetches
+  (~40+ GB, several minutes to run).
+- Verified against the live API on 2026-07-19 (WM-6 run initialized 14z):
+  `fetch_deterministic_field()`'s `g["deterministic"][variable]` path is
+  correct, coordinates come back as 1D global arrays (lat -89.75..90,
+  lon -180..179.75, 0.25 deg), and the whole pipeline renders a real map
+  end to end.

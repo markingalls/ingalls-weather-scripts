@@ -24,13 +24,18 @@ trustworthy than just showing the forecast value itself.
 USAGE
 -----
     export WB_API_KEY=...              # https://app.windbornesystems.com/api_tokens
-    python build_map.py                          # latest WM-6 run, 10-day peak TPW
-    python build_map.py --max-hour 168 --step-hours 3  # 7-day window, finer time sampling
+    python build_map.py                          # latest WM-6 run, 10-day peak TPW, daily steps
+    python build_map.py --max-hour 168 --step-hours 12  # 7-day window, twice-daily sampling
 
-Each grid point is fetched once per sampled forecast hour (default every 6h
-out to 240h/10 days -- 41 requests), each a small single-variable zarr
-file. To re-render without re-fetching, pass --file path/to/snapshot.npz
-(see save/load format in fetch_all() / build_map()).
+WM-6's gridded endpoint refuses to filter to a single variable for this
+run ("Variable filtering is not available for archived forecasts") and
+requires variable=all instead, which downloads the full global,
+all-163-variable file (~1.9 GB) for every sampled forecast hour rather
+than a small single-variable slice -- ~20-25s per fetch at good bandwidth.
+Default is one fetch per day (11 requests for the full 10-day window);
+--step-hours 12 or 6 samples more finely at ~2x/4x the download time. To
+re-render without re-fetching, pass --file path/to/snapshot.npz (see
+save/load format in fetch_all() / build_map()).
 
 REQUIRES (already checked into /maps at repo root, shared across all
 Ingalls Weather map projects):
@@ -43,6 +48,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -317,11 +323,22 @@ def fetch_all(max_hour, step_hours, api_key):
     lat = lon = peak_kgm2 = None
     r0 = r1 = c0 = c1 = None
     for i, fh in enumerate(hours):
-        print(f"Fetching F{fh:03d} ({i + 1}/{len(hours)}) ...")
-        url_info = wb_get("gridded", api_key, variable=VARIABLE, format="zarr",
+        # variable filtering (variable=VARIABLE) 400s on every forecast hour
+        # of the current run with "Variable filtering is not available for
+        # archived forecasts. Use variable=all ..." -- WM-6's gridded
+        # endpoint apparently treats a run's whole storage tier as archived
+        # well before every forecast hour has passed, not just genuinely
+        # past-valid-time hours. variable=all downloads the full global,
+        # all-163-variable file (~1.9 GB) per forecast hour instead of a
+        # small single-variable slice -- see README for the size/time
+        # tradeoff this forces.
+        t0 = time.time()
+        print(f"Fetching F{fh:03d} ({i + 1}/{len(hours)}) ...", end=" ", flush=True)
+        url_info = wb_get("gridded", api_key, variable="all", format="zarr",
                            as_url="true", initialization_time=init_time, forecast_hour=fh)
-        resp = requests.get(url_info["url"], timeout=60)
+        resp = requests.get(url_info["url"], timeout=180)
         resp.raise_for_status()
+        print(f"{len(resp.content) / 1e6:.0f} MB in {time.time() - t0:.0f}s")
         # zarr's ZipStore wants a real file path (not an in-memory buffer --
         # this differs between zarr major versions, so write to a temp file
         # rather than assume either constructor signature).
@@ -539,9 +556,12 @@ if __name__ == "__main__":
         description="Build the Tropical Storm Elida -> Pacific Northwest peak TPW map.")
     parser.add_argument("--max-hour", type=int, default=240,
                          help="Forecast window in hours (default: 240 = 10 days).")
-    parser.add_argument("--step-hours", type=int, default=6,
-                         help="Sampling interval in hours across the window (default: 6). "
-                              "WM-6 natively steps every 3h; halving this doubles the fetch count.")
+    parser.add_argument("--step-hours", type=int, default=24,
+                         help="Sampling interval in hours across the window (default: 24 = "
+                              "daily). Every fetch pulls WM-6's full global, all-variable "
+                              "gridded file (~1.9 GB -- see README) since variable filtering "
+                              "isn't available for this run, so halving this doubles both the "
+                              "fetch count and the download time.")
     parser.add_argument("--file", type=Path, default=None,
                          help="Render from a previously saved snapshot (.npz) instead of fetching live.")
     parser.add_argument("--out", type=Path, default=None,
