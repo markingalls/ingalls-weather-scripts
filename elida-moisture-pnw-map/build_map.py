@@ -1,14 +1,18 @@
 """
-Elida Moisture Surge -> Pacific Northwest Map (one-off)
+Tropical Storm Elida Moisture Surge -> Pacific Northwest Map (one-off)
 Ingalls Weather
 
-Tracks the moisture plume moving north out of the Elida, NM area toward the
-Pacific Northwest: for every WM-6 (WindBorne WeatherMesh-6) forecast step
-over the next 10 days, computes the ensemble's chance of total column water
-vapor (TPW / precipitable water) exceeding 1 inch at each grid point, then
-takes the max across all of those steps -- so the map shows, per pixel, the
-best chance of a moist plume passing over that spot at any point in the
-window, regardless of which day it happens.
+Tracks the moisture plume moving north out of (post-)Tropical Storm Elida,
+currently churning in the open eastern Pacific ~985 mi west of southern
+Baja California, toward the Pacific Northwest: for every WM-6 (WindBorne
+WeatherMesh-6) forecast step over the next 10 days, computes the
+ensemble's chance of total column water vapor (TPW / precipitable water)
+exceeding 1 inch at each grid point, then takes the max across all of
+those steps -- so the map shows, per pixel, the best chance of a moist
+plume passing over that spot at any point in the window, regardless of
+which day it happens. Elida itself is forecast to weaken to a remnant low
+and dissipate within a few days (NHC, 200 AM PDT Jul 19 2026 advisory);
+this map tracks where its moisture ends up, not the storm's own track.
 
 WHY A GAUSSIAN ESTIMATE, NOT A RAW MEMBER COUNT
 -------------------------------------------------
@@ -100,9 +104,18 @@ POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
 # ---------------------------------------------------------------------------
-# Data source -- WM-6 global ensemble, gridded + cropped to the CONUS domain
-# (not wm6-3km: that's a CONUS-only deterministic 3km product with no
-# distribution stats at all). Runs 3-hourly out to 360h (15 days).
+# Data source -- WM-6 global ensemble, gridded (not wm6-3km: that's a
+# CONUS-only deterministic 3km product with no distribution stats at all).
+# Runs 3-hourly out to 360h (15 days).
+#
+# The gridded endpoint's "domain" param (default "conus") is documented as
+# a regional crop for the regional-native products (wm6-3km, hrrr); it's
+# left unset here rather than assumed to also apply usefully to wm-6's own
+# global grid -- Elida's current position (21.4N 125.2W) sits well south
+# and west of a strict CONUS bounding box, so this deliberately fetches
+# whatever extent the API actually returns un-cropped and lets
+# crop_to_bbox() below pull out the map's bbox from that, instead of risking
+# a server-side "conus" crop silently cutting off the storm itself.
 # ---------------------------------------------------------------------------
 WB_BASE = "https://api.windbornesystems.com/forecasts/v1/wm-6"
 VARIABLE = "total_column_water_vapour"  # TPW / precipitable water, kg/m^2 (== mm liquid equivalent)
@@ -112,20 +125,28 @@ MIN_STD_KGM2 = 0.1  # guards norm.sf() against a zero-std divide if WM-6 ever re
 # ---------------------------------------------------------------------------
 # Figure geometry -- same canvas/colorbar layout as columbia-basin-temps.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 10, 8.9
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 10, 14
 FIG_DPI = 200
-AXES_RECT = [0.035, 0.15, 0.93, 0.75]  # [left, bottom, width, height], figure fraction
+AXES_RECT = [0.035, 0.10, 0.93, 0.80]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
-# Map domain -- eastern NM (Elida, with a comfortable margin south/east)
-# up through the Interior West into the Pacific Northwest.
+# Map domain -- Tropical Storm Elida's current position in the open eastern
+# Pacific (with a comfortable margin south/west) up through the CA/NV/OR
+# coastal and Great Basin corridor into the Pacific Northwest, tracking
+# where Elida's remnant moisture is forecast to get swept north.
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -125.0, -100.0
-LAT_MIN, LAT_MAX = 29.0, 49.5
-CENTER_LON, CENTER_LAT = -113.0, 40.0
+LON_MIN, LON_MAX = -130.0, -108.0
+LAT_MIN, LAT_MAX = 18.0, 49.5
+CENTER_LON, CENTER_LAT = -119.0, 34.0
 
-ELIDA_LON, ELIDA_LAT = -103.6355, 35.0503
+# Elida's center per NHC's 200 AM PDT Sun Jul 19 2026 advisory (0900 UTC):
+# 21.4N 125.2W, ~985 mi west of southern Baja California, moving NNW ~13
+# mph. A snapshot of where the storm was at advisory time, not a fixed
+# geographic point -- update ELIDA_LON/LAT/LABEL if re-running later with a
+# newer advisory.
+ELIDA_LON, ELIDA_LAT = -125.2, 21.4
+ELIDA_LABEL = "TS Elida (09Z Jul 19 position)"
 
 # Degrees beyond the plotted extent to keep when cropping the fetched
 # (regional) grid, so the padded resample grid below has real data to
@@ -142,36 +163,40 @@ RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAM
 RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAMPLE_PAD_DEG
 
 # ---------------------------------------------------------------------------
-# City labels along the plume's path, Elida NM up to the PNW.
+# City labels along Elida's likely path -- the Baja/California coast up
+# through the Great Basin into the Pacific Northwest.
 # ---------------------------------------------------------------------------
 CITIES = [
-    ("Albuquerque", -106.6504, 35.0844, "left"),
-    ("Farmington", -108.2187, 36.7281, "left"),
-    ("Denver", -104.9903, 39.7392, "right"),
-    ("Grand Junction", -108.5506, 39.0639, "left"),
-    ("Salt Lake City", -111.8910, 40.7608, "right"),
-    ("Twin Falls", -114.4609, 42.5629, "left"),
+    ("Cabo San Lucas", -109.9124, 22.8905, "right"),
+    ("San Diego", -117.1611, 32.7157, "left"),
+    ("Los Angeles", -118.2437, 34.0522, "left"),
+    ("Las Vegas", -115.1398, 36.1699, "right"),
+    ("San Francisco", -122.4194, 37.7749, "left"),
+    ("Reno", -119.8138, 39.5296, "right"),
+    ("Sacramento", -121.4944, 38.5816, "left"),
+    ("Eureka", -124.1637, 40.8021, "left"),
     ("Boise", -116.2023, 43.6150, "right"),
+    ("Medford", -122.8756, 42.3265, "left"),
+    ("Bend", -121.3153, 44.0582, "right"),
     ("Pendleton", -118.7879, 45.6721, "right"),
-    ("Yakima", -120.5059, 46.6021, "left"),
-    ("Spokane", -117.4260, 47.6588, "right"),
     ("Portland", -122.6784, 45.5152, "left"),
-    ("Seattle", -122.3321, 47.6062, "right"),
+    ("Yakima", -120.5059, 46.6021, "right"),
+    ("Spokane", -117.4260, 47.6588, "right"),
+    ("Seattle", -122.3321, 47.6062, "left"),
 ]
 
 # ---------------------------------------------------------------------------
-# Probability color ramp -- teal -> blue -> purple, distinct from the
-# rainbow temperature table used elsewhere in this repo, transparent at 0%
-# so the basemap shows through where there's no chance at all.
+# Probability color ramp -- tan (dry) -> green (moistening) -> blue
+# (saturated), a moisture-reads-as-wetness ramp distinct from the rainbow
+# temperature table used elsewhere in this repo.
 # ---------------------------------------------------------------------------
 PROB_COLOR_STOPS = [
-    (0.00, "#f7f6f2"),
-    (0.08, "#dcefec"),
-    (0.25, "#9fd6cd"),
-    (0.45, "#57b3ad"),
-    (0.65, "#3d84b8"),
-    (0.82, "#5c4fa8"),
-    (1.00, "#9b2fae"),
+    (0.00, "#efe3bd"),
+    (0.20, "#e1d89c"),
+    (0.40, "#b7cf7c"),
+    (0.60, "#6fae6f"),
+    (0.80, "#4a93a0"),
+    (1.00, "#215ea8"),
 ]
 
 
@@ -310,7 +335,7 @@ def fetch_all(max_hour, step_hours, threshold_kgm2, api_key):
     r0 = r1 = c0 = c1 = None
     for i, fh in enumerate(hours):
         print(f"Fetching F{fh:03d} ({i + 1}/{len(hours)}) ...")
-        url_info = wb_get("gridded", api_key, variable=VARIABLE, domain="conus", format="zarr",
+        url_info = wb_get("gridded", api_key, variable=VARIABLE, format="zarr",
                            as_url="true", include_distribution="true",
                            initialization_time=init_time, forecast_hour=fh)
         resp = requests.get(url_info["url"], timeout=60)
@@ -327,6 +352,12 @@ def fetch_all(max_hour, step_hours, threshold_kgm2, api_key):
             if lat is None:
                 lat_raw = np.asarray(g["latitude"][:])
                 lon_raw = np.asarray(g["longitude"][:])
+                print(f"  API returned lat {lat_raw.min():.1f}..{lat_raw.max():.1f}, "
+                      f"lon {lon_raw.min():.1f}..{lon_raw.max():.1f}")
+                if lat_raw.min() > LAT_MIN or lon_raw.min() > LON_MIN:
+                    print(f"  NOTE: returned grid doesn't reach the map's SW corner "
+                          f"({LAT_MIN}N, {LON_MIN}E) -- that corner (near Elida's current "
+                          f"position) will be nearest-neighbor extrapolated, not real model data.")
                 r0, r1, c0, c1, lat, lon = crop_to_bbox(lat_raw, lon_raw)
 
             mean_kgm2 = extract_stat(g, "mean")[r0:r1, c0:c1]
@@ -408,11 +439,11 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
     ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
-    # Elida, NM -- the plume's point of origin, marked distinctly from the
-    # regular city dots.
-    ax.plot(ELIDA_LON, ELIDA_LAT, marker="*", markersize=16, color="#f2b807", zorder=102,
-            mec="black", mew=1.0, transform=pc)
-    elida_txt = ax.text(ELIDA_LON + 0.35, ELIDA_LAT, "Elida, NM", fontsize=11,
+    # Tropical Storm Elida's position at advisory time -- marked distinctly
+    # (tropical-cyclone-style filled circle) from the regular city dots.
+    ax.plot(ELIDA_LON, ELIDA_LAT, marker="o", markersize=13, color="#e8722c", zorder=102,
+            mec="black", mew=1.3, transform=pc)
+    elida_txt = ax.text(ELIDA_LON + 0.5, ELIDA_LAT, ELIDA_LABEL, fontsize=11,
                          fontproperties=poppins_semibold, color="white", ha="left", va="center",
                          zorder=103, transform=pc)
     elida_txt.set_path_effects([pe.withStroke(linewidth=1.8, foreground=(0, 0, 0, 0.85))])
@@ -451,7 +482,7 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
     frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
     cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.022
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
-    cbar_bottom = 0.085
+    cbar_bottom = 0.045
 
     gradient = np.linspace(0, 100, 256).reshape(1, -1)
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
@@ -468,7 +499,7 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
 
     # Title & subtitle above the map
     init_dt = datetime.fromisoformat(init_time.replace("Z", "+00:00"))
-    fig.text(0.03, 0.975, "Moisture Surge: Elida, NM → Pacific Northwest", fontsize=20,
+    fig.text(0.03, 0.975, "Moisture Surge: TS Elida → Pacific Northwest", fontsize=20,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
     fig.text(0.03, 0.935, f"Chance of TPW > {threshold_in:g}\" • WindBorne WeatherMesh-6 Ensemble • "
                           f"Init {init_dt.strftime('%Y-%m-%d %H')}z • max over 10 days (F000–F{max(hours):03d})",
@@ -511,7 +542,7 @@ def build_map(max_hour, step_hours, threshold_in, output_path, override_path=Non
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Build the Elida, NM -> Pacific Northwest moisture surge map.")
+        description="Build the Tropical Storm Elida -> Pacific Northwest moisture surge map.")
     parser.add_argument("--max-hour", type=int, default=240,
                          help="Forecast window in hours (default: 240 = 10 days).")
     parser.add_argument("--step-hours", type=int, default=6,

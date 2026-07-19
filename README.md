@@ -22,7 +22,8 @@ workflows. Each project lives in its own directory with its own README.
   long-term climatology.
 - [`elida-moisture-pnw-map/`](elida-moisture-pnw-map/) — one-off map of
   WM-6's ensemble chance of TPW > 1" (max over the next 10 days) tracking
-  the moisture plume from Elida, NM up toward the Pacific Northwest.
+  the moisture plume from Tropical Storm Elida up toward the Pacific
+  Northwest.
 
 ## Shared resources
 
