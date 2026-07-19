@@ -105,12 +105,11 @@ python3 build_chart.py
 - **X-axis** is rendered in Pacific time (`America/Los_Angeles`, so it
   follows PDT/PST automatically), even though the run itself is fetched
   and labeled by init time in UTC/z per meteorological convention.
-- Chart styling (fonts, colors, dimensions) mirrors
-  `850-700-temp-chart/build_chart.py` -- edit `build_chart.py` directly to
-  adjust. Reuses that project's same two accents (forest green `#164f29`
-  for the first location, climatology orange `#c9531c` for the second) so
-  a multi-line chart still reads as this brand's palette. Axis
-  spines/ticks are black. Logo sits top-right, spanning the title/subtitle/
-  legend header (the alerts-map/temp-chart projects place it bottom-right
+- Chart styling (fonts, dimensions) mirrors `850-700-temp-chart/build_chart.py`
+  -- edit `build_chart.py` directly to adjust. Location lines are forest
+  green `#164f29` (also used in that project, the logo's pine tree) for the
+  first location, dark blue `#0b3d91` for the second. Axis spines/ticks are
+  black. Logo sits top-right, spanning the title/subtitle/legend header
+  (the alerts-map/temp-chart projects place it bottom-right
   instead, since those don't have a full-width band legend competing for
   that corner).

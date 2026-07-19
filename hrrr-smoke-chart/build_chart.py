@@ -25,13 +25,12 @@ INK_SECONDARY = "#5a584f"
 GRID_COLOR = "#000000"
 AXIS_COLOR = "#000000"
 
-# Same two accents as ../850-700-temp-chart/build_chart.py: forest green
-# (the logo's pine tree) for the first location, climatology orange for
-# the second, so a multi-line chart still reads as this brand's palette.
+# Forest green (the logo's pine tree, also used in ../850-700-temp-chart/)
+# for the first location, dark blue for the second.
 # Both lines always get a white halo since the plot area is always shaded
 # (AQI bands or the NOAA smoke-concentration scale below), some of which
 # are close in hue to these two.
-LINE_COLORS = ["#164f29", "#c9531c"]
+LINE_COLORS = ["#164f29", "#0b3d91"]
 LINE_HALO = [pe.withStroke(linewidth=4, foreground="white")]
 
 Z_BANDS = 1
