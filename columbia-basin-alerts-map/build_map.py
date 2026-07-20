@@ -10,7 +10,7 @@ from matplotlib.lines import Line2D
 from matplotlib.axes import Axes
 import cartopy.crs as ccrs
 from cartopy.mpl.path import shapely_to_path
-from shapely.geometry import shape, box
+from shapely.geometry import shape, box, Polygon
 from shapely.ops import transform as shp_transform, unary_union
 import numpy as np
 from datetime import datetime
@@ -96,6 +96,31 @@ def darken(hexcolor, factor=0.6):
 def hex_to_rgb(hexcolor):
     hexcolor = hexcolor.lstrip("#")
     return tuple(int(hexcolor[i:i+2], 16) for i in (0, 2, 4))
+
+
+# Degree^2 area floor for keeping a polygon from an overlay op. Real slivers
+# of interest are many orders of magnitude bigger than this; anything under
+# it is floating-point noise from touching boundaries.
+MIN_POLY_AREA = 1e-8
+
+
+def polygons_only(geom):
+    """Drop degenerate Point/LineString/near-zero-area slivers that
+    shapely's intersection and difference ops leave behind at touching
+    polygon boundaries. Left in, cartopy's projection code can't cut a
+    degenerate ring cleanly and falls back to covering the entire
+    projection disk instead of the sliver's true (near-zero) extent --
+    which is what made overlap-stripe fills bleed across the whole map."""
+    if geom.geom_type == "GeometryCollection":
+        parts = [g for g in geom.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        geom = unary_union(parts) if parts else Polygon()
+    if geom.geom_type not in ("Polygon", "MultiPolygon"):
+        return Polygon()
+    polys = list(geom.geoms) if geom.geom_type == "MultiPolygon" else [geom]
+    kept = [p for p in polys if p.area > MIN_POLY_AREA]
+    if not kept:
+        return Polygon()
+    return unary_union(kept) if len(kept) > 1 else kept[0]
 
 
 def make_stripe_image(colors, width_px, height_px, stripe_px=20):
@@ -231,13 +256,13 @@ for event, geom in event_geoms.items():
     next_partition = []
     remaining = geom
     for cell_geom, cell_events in partition:
-        overlap = cell_geom.intersection(remaining)
+        overlap = polygons_only(cell_geom.intersection(remaining))
         if not overlap.is_empty:
             next_partition.append((overlap, cell_events | {event}))
-        rest = cell_geom.difference(remaining)
+        rest = polygons_only(cell_geom.difference(remaining))
         if not rest.is_empty:
             next_partition.append((rest, cell_events))
-        remaining = remaining.difference(cell_geom)
+        remaining = polygons_only(remaining.difference(cell_geom))
     if not remaining.is_empty:
         next_partition.append((remaining, frozenset({event})))
     partition = next_partition
@@ -247,11 +272,14 @@ for event, geom in event_geoms.items():
 combo_geoms = defaultdict(list)
 for geom, tags in partition:
     combo_geoms[tags].append(geom)
-combo_geoms = {tags: unary_union(geoms) for tags, geoms in combo_geoms.items()}
+combo_geoms = {tags: polygons_only(unary_union(geoms))
+                for tags, geoms in combo_geoms.items()}
 
 OVERLAP_EDGE = "#4a4a4a"
 
 for tags, geom in combo_geoms.items():
+    if geom.is_empty:
+        continue
     if len(tags) == 1:
         event = next(iter(tags))
         fill = NWS_COLORS.get(event, "#e8a33d")
