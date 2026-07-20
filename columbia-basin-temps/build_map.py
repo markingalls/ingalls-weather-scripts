@@ -65,10 +65,10 @@ Logo is read from /assets/ingalls_weather_logo.png at repo root.
 """
 
 import argparse
-import io
 import json
 import os
 import sys
+import tempfile
 import time
 import warnings
 from datetime import datetime, timedelta, timezone
@@ -403,23 +403,28 @@ def fetch_wm6_3km(date, metric, hour, api_key):
         print(f"Fetching forecast hour {forecast_hour} (valid {valid_time.isoformat()}) ...")
         resp = requests.get(url_info["url"], timeout=60)
         resp.raise_for_status()
-        store = zarr.storage.ZipStore(io.BytesIO(resp.content), mode="r")
-        g = zarr.open(store, mode="r")
-        if lat is None:
-            lat = g["latitude"][:]
-            lon = g["longitude"][:]
-            mask = ((lon >= LON_MIN - FETCH_PAD_DEG) & (lon <= LON_MAX + FETCH_PAD_DEG) &
-                    (lat >= LAT_MIN - FETCH_PAD_DEG) & (lat <= LAT_MAX + FETCH_PAD_DEG))
-            rows = np.where(mask.any(axis=1))[0]
-            cols = np.where(mask.any(axis=0))[0]
-            r0, r1 = rows.min(), rows.max() + 1
-            c0, c1 = cols.min(), cols.max() + 1
-            lat, lon = lat[r0:r1, c0:c1], lon[r0:r1, c0:c1]
-            fill = np.inf if metric == "low" else -np.inf
-            reduced_temp_k = np.full(lat.shape, fill, dtype=np.float32)
-        hour_temp_k = g["temperature_2m"][r0:r1, c0:c1]
-        reduced_temp_k = (np.minimum if metric == "low" else np.maximum)(reduced_temp_k, hour_temp_k)
-        store.close()
+        # zarr's ZipStore needs a real path, not an in-memory buffer, so the
+        # downloaded archive is spooled to a temp file first.
+        with tempfile.NamedTemporaryFile(suffix=".zip") as tf:
+            tf.write(resp.content)
+            tf.flush()
+            store = zarr.storage.ZipStore(tf.name, mode="r")
+            g = zarr.open(store, mode="r")
+            if lat is None:
+                lat = g["latitude"][:]
+                lon = g["longitude"][:]
+                mask = ((lon >= LON_MIN - FETCH_PAD_DEG) & (lon <= LON_MAX + FETCH_PAD_DEG) &
+                        (lat >= LAT_MIN - FETCH_PAD_DEG) & (lat <= LAT_MAX + FETCH_PAD_DEG))
+                rows = np.where(mask.any(axis=1))[0]
+                cols = np.where(mask.any(axis=0))[0]
+                r0, r1 = rows.min(), rows.max() + 1
+                c0, c1 = cols.min(), cols.max() + 1
+                lat, lon = lat[r0:r1, c0:c1], lon[r0:r1, c0:c1]
+                fill = np.inf if metric == "low" else -np.inf
+                reduced_temp_k = np.full(lat.shape, fill, dtype=np.float32)
+            hour_temp_k = g["temperature_2m"][r0:r1, c0:c1]
+            reduced_temp_k = (np.minimum if metric == "low" else np.maximum)(reduced_temp_k, hour_temp_k)
+            store.close()
 
     return lat, lon, reduced_temp_k, {"kind": "init", "value": init_time}
 
