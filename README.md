@@ -16,6 +16,10 @@ workflows. Each project lives in its own directory with its own README.
   Columbia Basin temperature map (same domain as
   `columbia-basin-alerts-map/`): high, low, or a specific hour's temps,
   from WM-6 3km, NOAA HRRR, ECMWF IFS, or ECMWF AIFS.
+- [`850-700-temp-chart/`](850-700-temp-chart/) — generates a styled
+  meteogram of the WindBorne WM-6 ensemble spread for a pressure-level
+  temperature at a point (defaults to KPSC / 850 mb), compared against
+  long-term climatology.
 
 ## Shared resources
 
