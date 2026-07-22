@@ -17,6 +17,7 @@ per outlook.
 | `temp_wk34`   | Temperature Outlook, Week 3–4                | CPC |
 | `precip_wk34` | Precipitation Outlook, Week 3–4              | CPC |
 | `spc_fire`    | Fire Weather Outlook, Day 1                  | SPC |
+| `spc_fire_day2` | Fire Weather Outlook, Day 2                | SPC |
 | `spc_severe`  | Severe Weather (Categorical) Outlook, Day 1  | SPC |
 | `wpc_precip`  | Excessive Rainfall Outlook, Day 1            | WPC |
 

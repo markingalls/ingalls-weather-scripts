@@ -14,6 +14,7 @@ frame/style. Pick one with --product:
     temp_wk34     CPC Week 3-4 Temperature Outlook
     precip_wk34   CPC Week 3-4 Precipitation Outlook
     spc_fire      SPC Day 1 Fire Weather Outlook
+    spc_fire_day2 SPC Day 2 Fire Weather Outlook
     spc_severe    SPC Day 1 Categorical (Severe Weather) Outlook
     wpc_precip    WPC Day 1 Excessive Rainfall Outlook
 
@@ -474,6 +475,16 @@ PRODUCTS = {
         style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire.png",
+    ),
+    "spc_fire_day2": dict(
+        title="Western U.S. Fire Weather Outlook — Day 2",
+        subtitle_prefix="NWS Storm Prediction Center — Day 2 Outlook",
+        agency="SPC",
+        urls=["https://www.spc.noaa.gov/products/fire_wx/day2fireotlk.kmz"],
+        parser=parse_kml_extended_data,
+        style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_fire_day2.png",
     ),
     "spc_severe": dict(
         title="Western U.S. Severe Weather Outlook",
