@@ -24,6 +24,10 @@ workflows. Each project lives in its own directory with its own README.
   canonical Columbia Basin lightning map (same domain as
   `columbia-basin-alerts-map/`): the last 24 hours of GLM flash detections,
   sourced from GOES-18.
+- [`columbia-basin-lightning-realtime-map/`](columbia-basin-lightning-realtime-map/)
+  — real-time companion to `columbia-basin-lightning-map/`: the last 2
+  hours of GLM flash detections, with finer 0-30/30-60/60-120 minute
+  recency bands for watching an active storm right now.
 
 ## Shared resources
 

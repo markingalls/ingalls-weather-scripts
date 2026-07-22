@@ -56,3 +56,8 @@ columbia-basin-temps/output/*.png
 # don't track them.
 columbia-basin-lightning-map/lightning_last24h.json
 columbia-basin-lightning-map/columbia_basin_lightning*.png
+
+# --- columbia-basin-lightning-realtime-map ---
+# same reasoning as columbia-basin-lightning-map above.
+columbia-basin-lightning-realtime-map/lightning_last2h.json
+columbia-basin-lightning-realtime-map/columbia_basin_lightning_realtime*.png

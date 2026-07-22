@@ -1,0 +1,9 @@
+matplotlib
+cartopy
+shapely
+geopandas
+pyproj
+requests
+Pillow
+boto3
+netCDF4
