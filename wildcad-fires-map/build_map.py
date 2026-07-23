@@ -5,7 +5,10 @@ Ingalls Weather
 Same domain as ../dew-point-storm-map/ (Prince George BC to Winnemucca NV,
 Bella Coola BC to Yellowstone WY), plotting currently active wildfires
 from three separate government sources, merged into one map since none of
-them individually covers the whole domain:
+them individually covers the whole domain. Markers are colored gray if
+contained ("Being Held" or better -- see "Containment coloring" near
+NEW_FIRE_HOURS below for why this is a status-category proxy, not a
+literal percentage), else red if reported in the last 24h, else orange.
 
   US (WA/OR/ID/w.MT/n.NV/n.UT/nw.WY): WildCAD-E, the interagency dispatch
     CAD system used by essentially every US wildland fire dispatch center.
@@ -203,6 +206,12 @@ BC_FIRES_URL = "https://services6.arcgis.com/ubm4tcTYICKBpist/arcgis/rest/servic
 AB_FIRES_URL = "https://services.arcgis.com/Eb8P5h4CJk8utIBz/arcgis/rest/services/wildfire_location_active/FeatureServer/0/query"
 HECTARES_TO_ACRES = 2.47105
 
+# BC's and Alberta's "Stage of Control"/"Fire Status" values that count as
+# "Being Held or better" for the gray contained-fire category (see
+# "Containment coloring" below) -- neither "Out of Control" (not contained
+# at all) nor "Out" (not shown here in the first place, excluded upstream).
+CONTAINED_STATUSES = {"Being Held", "Under Control"}
+
 # ---------------------------------------------------------------------------
 # Marker sizing -- area (not radius) scales with acres so the *visual*
 # footprint reads proportionally, log-scaled since fire size spans several
@@ -218,10 +227,22 @@ SIZE_LEGEND_ACRES = [1, 25, 500, 5000]
 # ---------------------------------------------------------------------------
 # Age coloring -- red for a fire first reported within NEW_FIRE_HOURS,
 # orange otherwise (including unknown age -- see fetch_all_fires callers).
+# Containment coloring (checked first -- see build_map()) overrides age:
+# gray for a fire at "Being Held" or better. None of the three sources
+# publishes an actual percent-contained figure -- BC/Alberta only expose a
+# handful of named status categories, and WildCAD only a contain/control
+# timestamp pair -- so this is a status-category proxy, not a literal
+# percentage threshold. "contained" per source (see fetch_*_fires()):
+#   WildCAD    fire_status.contain is set (control is always unset here,
+#              since fires WildCAD itself marks controlled are filtered
+#              out entirely as no longer active)
+#   BC/Alberta FIRE_STATUS in CONTAINED_STATUSES ("Being Held" or "Under
+#              Control")
 # ---------------------------------------------------------------------------
 NEW_FIRE_HOURS = 24.0
 NEW_COLOR, NEW_EDGE = "#e6231e", "#7a0e0a"
 EXISTING_COLOR, EXISTING_EDGE = "#f2892b", "#8a4b0a"
+CONTAINED_COLOR, CONTAINED_EDGE = "#9a9a92", "#5a5a52"
 
 
 def load_land():
@@ -301,6 +322,10 @@ def fetch_wildcad_fires(lookback_days, now):
                 status = {}
             if status.get("control"):
                 continue  # declared controlled -- no longer an active fire
+            # A "contain" timestamp is WildCAD's rough equivalent of BC/
+            # Alberta's "Being Held" -- perimeter lined, not yet declared
+            # fully controlled (control is always null here, see above).
+            contained = bool(status.get("contain"))
             try:
                 acres = float(rec["acres"]) if rec.get("acres") not in (None, "") else None
             except (TypeError, ValueError):
@@ -321,7 +346,7 @@ def fetch_wildcad_fires(lookback_days, now):
             by_key[key] = {
                 "name": (rec.get("name") or "UNNAMED").strip(),
                 "lat": lat, "lon": lon, "acres": acres,
-                "age_hours": age_hours, "source": dc,
+                "age_hours": age_hours, "contained": contained, "source": dc,
             }
     return by_key
 
@@ -363,9 +388,10 @@ def fetch_bc_fires(now):
         if p.get("IGNITION_DATE") is not None:
             ignition = datetime.fromtimestamp(p["IGNITION_DATE"] / 1000, tz=timezone.utc)
             age_hours = (now - ignition).total_seconds() / 3600
+        contained = p.get("FIRE_STATUS") in CONTAINED_STATUSES
         by_key[f"BC:{p.get('FIRE_ID')}"] = {
             "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
-            "age_hours": age_hours, "source": "BCWS",
+            "age_hours": age_hours, "contained": contained, "source": "BCWS",
         }
     return by_key
 
@@ -378,7 +404,7 @@ def fetch_ab_fires(now):
     try:
         resp = requests.get(AB_FIRES_URL, params={
             "where": "1=1",
-            "outFields": "FIRE_NUMBER,LATITUDE,LONGITUDE,AREA_ESTIMATE,LABEL,FIRE_STATUS_DATE",
+            "outFields": "FIRE_NUMBER,LATITUDE,LONGITUDE,AREA_ESTIMATE,LABEL,FIRE_STATUS_DATE,FIRE_STATUS",
             "f": "geojson",
         }, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
         resp.raise_for_status()
@@ -412,9 +438,10 @@ def fetch_ab_fires(now):
                 age_hours = (now - status_dt).total_seconds() / 3600
             except ValueError:
                 pass
+        contained = p.get("FIRE_STATUS") in CONTAINED_STATUSES
         by_key[f"AB:{p.get('FIRE_NUMBER')}"] = {
             "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
-            "age_hours": age_hours, "source": "ABWildfire",
+            "age_hours": age_hours, "contained": contained, "source": "ABWildfire",
         }
     return by_key
 
@@ -473,15 +500,22 @@ def build_map(fires, fetched_at, output_path):
     # a big one's marker. No name labels -- with ~300+ fires active across
     # this domain in a typical mid-season snapshot, any label-density
     # threshold worth using still reads as clutter; the size/color alone
-    # (plus the legends) carries the useful signal. Color flags age: red
-    # for a fire first reported within the last NEW_FIRE_HOURS, orange for
-    # everything else, including any fire whose age can't be determined
-    # (safer default than implying "new" on missing data).
+    # (plus the legends) carries the useful signal. Color: gray for a
+    # contained fire (checked first -- containment is the more decision-
+    # relevant fact, so it wins over a fire also happening to be new),
+    # else red if first reported within the last NEW_FIRE_HOURS, else
+    # orange -- including any fire whose age can't be determined (safer
+    # default than implying "new" on missing data).
     fires_by_size = sorted(fires, key=lambda f: -(f["acres"] or 0))
     for f in fires_by_size:
         size = marker_size_pts2(f["acres"])
         is_new = f["age_hours"] is not None and f["age_hours"] <= NEW_FIRE_HOURS
-        color, edge = (NEW_COLOR, NEW_EDGE) if is_new else (EXISTING_COLOR, EXISTING_EDGE)
+        if f["contained"]:
+            color, edge = CONTAINED_COLOR, CONTAINED_EDGE
+        elif is_new:
+            color, edge = NEW_COLOR, NEW_EDGE
+        else:
+            color, edge = EXISTING_COLOR, EXISTING_EDGE
         ax.scatter(f["lon"], f["lat"], s=size, color=color, edgecolor=edge,
                    linewidth=0.7, alpha=0.85, zorder=50, transform=pc)
 
@@ -500,6 +534,8 @@ def build_map(fires, fetched_at, output_path):
                markeredgewidth=0.7, alpha=0.85, markersize=7, label=f"New (<{NEW_FIRE_HOURS:.0f}h)"),
         Line2D([0], [0], marker="o", linestyle="none", color=EXISTING_COLOR, markeredgecolor=EXISTING_EDGE,
                markeredgewidth=0.7, alpha=0.85, markersize=7, label="Existing"),
+        Line2D([0], [0], marker="o", linestyle="none", color=CONTAINED_COLOR, markeredgecolor=CONTAINED_EDGE,
+               markeredgewidth=0.7, alpha=0.85, markersize=7, label="Contained (Being Held+)"),
     ]
     age_leg = fig.legend(handles=age_handles, loc="center", frameon=False, fontsize=8.75,
                           prop=poppins_reg, ncol=len(age_handles), handletextpad=0.6, columnspacing=1.4,

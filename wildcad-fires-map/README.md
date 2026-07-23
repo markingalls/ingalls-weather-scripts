@@ -6,8 +6,8 @@ Winnemucca NV, Bella Coola BC to Yellowstone WY), merged from three
 government sources since none of them alone covers the whole domain:
 WildCAD-E (US dispatch centers), BC Wildfire Service, and Alberta
 Wildfire. Markers are sized (log scale, no name labels) by acreage and
-colored by age (red if first reported within the last 24 hours, orange
-otherwise).
+colored gray if contained ("Being Held" or better), else red if first
+reported within the last 24 hours, else orange.
 
 ## Files
 
@@ -109,12 +109,24 @@ with each other, then flattened and sorted by acreage.
 - **Marker sizing**: area (not radius) scales log-scale with acres, since
   fire size spans several orders of magnitude (0.1 to 10,000+ acres) in
   the combined dataset -- `marker_size_pts2()`.
+- **Containment coloring (checked first, wins over age)**: gray if a fire
+  is contained -- "Being Held" or better. **None of the three sources
+  publishes an actual percent-contained figure** -- confirmed directly
+  against all three live APIs, not assumed -- so this is a status-category
+  proxy, not a literal percentage threshold:
+  - WildCAD: `fire_status.contain` timestamp is set. Its `control`
+    timestamp (fully controlled) is never set on any fire shown here,
+    since WildCAD fires marked controlled are filtered out entirely as no
+    longer active (see "Currently active" above) -- so "contain" is as
+    far up the containment ladder as a WildCAD fire in this dataset gets.
+  - BC / Alberta: `FIRE_STATUS` in `CONTAINED_STATUSES`
+    (`"Being Held"`, `"Under Control"`).
 - **Age coloring**: red if a fire was first reported within
-  `NEW_FIRE_HOURS` (24 by default), orange otherwise -- including any fire
-  whose age can't be determined, a safer default than implying "new" on
-  missing data (in practice this never happens: every source currently
-  supplies *some* date field). Each source's notion of "first reported"
-  differs in reliability:
+  `NEW_FIRE_HOURS` (24 by default) and isn't contained, orange otherwise
+  -- including any fire whose age can't be determined, a safer default
+  than implying "new" on missing data (in practice this never happens:
+  every source currently supplies *some* date field). Each source's
+  notion of "first reported" differs in reliability:
   - WildCAD: the incident's initial-report timestamp. It's naive (no UTC
     offset) and dispatch centers log in local time, not UTC -- treated as
     UTC here, so up to ~7 hours off depending on the center's time zone.
