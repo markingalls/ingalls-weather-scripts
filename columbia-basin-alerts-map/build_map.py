@@ -98,10 +98,12 @@ def hex_to_rgb(hexcolor):
     return tuple(int(hexcolor[i:i+2], 16) for i in (0, 2, 4))
 
 
-# Degree^2 area floor for keeping a polygon from an overlay op. Real slivers
-# of interest are many orders of magnitude bigger than this; anything under
-# it is floating-point noise from touching boundaries.
-MIN_POLY_AREA = 1e-8
+# Degree^2 area floor for keeping a polygon from an overlay op. The
+# smallest real alert zone we've seen is ~0.006 deg^2; floating-point
+# slivers from touching boundaries have measured as large as ~3e-7
+# deg^2 (a ~1km-long, near-zero-width strip) and still broken cartopy's
+# projection cutting, so this floor sits comfortably between the two.
+MIN_POLY_AREA = 1e-4
 
 
 def polygons_only(geom):
