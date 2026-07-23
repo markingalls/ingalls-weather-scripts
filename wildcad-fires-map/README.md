@@ -121,6 +121,15 @@ with each other, then flattened and sorted by acreage.
     far up the containment ladder as a WildCAD fire in this dataset gets.
   - BC / Alberta: `FIRE_STATUS` in `CONTAINED_STATUSES`
     (`"Being Held"`, `"Under Control"`).
+- **Draw order**: markers are drawn red on top of orange on top of gray,
+  so in a dense, overlapping cluster the most operationally urgent fires
+  (new, uncontained) are never hidden underneath older or contained ones.
+  All markers share one `zorder`, so this is controlled by sorting the
+  fire list itself before the draw loop (ascending by color priority,
+  gray/orange/red), not by giving each color a different `zorder` --
+  within each color tier, acreage (descending) is still the tiebreaker,
+  same as before, so a small fire isn't buried under a same-colored large
+  one nearby either.
 - **Age coloring**: red if a fire was first reported within
   `NEW_FIRE_HOURS` (24 by default) and isn't contained, orange otherwise
   -- including any fire whose age can't be determined, a safer default

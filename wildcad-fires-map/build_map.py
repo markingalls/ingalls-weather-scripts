@@ -495,27 +495,35 @@ def build_map(fires, fetched_at, output_path):
                        color="#3a3835", ha=ha, va="center", zorder=11, transform=name_transform)
         txt.set_path_effects(city_stroke)
 
-    # Fire markers -- filled circle, area scaled (log) by acres, drawn
-    # largest-first (zorder by size) so small fires never get buried under
-    # a big one's marker. No name labels -- with ~300+ fires active across
-    # this domain in a typical mid-season snapshot, any label-density
-    # threshold worth using still reads as clutter; the size/color alone
-    # (plus the legends) carries the useful signal. Color: gray for a
-    # contained fire (checked first -- containment is the more decision-
-    # relevant fact, so it wins over a fire also happening to be new),
-    # else red if first reported within the last NEW_FIRE_HOURS, else
-    # orange -- including any fire whose age can't be determined (safer
-    # default than implying "new" on missing data).
-    fires_by_size = sorted(fires, key=lambda f: -(f["acres"] or 0))
-    for f in fires_by_size:
-        size = marker_size_pts2(f["acres"])
-        is_new = f["age_hours"] is not None and f["age_hours"] <= NEW_FIRE_HOURS
+    # Fire markers -- filled circle, area scaled (log) by acres. Color:
+    # gray for a contained fire (checked first -- containment is the more
+    # decision-relevant fact, so it wins over a fire also happening to be
+    # new), else red if first reported within the last NEW_FIRE_HOURS,
+    # else orange -- including any fire whose age can't be determined
+    # (safer default than implying "new" on missing data). No name labels
+    # -- with ~300+ fires active across this domain in a typical
+    # mid-season snapshot, any label-density threshold worth using still
+    # reads as clutter; the size/color alone (plus the legends) carries
+    # the useful signal.
+    def fire_color(f):
         if f["contained"]:
-            color, edge = CONTAINED_COLOR, CONTAINED_EDGE
-        elif is_new:
-            color, edge = NEW_COLOR, NEW_EDGE
-        else:
-            color, edge = EXISTING_COLOR, EXISTING_EDGE
+            return CONTAINED_COLOR, CONTAINED_EDGE, 0
+        if f["age_hours"] is not None and f["age_hours"] <= NEW_FIRE_HOURS:
+            return NEW_COLOR, NEW_EDGE, 2
+        return EXISTING_COLOR, EXISTING_EDGE, 1
+
+    # Draw order stacks red on top of orange on top of gray -- a new fire
+    # is the most operationally urgent thing to see first, gray the least
+    # -- sorted ascending by that draw_priority so higher-priority colors
+    # are drawn later (on top). Acres (descending) is the tiebreaker
+    # within a color tier, same as before, so a small fire still isn't
+    # buried under a same-colored large one nearby.
+    fires_to_draw = sorted(
+        ((f, *fire_color(f)) for f in fires),
+        key=lambda t: (t[3], -(t[0]["acres"] or 0)),
+    )
+    for f, color, edge, _priority in fires_to_draw:
+        size = marker_size_pts2(f["acres"])
         ax.scatter(f["lon"], f["lat"], s=size, color=color, edgecolor=edge,
                    linewidth=0.7, alpha=0.85, zorder=50, transform=pc)
 
