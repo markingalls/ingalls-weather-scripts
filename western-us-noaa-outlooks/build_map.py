@@ -55,11 +55,13 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
 import matplotlib.colors as mcolors
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, PathPatch
+from matplotlib.axes import Axes
 import numpy as np
 import requests
 
 import cartopy.crs as ccrs
+from cartopy.mpl.path import shapely_to_path
 import shapely
 from shapely.geometry import shape, box, MultiPolygon, Polygon as ShPolygon, MultiPolygon as ShMultiPolygon
 from shapely.ops import unary_union
@@ -279,6 +281,132 @@ def date_from_fetch_time(placemarks, fetched_at):
 
 
 # ---------------------------------------------------------------------------
+# Overlap striping -- for products with more than one independent hazard
+# axis (e.g. SPC's fire-weather-index tiers vs. its separate dry-thunderstorm
+# risk), alpha-stacking two overlapping fills blends into a color matching
+# neither hazard. Same diagonal-candy-stripe technique as
+# columbia-basin-alerts-map uses for overlapping NWS alerts.
+# ---------------------------------------------------------------------------
+
+def hex_to_rgb(hexcolor):
+    hexcolor = hexcolor.lstrip("#")
+    return tuple(int(hexcolor[i:i+2], 16) for i in (0, 2, 4))
+
+
+# Degree^2 area floor for keeping a polygon from an overlay op. Real slivers
+# of interest are many orders of magnitude bigger than this; anything under
+# it is floating-point noise from touching boundaries.
+MIN_POLY_AREA = 1e-8
+
+
+def polygons_only(geom):
+    """Drop degenerate Point/LineString/near-zero-area slivers that
+    shapely's intersection and difference ops leave behind at touching
+    polygon boundaries. Left in, cartopy's projection code can't cut a
+    degenerate ring cleanly and falls back to covering the entire
+    projection disk instead of the sliver's true (near-zero) extent --
+    which is what made overlap-stripe fills bleed across the whole map."""
+    if geom.geom_type == "GeometryCollection":
+        parts = [g for g in geom.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        geom = unary_union(parts) if parts else ShPolygon()
+    if geom.geom_type not in ("Polygon", "MultiPolygon"):
+        return ShPolygon()
+    polys = list(geom.geoms) if geom.geom_type == "MultiPolygon" else [geom]
+    kept = [p for p in polys if p.area > MIN_POLY_AREA]
+    if not kept:
+        return ShPolygon()
+    return unary_union(kept) if len(kept) > 1 else kept[0]
+
+
+def make_stripe_image(colors, width_px, height_px, stripe_px=20):
+    """Diagonal candy-stripe raster alternating full-opacity bands of
+    each color in `colors`, sized to cover width_px x height_px."""
+    yy, xx = np.mgrid[0:height_px, 0:width_px]
+    band = ((xx + yy) // stripe_px) % len(colors)
+    img = np.zeros((height_px, width_px, 3), dtype=np.uint8)
+    for i, c in enumerate(colors):
+        img[band == i] = hex_to_rgb(c)
+    return img
+
+
+def draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px, stripe_overlaps):
+    """Draw the parsed hazard polygons. When stripe_overlaps is set, regions
+    where two different hazard axes overlap (see the "axis" style field) are
+    drawn as candy-stripe fills instead of alpha-stacking; regions where
+    same-axis categories overlap (i.e. ordinary nested severity, like
+    Critical sitting inside Elevated) still just let the more severe one's
+    solid color win, unchanged from the non-striped path."""
+    if not stripe_overlaps:
+        for i, item in enumerate(styled):
+            ax.add_geometries([item["geom"]], crs=pc, facecolor=item["color"], edgecolor=item["color"],
+                               linewidth=1.2, alpha=item["alpha"], zorder=3 + i)
+        return
+
+    # Union polygons sharing a label (defensive -- each category is
+    # typically already a single placemark) before partitioning.
+    by_label = {}
+    for item in styled:
+        entry = by_label.setdefault(item["label"], {**item, "geoms": []})
+        entry["geoms"].append(item["geom"])
+    labels = []
+    for label, entry in by_label.items():
+        geom = entry["geoms"][0] if len(entry["geoms"]) == 1 else unary_union(entry["geoms"])
+        labels.append({**entry, "geom": geom})
+    labels.sort(key=lambda d: d["order_key"])
+
+    # Partition into disjoint regions, each tagged with the labels covering it.
+    partition = []  # list of (geom, tuple of label dicts)
+    for lab in labels:
+        next_partition = []
+        remaining = lab["geom"]
+        for cell_geom, cell_labels in partition:
+            overlap = polygons_only(cell_geom.intersection(remaining))
+            if not overlap.is_empty:
+                next_partition.append((overlap, cell_labels + (lab,)))
+            rest = polygons_only(cell_geom.difference(remaining))
+            if not rest.is_empty:
+                next_partition.append((rest, cell_labels))
+            remaining = polygons_only(remaining.difference(cell_geom))
+        if not remaining.is_empty:
+            next_partition.append((remaining, (lab,)))
+        partition = next_partition
+
+    OVERLAP_EDGE = "#4a4a4a"
+    for i, (geom, cell_labels) in enumerate(partition):
+        if geom.is_empty:
+            continue
+        axes_present = {l.get("axis", "primary") for l in cell_labels}
+        if len(axes_present) <= 1:
+            # Single axis (including the common single-label case) -- the
+            # most severe category's solid color wins, same as unstriped.
+            top = max(cell_labels, key=lambda l: l["order_key"])
+            ax.add_geometries([geom], crs=pc, facecolor=top["color"], edgecolor=top["color"],
+                               linewidth=1.2, alpha=top["alpha"], zorder=3 + i)
+            continue
+
+        # Cross-axis overlap: stripe with one representative (most severe
+        # within its own axis) color per axis present.
+        rep_by_axis = {}
+        for l in cell_labels:
+            axis = l.get("axis", "primary")
+            if axis not in rep_by_axis or l["order_key"] > rep_by_axis[axis]["order_key"]:
+                rep_by_axis[axis] = l
+        colors = [rep_by_axis[a]["color"] for a in sorted(rep_by_axis)]
+        alpha = max(l["alpha"] for l in cell_labels)
+        stripe_img = make_stripe_image(colors, ax_w_px, ax_h_px)
+        proj_geom = ax.projection.project_geometry(geom, pc)
+        clip_path = shapely_to_path(proj_geom)
+        clip_patch = PathPatch(clip_path, transform=ax.transData)
+        # GeoAxes overrides imshow to require a CRS transform; this is
+        # plain axes-fraction space, so call the base Axes.imshow.
+        im = Axes.imshow(ax, stripe_img, extent=(0, 1, 0, 1), transform=ax.transAxes,
+                          origin="upper", interpolation="nearest", alpha=alpha, zorder=3 + i)
+        im.set_clip_path(clip_patch)
+        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
+                           linewidth=1.2, alpha=1.0, zorder=3 + i + 0.05)
+
+
+# ---------------------------------------------------------------------------
 # Styling per source. Each style function takes a parsed placemark and
 # returns None (skip / unrecognized) or a dict with:
 #   color, alpha, order_key (severity, for zorder + legend ordering), label
@@ -340,14 +468,16 @@ def cpc_prob_style(cmap_by_direction):
 SPC_FIRE_STYLE = {
     # Official SPC categorical colors, from the fire_weather/SPC_firewx
     # MapServer renderer (mapservices.weather.noaa.gov) rather than a
-    # hand-picked approximation.
-    "ELEV": {"color": "#e69800", "alpha": 0.65, "order_key": 1, "label": "Elevated"},
-    "CRIT": {"color": "#ff0000", "alpha": 0.65, "order_key": 2, "label": "Critical"},
-    "EXTM": {"color": "#e600a9", "alpha": 0.65, "order_key": 3, "label": "Extreme"},
+    # hand-picked approximation. "axis" marks which independent hazard
+    # dimension a category belongs to -- see stripe_overlaps in PRODUCTS.
+    "ELEV": {"color": "#e69800", "alpha": 0.65, "order_key": 1, "label": "Elevated", "axis": "index"},
+    "CRIT": {"color": "#ff0000", "alpha": 0.65, "order_key": 2, "label": "Critical", "axis": "index"},
+    "EXTM": {"color": "#e600a9", "alpha": 0.65, "order_key": 3, "label": "Extreme", "axis": "index"},
     # Dry thunderstorm risk is a separate hazard axis (lightning without
     # rain), not a more severe fire-weather-index tier -- distinct hue.
     # ("Iso DryT" in SPC's own renderer; "Scattered DryT" reuses Critical's red.)
-    "IDRT": {"color": "#732600", "alpha": 0.55, "order_key": 4, "label": "Isolated Dry Thunderstorms"},
+    "IDRT": {"color": "#732600", "alpha": 0.55, "order_key": 4, "label": "Isolated Dry Thunderstorms",
+              "axis": "dry_thunder"},
 }
 
 SPC_SEVERE_STYLE = {
@@ -475,6 +605,7 @@ PRODUCTS = {
         style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire.png",
+        stripe_overlaps=True,
     ),
     "spc_fire_day2": dict(
         title="Western U.S. Fire Weather Outlook — Day 2",
@@ -485,6 +616,7 @@ PRODUCTS = {
         style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire_day2.png",
+        stripe_overlaps=True,
     ),
     "spc_severe": dict(
         title="Western U.S. Severe Weather Outlook",
@@ -657,16 +789,21 @@ def build_map(product_key, output_path, override_path=None):
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
     ax.patch.set_facecolor("white")
 
+    # Pixel size of the map's plotted area, used for candy-stripe fills
+    # (draw_hazard_layers) at a consistent on-screen stripe width.
+    fig.canvas.draw()
+    ax_bbox = ax.get_window_extent()
+    ax_w_px, ax_h_px = int(ax_bbox.width), int(ax_bbox.height)
+
     ax.add_geometries(land_geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", linewidth=0, zorder=1)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=2)
     ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac", linewidth=0.7, zorder=2.2)
     ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=2.5)
 
     # Outlook polygons, least to most severe so more severe areas draw on top
-    # where categories overlap.
-    for i, item in enumerate(styled):
-        ax.add_geometries([item["geom"]], crs=pc, facecolor=item["color"], edgecolor=item["color"],
-                           linewidth=1.2, alpha=item["alpha"], zorder=3 + i)
+    # where same-axis categories overlap; cross-axis overlaps get striped
+    # instead when the product opts in (see PRODUCTS[...]["stripe_overlaps"]).
+    draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px, cfg.get("stripe_overlaps", False))
 
     # City labels
     for name, lon, lat, pos in CITIES:
