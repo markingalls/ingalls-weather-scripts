@@ -155,9 +155,10 @@ LOW_WINDOW = (2, 9)
 
 # --metric fire -- SPC's Fire Weather Outlook criteria: sustained 10m wind,
 # 2m relative humidity (from temperature_2m/dewpoint_2m via the Magnus
-# formula), and 2m temperature must all cross their thresholds at once for
-# >= FIRE_SUSTAINED_HOURS consecutive hours somewhere in the day. RH
-# thresholds are regional (SPC publishes a critical-RH-by-region map);
+# formula), and 2m temperature must all cross their thresholds at once in
+# some hour of the day. (SPC's own criteria also require this to hold for
+# >= 3 consecutive hours; this script doesn't enforce that minimum duration.)
+# RH thresholds are regional (SPC publishes a critical-RH-by-region map);
 # this domain sits in the Columbia Basin's own "<=20%" critical band per
 # that map, so RH thresholds below are fixed to that region rather than
 # sampled per-pixel -- the western fringe of this map's domain (Portland/
@@ -171,7 +172,6 @@ FIRE_CATEGORIES = [
 ]
 FIRE_CATEGORY_NAMES = {0: "None", 1: "Elevated", 2: "Critical", 3: "Extreme"}
 FIRE_CATEGORY_COLORS = {1: "#E8C468", 2: "#FF3B30", 3: "#E066FF"}
-FIRE_SUSTAINED_HOURS = 3
 MPS_TO_MPH = 2.236936
 
 # hrrr/ecmwf-ifs/ecmwf-aifs are fetched at full native resolution, straight
@@ -522,8 +522,8 @@ def compute_fire_category_grid(temp_k_3d, dewpoint_k_3d, wind_u_3d, wind_v_3d):
     -- each [hour, lat, lon] -- to a single peak fire-weather risk level per
     cell (0=None, 1=Elevated, 2=Critical, 3=Extreme), per FIRE_CATEGORIES:
     a cell reaches a level once that level's wind/RH/temperature thresholds
-    are all met for >= FIRE_SUSTAINED_HOURS *consecutive* hours somewhere in
-    the stack. Relative humidity is derived from temperature/dewpoint via
+    are all met simultaneously in any single hour of the stack (no minimum
+    duration). Relative humidity is derived from temperature/dewpoint via
     the Magnus formula (both are already Kelvin in wm6-3km's output)."""
     temp_f = k_to_f(temp_k_3d)
     temp_c = temp_k_3d - 273.15
@@ -532,17 +532,10 @@ def compute_fire_category_grid(temp_k_3d, dewpoint_k_3d, wind_u_3d, wind_v_3d):
               / np.exp((17.625 * temp_c) / (243.04 + temp_c)))
     wind_mph = np.sqrt(wind_u_3d ** 2 + wind_v_3d ** 2) * MPS_TO_MPH
 
-    n_hours = temp_f.shape[0]
     category_grid = np.zeros(temp_f.shape[1:], dtype=int)
     for level, wind_min, rh_max, temp_min in FIRE_CATEGORIES:
         meets_hour = (wind_mph >= wind_min) & (rh_pct <= rh_max) & (temp_f >= temp_min)
-        sustained = np.zeros(temp_f.shape[1:], dtype=bool)
-        for h in range(n_hours - FIRE_SUSTAINED_HOURS + 1):
-            window_met = meets_hour[h]
-            for k in range(1, FIRE_SUSTAINED_HOURS):
-                window_met = window_met & meets_hour[h + k]
-            sustained |= window_met
-        category_grid = np.maximum(category_grid, np.where(sustained, level, 0))
+        category_grid = np.maximum(category_grid, np.where(meets_hour.any(axis=0), level, 0))
 
     return category_grid
 
@@ -1003,10 +996,10 @@ def build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, ove
     draw_land(ax, pc, facecolor="#e3e1da", edgecolor="none", zorder=0.5)
 
     # Categorical fill -- each of SPC's three risk tiers requires its own
-    # wind/RH/temperature thresholds to hold for >= FIRE_SUSTAINED_HOURS
-    # consecutive hours somewhere in the day (see compute_fire_category_grid).
-    # "None" cells are left fully transparent so the land color shows
-    # through, similar to SPC's own outlook graphics.
+    # wind/RH/temperature thresholds to hold at once in some hour of the
+    # day (see compute_fire_category_grid). "None" cells are left fully
+    # transparent so the land color shows through, similar to SPC's own
+    # outlook graphics.
     rgba = np.zeros(category_grid.shape + (4,))
     for level, hex_color in FIRE_CATEGORY_COLORS.items():
         cells = category_grid == level

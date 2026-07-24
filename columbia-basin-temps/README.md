@@ -63,10 +63,12 @@ Plots peak fire weather risk instead of temperature, using [SPC's Fire
 Weather Outlook criteria](https://www.spc.noaa.gov/misc/about.html#FireWx):
 a cell reaches **Elevated**, **Critical**, or **Extreme** once that tier's
 sustained 10m wind, 2m relative humidity, and 2m temperature thresholds
-are all met *simultaneously* for at least 3 consecutive hours somewhere in
-the 24 local hours of the target date (`compute_fire_category_grid()`;
-relative humidity is derived from `temperature_2m`/`dewpoint_2m` via the
-Magnus formula, wind from `wind_u_10m`/`wind_v_10m`):
+are all met *simultaneously* in any single hour of the 24 local hours of
+the target date (`compute_fire_category_grid()`; relative humidity is
+derived from `temperature_2m`/`dewpoint_2m` via the Magnus formula, wind
+from `wind_u_10m`/`wind_v_10m`). SPC's own criteria also require this to
+hold for >= 3 consecutive hours; this script doesn't enforce that minimum
+duration, so it will flag brief spikes SPC's own product wouldn't:
 
 | Tier | Sustained wind | RH | Temp |
 |------|-----------------|-----|------|
