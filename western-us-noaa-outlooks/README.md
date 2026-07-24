@@ -20,6 +20,7 @@ per outlook.
 | `spc_fire_day2` | Fire Weather Outlook, Day 2                | SPC |
 | `spc_severe`  | Severe Weather (Categorical) Outlook, Day 1  | SPC |
 | `wpc_precip`  | Excessive Rainfall Outlook, Day 1            | WPC |
+| `drought_monitor` | U.S. Drought Monitor (D0–D4)             | NDMC |
 
 ## Usage
 

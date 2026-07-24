@@ -17,6 +17,7 @@ frame/style. Pick one with --product:
     spc_fire_day2 SPC Day 2 Fire Weather Outlook
     spc_severe    SPC Day 1 Categorical (Severe Weather) Outlook
     wpc_precip    WPC Day 1 Excessive Rainfall Outlook
+    drought_monitor  U.S. Drought Monitor (NDMC weekly D0-D4 categories)
 
 USAGE
 -----
@@ -232,6 +233,31 @@ def parse_kml_extended_data(text):
     return results
 
 
+def parse_usdm_geojson(text):
+    """U.S. Drought Monitor's ArcGIS FeatureServer returns plain GeoJSON
+    rather than KML: one feature per DM category (0-4), each already the
+    full cumulative extent of that category or worse. Only exterior rings
+    are kept per part (holes are dropped), matching the same simplification
+    the KML parsers above make for polygons with interior boundaries."""
+    data = json.loads(text)
+    results = []
+    for feat in data.get("features", []):
+        geom = feat.get("geometry")
+        if not geom:
+            continue
+        if geom["type"] == "Polygon":
+            parts = [geom["coordinates"]]
+        elif geom["type"] == "MultiPolygon":
+            parts = geom["coordinates"]
+        else:
+            continue
+        rings = [part[0] for part in parts if part and len(part[0]) >= 3]
+        if not rings:
+            continue
+        results.append({"fields": feat.get("properties", {}), "rings": rings})
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Date formatting per source
 # ---------------------------------------------------------------------------
@@ -278,6 +304,22 @@ def date_from_fetch_time(placemarks, fetched_at):
     """WPC's Excessive Rainfall Outlook KML carries no embedded date --
     fall back to today (the outlook is always for the current cycle)."""
     return f"issued {datetime.now().strftime('%b %d, %Y')}"
+
+
+def date_from_usdm_fields(placemarks, fetched_at):
+    """USDM's ValidStart/ValidEnd come through as epoch-millisecond ints
+    (ArcGIS's GeoJSON date encoding), one pair per DM feature but always
+    the same pair -- the whole weekly release shares one valid period."""
+    starts, ends = [], []
+    for pm in placemarks:
+        f = pm["fields"]
+        if f.get("ValidStart") is not None:
+            starts.append(datetime.utcfromtimestamp(f["ValidStart"] / 1000))
+        if f.get("ValidEnd") is not None:
+            ends.append(datetime.utcfromtimestamp(f["ValidEnd"] / 1000))
+    if not starts or not ends:
+        return "valid date range unavailable"
+    return _format_range(min(starts), max(ends))
 
 
 # ---------------------------------------------------------------------------
@@ -518,6 +560,28 @@ def wpc_ero_style(pm):
     return None
 
 
+# Official USDM palette (droughtmonitor.unl.edu legend). Categories are
+# cumulative -- each DM polygon is "this category or worse" -- so, like the
+# SPC severe tiers, drawing least to most severe with the more severe one on
+# top is exactly right with no overlap striping needed.
+USDM_STYLE = {
+    0: {"color": "#ffff00", "alpha": 0.65, "order_key": 1, "label": "D0 — Abnormally Dry"},
+    1: {"color": "#fcd37f", "alpha": 0.65, "order_key": 2, "label": "D1 — Moderate Drought"},
+    2: {"color": "#ffaa00", "alpha": 0.65, "order_key": 3, "label": "D2 — Severe Drought"},
+    3: {"color": "#e60000", "alpha": 0.65, "order_key": 4, "label": "D3 — Extreme Drought"},
+    4: {"color": "#730000", "alpha": 0.65, "order_key": 5, "label": "D4 — Exceptional Drought"},
+}
+
+
+def usdm_style(pm):
+    dm = pm["fields"].get("DM")
+    sty = USDM_STYLE.get(dm)
+    if sty is None:
+        print(f"WARNING: unrecognized drought category DM={dm}, skipping.")
+        return None
+    return dict(sty)
+
+
 # ---------------------------------------------------------------------------
 # Product registry
 # ---------------------------------------------------------------------------
@@ -637,6 +701,20 @@ PRODUCTS = {
         style=wpc_ero_style,
         date=date_from_fetch_time,
         output="western_us_wpc_precip.png",
+    ),
+    "drought_monitor": dict(
+        title="Western U.S. Drought Monitor",
+        subtitle_prefix="National Drought Mitigation Center — U.S. Drought Monitor",
+        agency="NDMC",
+        urls=[
+            "https://services5.arcgis.com/0OTVzJS4K09zlixn/arcgis/rest/services/"
+            "USDM_current/FeatureServer/0/query?where=1%3D1&outFields=DM,ValidStart,ValidEnd"
+            "&returnGeometry=true&outSR=4326&f=geojson"
+        ],
+        parser=parse_usdm_geojson,
+        style=usdm_style,
+        date=date_from_usdm_fields,
+        output="western_us_drought_monitor.png",
     ),
 }
 
@@ -839,9 +917,14 @@ def build_map(product_key, output_path, override_path=None):
         (frame_px.x0 + MAP_FRAME_INSET_PX) / (FIG_WIDTH_IN * FIG_DPI),
         (frame_px.y0 + MAP_FRAME_INSET_PX) / (FIG_HEIGHT_IN * FIG_DPI),
     )
+    # Products with more than a handful of categories (e.g. the drought
+    # monitor's five D0-D4 tiers) get a second column so the box stays
+    # short enough not to grow up into a city label near the bottom-left
+    # corner, instead of just getting taller.
+    legend_ncols = 2 if len(handles) > 4 else 1
     leg = fig.legend(handles=handles, loc="lower left", frameon=True, fontsize=8.25,
                       prop=poppins_reg, handlelength=1.05, handleheight=1.05, borderpad=0.3,
-                      facecolor="white", framealpha=0.7, edgecolor="none",
+                      facecolor="white", framealpha=0.7, edgecolor="none", ncols=legend_ncols,
                       bbox_to_anchor=legend_anchor)
     for text in leg.get_texts():
         text.set_color("#2b2a26")
