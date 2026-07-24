@@ -842,6 +842,14 @@ def build_map(product_key, output_path, override_path=None):
             continue
         polys = [ShPolygon(ring) for ring in pm["rings"]]
         geom = polys[0] if len(polys) == 1 else ShMultiPolygon(polys)
+        if not geom.is_valid:
+            # Self-intersecting rings (seen in USDM's multi-hundred-part
+            # category polygons) make matplotlib/cartopy fill well beyond
+            # the geometry's real extent -- e.g. D0 bled into Canada,
+            # Mexico, and the Pacific despite genuinely stopping at the
+            # US border. make_valid resolves the self-intersections rather
+            # than papering over them with a buffer(0) hull-ish fudge.
+            geom = polygons_only(shapely.make_valid(geom))
         if not geom.intersects(MAP_BBOX):
             continue  # outside the Western US frame -- drop so it doesn't pad out the legend
         styled.append({**sty, "geom": geom})
