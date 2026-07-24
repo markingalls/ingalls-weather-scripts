@@ -734,21 +734,25 @@ def setup_figure_and_axes():
     return fig, ax, pc
 
 
-def draw_basemap_layers(ax, pc):
-    """Coastline, state/international borders, and highways -- identical
-    across every metric's rendering path, drawn on top of whatever data
-    raster comes before it (zorder 1)."""
+def draw_land(ax, pc, facecolor="none", edgecolor="#4a6b7a", zorder=1.5):
+    """Coastline -- outline only (no fill, the default) so a continuous data
+    raster underneath still shows over water; this is what traces the
+    Puget Sound's shape for the temperature metrics. --metric fire instead
+    fills it (Columbia Basin Alerts map's land color) at a zorder below its
+    categorical raster, since most of the map has no fire risk to show."""
+    land_geoms = load_land()
+    ax.add_geometries(land_geoms, crs=pc, facecolor=facecolor, edgecolor=edgecolor, linewidth=0.8, zorder=zorder)
+
+
+def draw_borders_and_roads(ax, pc, admin1_edgecolor="#5a4632", admin0_edgecolor="#3a2f21"):
+    """State/international borders and highways, drawn on top of whatever
+    data raster comes before them."""
     admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
-    land_geoms = load_land()
     motorway_geoms, trunk_geoms = load_roads()
 
-    # Coastline -- outline only (no fill) so the data raster still shows
-    # over water; this is what traces the Puget Sound's shape.
-    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
-
-    ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
-    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+    ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor=admin1_edgecolor, linewidth=0.8, zorder=2)
+    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor=admin0_edgecolor, linewidth=1.1, zorder=2.5)
 
     ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR, linewidth=1.1, zorder=2.6)
     ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR, linewidth=1.3, zorder=2.7)
@@ -873,7 +877,8 @@ def build_map(source, metric, hour, date, output_path, override_path=None):
     ax.imshow(temp_k, transform=pc, cmap=temp_cmap, norm=temp_norm, origin="lower",
               extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
 
-    draw_basemap_layers(ax, pc)
+    draw_land(ax, pc)
+    draw_borders_and_roads(ax, pc)
 
     # City labels -- name plus that spot's forecast value, sampled from the
     # resampled regular grid.
@@ -991,11 +996,17 @@ def build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, ove
 
     fig, ax, pc = setup_figure_and_axes()
 
+    # Land fill (below the fire raster) and border/road colors match
+    # ../columbia-basin-alerts-map/build_map.py's palette -- unlike the
+    # temperature metrics, most of this map has no fire risk to show, so a
+    # plain white background reads as missing data rather than "clear."
+    draw_land(ax, pc, facecolor="#e3e1da", edgecolor="none", zorder=0.5)
+
     # Categorical fill -- each of SPC's three risk tiers requires its own
     # wind/RH/temperature thresholds to hold for >= FIRE_SUSTAINED_HOURS
     # consecutive hours somewhere in the day (see compute_fire_category_grid).
-    # "None" cells are left fully transparent so risk areas stand out
-    # against the plain basemap, similar to SPC's own outlook graphics.
+    # "None" cells are left fully transparent so the land color shows
+    # through, similar to SPC's own outlook graphics.
     rgba = np.zeros(category_grid.shape + (4,))
     for level, hex_color in FIRE_CATEGORY_COLORS.items():
         cells = category_grid == level
@@ -1004,7 +1015,7 @@ def build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, ove
     ax.imshow(rgba, transform=pc, origin="lower",
               extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
 
-    draw_basemap_layers(ax, pc)
+    draw_borders_and_roads(ax, pc, admin1_edgecolor="#b9b6ac", admin0_edgecolor="#9a978c")
 
     # City labels -- name plus that spot's peak risk category.
     geodetic_transform = pc._as_mpl_transform(ax)
@@ -1018,15 +1029,20 @@ def build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, ove
     ax.spines['geo'].set_linewidth(1.6)
 
     # Legend -- discrete swatches in place of the temperature maps'
-    # continuous colorbar, centered under the same rendered map frame.
+    # continuous colorbar, centered under the same rendered map frame and
+    # tucked up close under it (measured from the frame's actual bottom
+    # edge, same as the horizontal centering, rather than a fixed guess --
+    # otherwise this map is mostly blank "None" and the extra gap below
+    # the frame reads as unintended whitespace).
     fig.canvas.draw()
     frame_px = ax.get_window_extent()
     frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
     frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
+    frame_bottom = frame_px.y0 / (FIG_HEIGHT_IN * FIG_DPI)
     legend_handles = [Patch(facecolor=FIRE_CATEGORY_COLORS[lvl], edgecolor="#8a887e",
                              label=FIRE_CATEGORY_NAMES[lvl]) for lvl in (1, 2, 3)]
     legend = fig.legend(handles=legend_handles, loc="lower center",
-                         bbox_to_anchor=((frame_left + frame_right) / 2, 0.07), ncols=3,
+                         bbox_to_anchor=((frame_left + frame_right) / 2, frame_bottom - 0.05), ncols=3,
                          frameon=False, prop=poppins_reg, fontsize=11)
     for text in legend.get_texts():
         text.set_color("#2b2a26")
@@ -1042,12 +1058,19 @@ def build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, ove
     fig.text(0.03, 0.935, f"{SOURCE_LABELS[source]} • {run_str}",
               fontsize=12, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    # Attribution
-    fig.text(0.5, 0.012, f"SPC fire weather criteria • {SOURCE_LABELS[source]} — Ingalls Weather",
+    # Attribution -- tucked just under the legend rather than pinned to the
+    # figure's bottom edge, so there's no dead gap once savefig below trims
+    # the canvas to content.
+    fig.text(0.5, frame_bottom - 0.1, f"SPC fire weather criteria • {SOURCE_LABELS[source]} — Ingalls Weather",
               fontsize=9, fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
+    # Same bbox_inches="tight" trim as ../columbia-basin-alerts-map/build_map.py
+    # uses -- this map's content doesn't reach as far down the figure as the
+    # temperature metrics' colorbar-plus-tick-labels layout does, so without
+    # it there's a dead strip of canvas below the attribution line.
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=200)
+    plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=200,
+                bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)
     print(f"Saved base map to {output_path}")
     composite_logo(output_path)

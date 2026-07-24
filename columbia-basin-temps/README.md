@@ -85,6 +85,18 @@ Needs all 24 hourly wm6-3km grids (rather than high/low's 13/8-hour
 window), and only wm6-3km, since Herbie's hrrr/ecmwf-ifs/ecmwf-aifs paths
 fetch just `temperature_2m` — no dewpoint or wind components (yet).
 
+Since most of the map has no fire risk on a given day, this metric styles
+its basemap like `../columbia-basin-alerts-map/build_map.py` instead of
+the temperature metrics' bare-white-water/no-fill-land look: land is
+filled `#e3e1da` (below the risk raster, via `draw_land()`'s `zorder`
+param) and state/international borders use that map's softer beige-gray
+(`#b9b6ac`/`#9a978c`) instead of the temperature metrics' dark brown, so
+a plain "no risk anywhere" area still reads as a finished map rather than
+missing data. It also saves with `bbox_inches="tight"` (same as the
+alerts map), since its single legend row needs less room below the frame
+than the temperature metrics' colorbar-plus-tick-labels do -- without it
+the fixed canvas leaves a dead strip at the bottom.
+
 Output PNG lands in `output/`. To render from a previously-saved grid
 instead of fetching live (useful for testing, or to avoid re-fetching),
 pass `--file path/to/snapshot.npz` — see `fetch_wm6_3km()` /
