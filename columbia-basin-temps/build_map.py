@@ -2,10 +2,10 @@
 Columbia Basin Temperature Map -- canonical map builder
 Ingalls Weather
 
-Styled map of 2m temperatures over the Columbia Basin (same domain as
-../columbia-basin-alerts-map/build_map.py: North Bend, WA down to the
-Baker City, OR corridor), supporting four forecast sources and three
-temperature metrics:
+Styled map of 2m temperatures -- or peak fire weather risk -- over the
+Columbia Basin (same domain as ../columbia-basin-alerts-map/build_map.py:
+North Bend, WA down to the Baker City, OR corridor), supporting four
+forecast sources and four metrics:
 
   --source wm6-3km    WindBorne WeatherMesh-6, 3 km, fetched directly from
                        the WindBorne API (requires WB_API_KEY).
@@ -21,6 +21,9 @@ temperature metrics:
   --metric low    min hourly 2m temp, 2am-9am local time (the pre-dawn
                   window that reliably contains the daily trough)
   --metric time   2m temp at one specific local hour, via --hour H (0-23)
+  --metric fire   peak SPC-style fire weather risk (Elevated/Critical/
+                  Extreme) over all 24 local hours -- wm6-3km only, see
+                  FIRE_CATEGORIES and compute_fire_category_grid()
 
 USAGE
 -----
@@ -28,6 +31,7 @@ USAGE
     python build_map.py --source hrrr --metric low --date 2026-07-12
     python build_map.py --source ecmwf-ifs --metric time --hour 17 --date 2026-07-12
     python build_map.py --source ecmwf-aifs --date 2026-07-12
+    python build_map.py --metric fire --date 2026-07-12
 
 wm6-3km requires WB_API_KEY (see https://app.windbornesystems.com/api_tokens)
 in the environment. hrrr/ecmwf-ifs/ecmwf-aifs need no API key -- Herbie
@@ -38,9 +42,14 @@ multi-GB archive. IFS publishes 3-hourly steps and AIFS 6-hourly, coarser
 than wm6-3km/hrrr's hourly steps, so --metric time snaps to the nearest
 step Herbie can actually fetch -- see snap_fxx_list().
 
+--metric fire only supports --source wm6-3km for now: it needs
+dewpoint_2m/wind_u_10m/wind_v_10m, which Herbie's hrrr/ecmwf-ifs/ecmwf-aifs
+paths don't fetch (only temperature_2m).
+
 To render from a previously-saved grid instead of fetching live (useful for
 testing, or to avoid re-fetching), pass --file path/to/snapshot.npz -- see
-fetch_wm6_3km() / fetch_hrrr() / fetch_ecmwf() for the npz layout.
+fetch_wm6_3km() / fetch_hrrr() / fetch_ecmwf() / fetch_wm6_3km_fire() for
+the npz layout.
 
 REQUIRES (already checked into /maps at repo root, shared across all
 Ingalls Weather map projects):
@@ -85,7 +94,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-from matplotlib.colors import Normalize, LinearSegmentedColormap
+from matplotlib.colors import Normalize, LinearSegmentedColormap, to_rgb
+from matplotlib.patches import Patch
 from matplotlib.transforms import offset_copy
 import numpy as np
 import requests
@@ -132,7 +142,7 @@ SOURCE_LABELS = {
     "ecmwf-aifs": "ECMWF AIFS 0.25°",
 }
 SOURCES = ["wm6-3km", "hrrr", "ecmwf-ifs", "ecmwf-aifs"]
-METRICS = ["high", "low", "time"]
+METRICS = ["high", "low", "time", "fire"]
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # Local-hour windows used to reduce a day's hourly temps to a single high or
@@ -142,6 +152,27 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # midnight isn't captured -- see the README.
 HIGH_WINDOW = (8, 20)
 LOW_WINDOW = (2, 9)
+
+# --metric fire -- SPC's Fire Weather Outlook criteria: sustained 10m wind,
+# 2m relative humidity (from temperature_2m/dewpoint_2m via the Magnus
+# formula), and 2m temperature must all cross their thresholds at once for
+# >= FIRE_SUSTAINED_HOURS consecutive hours somewhere in the day. RH
+# thresholds are regional (SPC publishes a critical-RH-by-region map);
+# this domain sits in the Columbia Basin's own "<=20%" critical band per
+# that map, so RH thresholds below are fixed to that region rather than
+# sampled per-pixel -- the western fringe of this map's domain (Portland/
+# Salem/Puget Sound, west of the Cascades) is technically in a more humid
+# (<=25%/<=30%) SPC region, so fire risk there may be modestly
+# under-reported. (level, wind_mph_min, rh_pct_max, temp_f_min):
+FIRE_CATEGORIES = [
+    (1, 15, 25, 55),  # Elevated
+    (2, 20, 20, 60),  # Critical
+    (3, 30, 13, 70),  # Extreme ("Extremely Critical" in SPC's own wording)
+]
+FIRE_CATEGORY_NAMES = {0: "None", 1: "Elevated", 2: "Critical", 3: "Extreme"}
+FIRE_CATEGORY_COLORS = {1: "#E8C468", 2: "#FF3B30", 3: "#E066FF"}
+FIRE_SUSTAINED_HOURS = 3
+MPS_TO_MPH = 2.236936
 
 # hrrr/ecmwf-ifs/ecmwf-aifs are fetched at full native resolution, straight
 # from each model's own free distribution, via Herbie (byte-range GRIB2
@@ -313,18 +344,21 @@ RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAM
 RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAMPLE_PAD_DEG
 
 
-def resample_to_regular_grid(lat, lon, values):
+def resample_to_regular_grid(lat, lon, values, method="linear"):
     """Interpolate a (lat, lon, values) grid -- curvilinear (wm6-3km, hrrr)
     or already-regular but on different axes (ecmwf-ifs/aifs) -- onto a
     single common regular lat/lon grid padded past the map's plotted extent
     (see RESAMPLE_PAD_DEG), so every source renders through the same
     downstream code regardless of its native projection. Returns
-    values_2d, indexed [lat, lon] ascending."""
+    values_2d, indexed [lat, lon] ascending. Use method="nearest" for
+    categorical data (e.g. fire weather risk level) where blending
+    adjacent categories via linear interpolation would invent
+    in-between values that were never actually assigned."""
     reg_lon = np.linspace(RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_NX)
     reg_lat = np.linspace(RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX, RESAMPLE_NY)
     reg_lon_grid, reg_lat_grid = np.meshgrid(reg_lon, reg_lat)
     points = np.column_stack([np.ravel(lon), np.ravel(lat)])
-    regridded = griddata(points, np.ravel(values), (reg_lon_grid, reg_lat_grid), method="linear")
+    regridded = griddata(points, np.ravel(values), (reg_lon_grid, reg_lat_grid), method=method)
     nan_mask = np.isnan(regridded)
     if nan_mask.any():
         regridded[nan_mask] = griddata(points, np.ravel(values),
@@ -427,6 +461,90 @@ def fetch_wm6_3km(date, metric, hour, api_key):
             store.close()
 
     return lat, lon, reduced_temp_k, {"kind": "init", "value": init_time}
+
+
+def fetch_wm6_3km_fire(date, api_key):
+    """Fetch all 24 local-hour grids for `date`, cropped to the map bbox,
+    pulling the four surface variables --metric fire needs: temperature_2m,
+    dewpoint_2m, wind_u_10m, wind_v_10m. Returns (lat_2d, lon_2d, temp_k_3d,
+    dewpoint_k_3d, wind_u_3d, wind_v_3d, {"kind": "init", "value": init_time}),
+    with the hourly arrays stacked [hour, lat, lon] in local-hour (0-23)
+    order."""
+    run_info = wb_get("run_information", api_key)
+    forecast_zero = datetime.fromisoformat(run_info["forecast_zero"].replace("Z", "+00:00"))
+    init_time = run_info["initialization_time"]
+    available_hours = {a["forecast_hour"] for a in run_info["available"]}
+
+    valid_times = local_window_valid_times(date, 0, 23)
+    lat = lon = None
+    r0 = r1 = c0 = c1 = None
+    temp_stack, dewpoint_stack, u_stack, v_stack = [], [], [], []
+
+    for valid_time in valid_times:
+        forecast_hour = round((valid_time - forecast_zero).total_seconds() / 3600)
+        if forecast_hour not in available_hours:
+            sys.exit(f"Forecast hour {forecast_hour} (valid {valid_time.isoformat()}) "
+                      f"is not yet available from run {init_time}. wm-6-3km's horizon "
+                      f"may not reach the requested date yet -- try again closer to it.")
+        url_info = wb_get("gridded", api_key, variable="all", domain="conus", format="zarr",
+                           as_url="true", initialization_time=init_time,
+                           forecast_hour=forecast_hour, time=valid_time.strftime("%Y-%m-%dT%H:%M:%SZ"))
+        print(f"Fetching forecast hour {forecast_hour} (valid {valid_time.isoformat()}) ...")
+        resp = requests.get(url_info["url"], timeout=60)
+        resp.raise_for_status()
+        with tempfile.NamedTemporaryFile(suffix=".zip") as tf:
+            tf.write(resp.content)
+            tf.flush()
+            store = zarr.storage.ZipStore(tf.name, mode="r")
+            g = zarr.open(store, mode="r")
+            if lat is None:
+                lat_full = g["latitude"][:]
+                lon_full = g["longitude"][:]
+                mask = ((lon_full >= LON_MIN - FETCH_PAD_DEG) & (lon_full <= LON_MAX + FETCH_PAD_DEG) &
+                        (lat_full >= LAT_MIN - FETCH_PAD_DEG) & (lat_full <= LAT_MAX + FETCH_PAD_DEG))
+                rows = np.where(mask.any(axis=1))[0]
+                cols = np.where(mask.any(axis=0))[0]
+                r0, r1 = rows.min(), rows.max() + 1
+                c0, c1 = cols.min(), cols.max() + 1
+                lat, lon = lat_full[r0:r1, c0:c1], lon_full[r0:r1, c0:c1]
+            temp_stack.append(np.array(g["temperature_2m"][r0:r1, c0:c1]))
+            dewpoint_stack.append(np.array(g["dewpoint_2m"][r0:r1, c0:c1]))
+            u_stack.append(np.array(g["wind_u_10m"][r0:r1, c0:c1]))
+            v_stack.append(np.array(g["wind_v_10m"][r0:r1, c0:c1]))
+            store.close()
+
+    return (lat, lon, np.stack(temp_stack), np.stack(dewpoint_stack),
+            np.stack(u_stack), np.stack(v_stack), {"kind": "init", "value": init_time})
+
+
+def compute_fire_category_grid(temp_k_3d, dewpoint_k_3d, wind_u_3d, wind_v_3d):
+    """Reduce a day's hourly (temperature, dewpoint, wind_u, wind_v) stacks
+    -- each [hour, lat, lon] -- to a single peak fire-weather risk level per
+    cell (0=None, 1=Elevated, 2=Critical, 3=Extreme), per FIRE_CATEGORIES:
+    a cell reaches a level once that level's wind/RH/temperature thresholds
+    are all met for >= FIRE_SUSTAINED_HOURS *consecutive* hours somewhere in
+    the stack. Relative humidity is derived from temperature/dewpoint via
+    the Magnus formula (both are already Kelvin in wm6-3km's output)."""
+    temp_f = k_to_f(temp_k_3d)
+    temp_c = temp_k_3d - 273.15
+    dewpoint_c = dewpoint_k_3d - 273.15
+    rh_pct = (100 * np.exp((17.625 * dewpoint_c) / (243.04 + dewpoint_c))
+              / np.exp((17.625 * temp_c) / (243.04 + temp_c)))
+    wind_mph = np.sqrt(wind_u_3d ** 2 + wind_v_3d ** 2) * MPS_TO_MPH
+
+    n_hours = temp_f.shape[0]
+    category_grid = np.zeros(temp_f.shape[1:], dtype=int)
+    for level, wind_min, rh_max, temp_min in FIRE_CATEGORIES:
+        meets_hour = (wind_mph >= wind_min) & (rh_pct <= rh_max) & (temp_f >= temp_min)
+        sustained = np.zeros(temp_f.shape[1:], dtype=bool)
+        for h in range(n_hours - FIRE_SUSTAINED_HOURS + 1):
+            window_met = meets_hour[h]
+            for k in range(1, FIRE_SUSTAINED_HOURS):
+                window_met = window_met & meets_hour[h + k]
+            sustained |= window_met
+        category_grid = np.maximum(category_grid, np.where(sustained, level, 0))
+
+    return category_grid
 
 
 # ---------------------------------------------------------------------------
@@ -599,23 +717,124 @@ def load_roads():
     return motorway_geoms, trunk_geoms
 
 
+def setup_figure_and_axes():
+    """Figure/axes scaffolding shared by every metric's rendering path:
+    the NearsidePerspective projection, figure size/background, and the
+    map axes cropped to the domain extent."""
+    proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
+                                     satellite_height=4_000_000)
+    pc = ccrs.PlateCarree()
+
+    fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
+    fig.patch.set_facecolor("#f7f6f2")
+
+    ax = fig.add_axes(AXES_RECT, projection=proj)
+    ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
+    ax.patch.set_facecolor("white")
+    return fig, ax, pc
+
+
+def draw_basemap_layers(ax, pc):
+    """Coastline, state/international borders, and highways -- identical
+    across every metric's rendering path, drawn on top of whatever data
+    raster comes before it (zorder 1)."""
+    admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
+    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
+    land_geoms = load_land()
+    motorway_geoms, trunk_geoms = load_roads()
+
+    # Coastline -- outline only (no fill) so the data raster still shows
+    # over water; this is what traces the Puget Sound's shape.
+    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
+
+    ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
+    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+
+    ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR, linewidth=1.1, zorder=2.6)
+    ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR, linewidth=1.3, zorder=2.7)
+
+
+def draw_city_dot_and_label(ax, fig, pc, geodetic_transform, poppins_semibold, stroke,
+                             name, lon_c, lat_c, pos, second_line):
+    """A city's dot plus its two-line label (name, then `second_line` tucked
+    in tight below it) -- shared by every metric's rendering path, which
+    only differ in what `second_line` says (a temperature or a fire-risk
+    category). Text always sits left or right of the dot; both the
+    dot-to-label gap and the name-to-second-line gap are offsets in
+    *points* (via offset_copy), not degrees, so they stay a constant, tight
+    distance regardless of map scale rather than growing or shrinking with
+    it."""
+    ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
+            mec="black", mew=0.8, transform=pc)
+    dx_pt = 6 if pos == "right" else -6
+    ha = "left" if pos == "right" else "right"
+
+    name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
+    name_txt = ax.text(lon_c, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold,
+                        color="white", ha=ha, va="center", zorder=101, transform=name_transform)
+    name_txt.set_path_effects(stroke)
+
+    second_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-4, units="points")
+    second_txt = ax.text(lon_c, lat_c, second_line, fontsize=9.75,
+                          fontproperties=poppins_semibold, color="white", ha=ha, va="top",
+                          zorder=101, transform=second_transform)
+    second_txt.set_path_effects(stroke)
+
+
+def composite_logo(output_path):
+    """Paste the Ingalls Weather logo bottom-right, snug inside the map
+    frame -- shared by every metric's rendering path."""
+    if not LOGO_FILE.exists():
+        print(f"NOTE: logo not found at {LOGO_FILE}, skipping (map saved without logo).")
+        return
+
+    base = Image.open(output_path).convert("RGB")
+    bw, bh = base.size
+    arr = np.array(base)
+    y = bh // 2
+    black_cols = [x for x in range(bw) if arr[y, x][0] < 40 and arr[y, x][1] < 40 and arr[y, x][2] < 40]
+    x = bw // 2
+    black_rows = [yy for yy in range(bh) if arr[yy, x][0] < 40 and arr[yy, x][1] < 40 and arr[yy, x][2] < 40]
+    frame_right = max(black_cols) if black_cols else bw - 20
+    frame_bottom = max(black_rows) if black_rows else bh - 20
+
+    logo = Image.open(LOGO_FILE).convert("RGB")
+    target_w = int(bw * 0.08)
+    scale = target_w / logo.width
+    target_h = int(logo.height * scale)
+    logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
+
+    pos = (frame_right - MAP_FRAME_INSET_PX - target_w, frame_bottom - MAP_FRAME_INSET_PX - target_h)
+    base.paste(logo_resized, pos)
+    base.save(output_path)
+    print(f"Composited logo at {pos}")
+
+
 def metric_title(metric, hour):
     if metric == "high":
         return "High Temperatures"
     if metric == "low":
         return "Low Temperatures"
+    if metric == "fire":
+        return "Peak Fire Weather"
     h12 = hour % 12 or 12
     ampm = "am" if hour < 12 else "pm"
     return f"{h12}{ampm} Temperatures"
 
 
 def metric_tag(metric, hour):
+    if metric == "fire":
+        return "fire"
     return metric if metric != "time" else f"time{hour:02d}"
 
 
 def build_map(source, metric, hour, date, output_path, override_path=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
+
+    if metric == "fire":
+        build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, override_path)
+        return
 
     if override_path:
         print(f"Using local snapshot: {override_path}")
@@ -641,21 +860,7 @@ def build_map(source, metric, hour, date, output_path, override_path=None):
     print(f"{metric.capitalize()} range: {visible.min():.0f}F - {visible.max():.0f}F")
 
     print("Loading basemap layers...")
-    admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
-    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
-    land_geoms = load_land()
-    motorway_geoms, trunk_geoms = load_roads()
-
-    proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
-                                     satellite_height=4_000_000)
-    pc = ccrs.PlateCarree()
-
-    fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
-    fig.patch.set_facecolor("#f7f6f2")
-
-    ax = fig.add_axes(AXES_RECT, projection=proj)
-    ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
-    ax.patch.set_facecolor("white")
+    fig, ax, pc = setup_figure_and_axes()
 
     # Temperature field -- a fixed Kelvin-to-color enhancement curve (not
     # rescaled to this map's data range), so color reads consistently
@@ -668,42 +873,16 @@ def build_map(source, metric, hour, date, output_path, override_path=None):
     ax.imshow(temp_k, transform=pc, cmap=temp_cmap, norm=temp_norm, origin="lower",
               extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
 
-    # Coastline -- outline only (no fill) so the temperature color still
-    # shows over water; this is what traces the Puget Sound's shape.
-    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
-
-    ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
-    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
-
-    ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR, linewidth=1.1, zorder=2.6)
-    ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR, linewidth=1.3, zorder=2.7)
+    draw_basemap_layers(ax, pc)
 
     # City labels -- name plus that spot's forecast value, sampled from the
-    # resampled regular grid. Text always sits left or right of its dot;
-    # the name (top line) is vertically centered on the dot, with the
-    # temperature tucked in tight just below it. Both the dot-to-label gap
-    # and the name-to-temperature gap are offsets in *points* (via
-    # offset_copy), not degrees, so they stay a constant, tight distance
-    # regardless of map scale rather than growing or shrinking with it.
+    # resampled regular grid.
     geodetic_transform = pc._as_mpl_transform(ax)
     stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
     for name, lon_c, lat_c, pos in CITIES:
-        ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
-                mec="black", mew=0.8, transform=pc)
         city_f = sample_grid_value(temp_f, lon_c, lat_c)
-        dx_pt = 6 if pos == "right" else -6
-        ha = "left" if pos == "right" else "right"
-
-        name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
-        name_txt = ax.text(lon_c, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold,
-                            color="white", ha=ha, va="center", zorder=101, transform=name_transform)
-        name_txt.set_path_effects(stroke)
-
-        temp_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-4, units="points")
-        temp_txt = ax.text(lon_c, lat_c, f"{city_f:.0f}°F", fontsize=9.75,
-                            fontproperties=poppins_semibold, color="white", ha=ha, va="top",
-                            zorder=101, transform=temp_transform)
-        temp_txt.set_path_effects(stroke)
+        draw_city_dot_and_label(ax, fig, pc, geodetic_transform, poppins_semibold, stroke,
+                                 name, lon_c, lat_c, pos, f"{city_f:.0f}°F")
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
@@ -775,31 +954,103 @@ def build_map(source, metric, hour, date, output_path, override_path=None):
     plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=200)
     plt.close(fig)
     print(f"Saved base map to {output_path}")
+    composite_logo(output_path)
 
-    # ---- Composite logo, bottom-right, snug inside the frame ----
-    if LOGO_FILE.exists():
-        base = Image.open(output_path).convert("RGB")
-        bw, bh = base.size
-        arr = np.array(base)
-        y = bh // 2
-        black_cols = [x for x in range(bw) if arr[y, x][0] < 40 and arr[y, x][1] < 40 and arr[y, x][2] < 40]
-        x = bw // 2
-        black_rows = [yy for yy in range(bh) if arr[yy, x][0] < 40 and arr[yy, x][1] < 40 and arr[yy, x][2] < 40]
-        frame_right = max(black_cols) if black_cols else bw - 20
-        frame_bottom = max(black_rows) if black_rows else bh - 20
 
-        logo = Image.open(LOGO_FILE).convert("RGB")
-        target_w = int(bw * 0.08)
-        scale = target_w / logo.width
-        target_h = int(logo.height * scale)
-        logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
+def build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, override_path=None):
+    """SPC-style peak fire weather risk (see FIRE_CATEGORIES) over all 24
+    local hours of `date`. Categorical, not continuous -- the temperature
+    color raster and its colorbar are replaced with a discrete
+    None/Elevated/Critical/Extreme fill and a swatch legend."""
+    if source != "wm6-3km":
+        sys.exit("--metric fire currently only supports --source wm6-3km "
+                  "(needs dewpoint_2m/wind_u_10m/wind_v_10m, which the Herbie-backed "
+                  "sources don't fetch).")
 
-        pos = (frame_right - MAP_FRAME_INSET_PX - target_w, frame_bottom - MAP_FRAME_INSET_PX - target_h)
-        base.paste(logo_resized, pos)
-        base.save(output_path)
-        print(f"Composited logo at {pos}")
+    if override_path:
+        print(f"Using local snapshot: {override_path}")
+        npz = np.load(override_path)
+        lat, lon, category_raw = npz["lat"], npz["lon"], npz["category"]
+        meta = {"kind": str(npz["meta_kind"]), "value": str(npz["meta_value"])} if "meta_kind" in npz else None
     else:
-        print(f"NOTE: logo not found at {LOGO_FILE}, skipping (map saved without logo).")
+        api_key = os.environ.get("WB_API_KEY")
+        if not api_key:
+            sys.exit("WB_API_KEY not set -- get a token at "
+                      "https://app.windbornesystems.com/api_tokens, or pass --file "
+                      "to render from a saved snapshot instead.")
+        lat, lon, temp_k, dewpoint_k, wind_u, wind_v, meta = fetch_wm6_3km_fire(date, api_key)
+        category_raw = compute_fire_category_grid(temp_k, dewpoint_k, wind_u, wind_v)
+
+    print("Resampling onto a regular grid...")
+    category_grid = np.rint(
+        resample_to_regular_grid(lat, lon, category_raw.astype(float), method="nearest")
+    ).astype(int)
+
+    counts = {FIRE_CATEGORY_NAMES[lvl]: int((category_grid == lvl).sum()) for lvl in (1, 2, 3)}
+    print(f"Peak fire weather cells (of {category_grid.size}): {counts}")
+
+    fig, ax, pc = setup_figure_and_axes()
+
+    # Categorical fill -- each of SPC's three risk tiers requires its own
+    # wind/RH/temperature thresholds to hold for >= FIRE_SUSTAINED_HOURS
+    # consecutive hours somewhere in the day (see compute_fire_category_grid).
+    # "None" cells are left fully transparent so risk areas stand out
+    # against the plain basemap, similar to SPC's own outlook graphics.
+    rgba = np.zeros(category_grid.shape + (4,))
+    for level, hex_color in FIRE_CATEGORY_COLORS.items():
+        cells = category_grid == level
+        rgba[cells, :3] = to_rgb(hex_color)
+        rgba[cells, 3] = 0.75
+    ax.imshow(rgba, transform=pc, origin="lower",
+              extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
+
+    draw_basemap_layers(ax, pc)
+
+    # City labels -- name plus that spot's peak risk category.
+    geodetic_transform = pc._as_mpl_transform(ax)
+    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
+    for name, lon_c, lat_c, pos in CITIES:
+        level = int(round(sample_grid_value(category_grid, lon_c, lat_c)))
+        draw_city_dot_and_label(ax, fig, pc, geodetic_transform, poppins_semibold, stroke,
+                                 name, lon_c, lat_c, pos, FIRE_CATEGORY_NAMES[level])
+
+    ax.spines['geo'].set_edgecolor('black')
+    ax.spines['geo'].set_linewidth(1.6)
+
+    # Legend -- discrete swatches in place of the temperature maps'
+    # continuous colorbar, centered under the same rendered map frame.
+    fig.canvas.draw()
+    frame_px = ax.get_window_extent()
+    frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
+    frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
+    legend_handles = [Patch(facecolor=FIRE_CATEGORY_COLORS[lvl], edgecolor="#8a887e",
+                             label=FIRE_CATEGORY_NAMES[lvl]) for lvl in (1, 2, 3)]
+    legend = fig.legend(handles=legend_handles, loc="lower center",
+                         bbox_to_anchor=((frame_left + frame_right) / 2, 0.07), ncols=3,
+                         frameon=False, prop=poppins_reg, fontsize=11)
+    for text in legend.get_texts():
+        text.set_color("#2b2a26")
+
+    # Title & subtitle above the map
+    if meta and meta["kind"] == "init":
+        init_dt = datetime.fromisoformat(meta["value"].replace("Z", "+00:00"))
+        run_str = f"Init {init_dt.strftime('%Y-%m-%d %H')}z"
+    else:
+        run_str = "unknown"
+    fig.text(0.03, 0.975, f"{date.strftime('%A')} Peak Fire Weather", fontsize=22,
+              fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
+    fig.text(0.03, 0.935, f"{SOURCE_LABELS[source]} • {run_str}",
+              fontsize=12, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
+
+    # Attribution
+    fig.text(0.5, 0.012, f"SPC fire weather criteria • {SOURCE_LABELS[source]} — Ingalls Weather",
+              fontsize=9, fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=200)
+    plt.close(fig)
+    print(f"Saved base map to {output_path}")
+    composite_logo(output_path)
 
 
 if __name__ == "__main__":
@@ -808,14 +1059,15 @@ if __name__ == "__main__":
     parser.add_argument("--source", choices=SOURCES, default="wm6-3km",
                          help="Forecast source (default: wm6-3km).")
     parser.add_argument("--metric", choices=METRICS, default="high",
-                         help="Temperature metric: high, low, or time (default: high).")
+                         help="high, low, time, or fire (SPC-style peak fire weather risk, "
+                              "wm6-3km only) -- default: high.")
     parser.add_argument("--hour", type=int, default=None,
                          help="Local hour (0-23), required when --metric time.")
     parser.add_argument("--date", type=str, default=None,
                          help="Target date, YYYY-MM-DD (default: the coming Sunday).")
     parser.add_argument("--file", type=Path, default=None,
-                         help="Render from a local saved grid (.npz with lat/lon/temp_k) "
-                              "instead of fetching live.")
+                         help="Render from a local saved grid (.npz) instead of fetching live -- "
+                              "lat/lon/temp_k for high/low/time, lat/lon/category for fire.")
     parser.add_argument("--out", type=Path, default=None,
                          help="Output PNG path (default: output/columbia_basin_<source>_<metric>_<date>.png).")
     args = parser.parse_args()
@@ -824,6 +1076,8 @@ if __name__ == "__main__":
         parser.error("--metric time requires --hour H (0-23).")
     if args.hour is not None and not (0 <= args.hour <= 23):
         parser.error("--hour must be between 0 and 23.")
+    if args.metric == "fire" and args.source != "wm6-3km":
+        parser.error("--metric fire currently only supports --source wm6-3km.")
 
     if args.file and not args.file.exists():
         sys.exit(f"--file {args.file} not found.")

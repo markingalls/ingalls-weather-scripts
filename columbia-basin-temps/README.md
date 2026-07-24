@@ -6,8 +6,8 @@ North Bend, WA down to the Baker City, OR corridor). Supersedes the old
 `columbia-basin-wm6-temps/` (WM-6 3km-only, high-only) — everything that
 could do is one mode of this script.
 
-Supports four forecast sources, all at full native resolution, and three
-temperature metrics:
+Supports four forecast sources, all at full native resolution, and four
+metrics:
 
 | `--source`     | Model                          | Native resolution | Via |
 |----------------|---------------------------------|--------------------|-----|
@@ -21,6 +21,7 @@ temperature metrics:
 | `high` (default)  | Max hourly 2m temp, 8am-8pm local time — the daytime window that reliably contains the daily peak. |
 | `low`             | Min hourly 2m temp, 2am-9am local time — the pre-dawn window that reliably contains the daily trough. Not a true overnight low spanning midnight into the next morning; see Notes. |
 | `time`            | Temp at one specific local hour, via `--hour H` (0-23). |
+| `fire`            | Peak SPC-style fire weather risk (None/Elevated/Critical/Extreme) over all 24 local hours. `wm6-3km` only -- see Notes and Fire weather below. |
 
 ## Usage
 
@@ -31,6 +32,7 @@ python build_map.py                                         # WM-6 3km high, com
 python build_map.py --source hrrr --metric low --date 2026-07-12
 python build_map.py --source ecmwf-ifs --metric time --hour 17 --date 2026-07-12
 python build_map.py --source ecmwf-aifs --date 2026-07-12
+python build_map.py --metric fire --date 2026-07-12
 ```
 
 `wm6-3km` fetches hourly gridded forecasts directly from the WindBorne API
@@ -55,14 +57,44 @@ the one requested; a console note explains the substitution when one
 happens. `high`/`low` just reduce over whichever native steps fall in the
 window (so IFS gets ~4-5 samples across the daytime window, AIFS ~2).
 
+### Fire weather (`--metric fire`)
+
+Plots peak fire weather risk instead of temperature, using [SPC's Fire
+Weather Outlook criteria](https://www.spc.noaa.gov/misc/about.html#FireWx):
+a cell reaches **Elevated**, **Critical**, or **Extreme** once that tier's
+sustained 10m wind, 2m relative humidity, and 2m temperature thresholds
+are all met *simultaneously* for at least 3 consecutive hours somewhere in
+the 24 local hours of the target date (`compute_fire_category_grid()`;
+relative humidity is derived from `temperature_2m`/`dewpoint_2m` via the
+Magnus formula, wind from `wind_u_10m`/`wind_v_10m`):
+
+| Tier | Sustained wind | RH | Temp |
+|------|-----------------|-----|------|
+| Elevated | ≥ 15 mph | ≤ 25% | ≥ 55°F |
+| Critical | ≥ 20 mph | ≤ 20% | ≥ 60°F |
+| Extreme  | ≥ 30 mph | ≤ 13% | ≥ 70°F |
+
+SPC's RH thresholds are regional (it publishes a critical-RH-by-region
+map); this domain sits in the Columbia Basin's own "≤20%" critical band,
+so that's what's fixed into `FIRE_CATEGORIES` rather than sampled
+per-pixel. The western fringe of this map's domain (Portland/Salem/Puget
+Sound, west of the Cascades) is technically in a more humid SPC region
+(≤25%/≤30%), so fire risk there may be modestly under-reported.
+
+Needs all 24 hourly wm6-3km grids (rather than high/low's 13/8-hour
+window), and only wm6-3km, since Herbie's hrrr/ecmwf-ifs/ecmwf-aifs paths
+fetch just `temperature_2m` — no dewpoint or wind components (yet).
+
 Output PNG lands in `output/`. To render from a previously-saved grid
 instead of fetching live (useful for testing, or to avoid re-fetching),
 pass `--file path/to/snapshot.npz` — see `fetch_wm6_3km()` /
-`fetch_hrrr()` / `fetch_ecmwf()` in `build_map.py` for the npz layout
-(`lat`, `lon`, `temp_k`, plus `meta_kind`/`meta_value` for the subtitle's
-"Init ..." line — omit both and it reads "unknown"). `--source` /
-`--metric` / `--hour` still need to be passed alongside `--file` since the
-snapshot only holds the grid, not the labels.
+`fetch_hrrr()` / `fetch_ecmwf()` / `fetch_wm6_3km_fire()` in
+`build_map.py` for the npz layout: `lat`, `lon`, `temp_k` (high/low/time)
+or `category` (fire, already reduced via `compute_fire_category_grid()`),
+plus `meta_kind`/`meta_value` for the subtitle's "Init ..." line — omit
+both and it reads "unknown". `--source` / `--metric` / `--hour` still
+need to be passed alongside `--file` since the snapshot only holds the
+grid, not the labels.
 
 ## Files
 
