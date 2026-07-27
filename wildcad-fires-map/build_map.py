@@ -11,10 +11,11 @@ NEW_FIRE_HOURS below for why this is a status-category proxy, not a
 literal percentage, for every source except CA), else red if reported in
 the last 24h, else orange. Fires over 25,000 acres get a dashed black
 outline ring, over 100,000 acres a solid one (see LARGE_FIRE_ACRES/
-MEGA_FIRE_ACRES below). Small (<10ac) or stale (28+ days no update)
-contained fires, and small *and* stale existing fires, are dropped after
-merging to cut clutter, except new fires, always shown at any size (see
-STALE_CONTAINED_DAYS/MIN_VISIBLE_ACRES/is_visible below).
+MEGA_FIRE_ACRES below). Small (<10ac) or stale (90+ days no update)
+contained fires, and small *and* stale (28+ days) existing fires, are
+dropped after merging to cut clutter, except new fires, always shown at
+any size (see STALE_CONTAINED_DAYS/STALE_EXISTING_DAYS/MIN_VISIBLE_ACRES/
+is_visible below).
 
   US (WA/OR/ID/w.MT/n.NV/n.UT/nw.WY): WildCAD-E, the interagency dispatch
     CAD system used by essentially every US wildland fire dispatch center.
@@ -312,34 +313,43 @@ MEGA_FIRE_ACRES = 100_000
 #   Alberta    FIRE_STATUS_DATE (already the last-status-change field)
 #   CA         ModifiedOnDateTime_dt, a real last-modified field
 #   - STALE_CONTAINED_DAYS: a contained (gray) fire whose last update is
-#     older than this is dropped outright -- it's not still being worked
-#     and its own record hasn't moved either, so it's just clutter at this
-#     point.
-#   - MIN_VISIBLE_ACRES: a non-new fire under this size is dropped only if
-#     it's *also* stale by the same STALE_CONTAINED_DAYS threshold (a
-#     contained fire is small-checked unconditionally, above, so this only
-#     changes anything for existing/orange fires) -- a small fire that's
-#     still getting fresh updates is still worth showing, just not once it
-#     goes quiet too.
+#     older than this is dropped outright, any size -- it's not still being
+#     worked and its own record hasn't moved either, so it's just clutter
+#     at this point.
+#   - MIN_VISIBLE_ACRES: a non-new, non-contained (existing/orange) fire
+#     under this size is dropped only if it's *also* stale by
+#     STALE_EXISTING_DAYS -- a small fire that's still getting fresh
+#     updates is still worth showing, just not once it goes quiet too. A
+#     contained fire is small-checked unconditionally above instead (its
+#     own, longer, staleness allowance already covers it).
+#   - STALE_EXISTING_DAYS is shorter than STALE_CONTAINED_DAYS on purpose:
+#     an existing fire going quiet for a few weeks is more likely to just
+#     be under-reported (still burning, no update filed) than genuinely
+#     done, so it's dropped sooner if it's also small; a contained fire
+#     going quiet is a much stronger done-with-it signal, so it gets more
+#     benefit of the doubt before being dropped outright.
 # ---------------------------------------------------------------------------
-STALE_CONTAINED_DAYS = 28
+STALE_CONTAINED_DAYS = 90
+STALE_EXISTING_DAYS = 28
 MIN_VISIBLE_ACRES = 10
 
 
 def is_visible(f):
-    """Decluttering filter (see STALE_CONTAINED_DAYS/MIN_VISIBLE_ACRES
-    above), applied once in fetch_all_fires() after merging every source.
-    Mirrors fire_color()'s own contained-then-new priority in build_map()
-    so a fire's filtering and its display color always agree: a contained
-    fire is checked (and can be dropped) as contained even if it's also
-    technically <24h old, since it would render gray, not red, either way."""
-    stale = f["last_update_hours"] is not None and f["last_update_hours"] > STALE_CONTAINED_DAYS * 24
+    """Decluttering filter (see STALE_CONTAINED_DAYS/STALE_EXISTING_DAYS/
+    MIN_VISIBLE_ACRES above), applied once in fetch_all_fires() after
+    merging every source. Mirrors fire_color()'s own contained-then-new
+    priority in build_map() so a fire's filtering and its display color
+    always agree: a contained fire is checked (and can be dropped) as
+    contained even if it's also technically <24h old, since it would
+    render gray, not red, either way."""
     small = f["acres"] is not None and f["acres"] < MIN_VISIBLE_ACRES
     if f["contained"]:
+        stale = f["last_update_hours"] is not None and f["last_update_hours"] > STALE_CONTAINED_DAYS * 24
         return not (stale or small)
     is_new = f["age_hours"] is not None and f["age_hours"] <= NEW_FIRE_HOURS
     if is_new:
         return True
+    stale = f["last_update_hours"] is not None and f["last_update_hours"] > STALE_EXISTING_DAYS * 24
     return not (stale and small)
 
 
