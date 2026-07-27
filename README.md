@@ -20,6 +20,11 @@ workflows. Each project lives in its own directory with its own README.
   meteogram of the WindBorne WM-6 ensemble spread for a pressure-level
   temperature at a point (defaults to KPSC / 850 mb), compared against
   long-term climatology.
+- [`tri-cities-temp-chart/`](tri-cities-temp-chart/) — generates a styled
+  14-day chart of Tri-Cities daily high temperature: 7 days observed
+  (xmACIS) and 7 days forecast (WindBorne WM-6), against 30-year daily
+  climatology (percentile shading, normal, and record highs, all from
+  xmACIS).
 
 ## Shared resources
 

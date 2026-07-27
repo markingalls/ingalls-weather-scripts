@@ -49,3 +49,12 @@ columbia-basin-temps/output/*.png
 850-700-temp-chart/forecast.json
 850-700-temp-chart/climatology.json
 850-700-temp-chart/wm6_ensemble_spread*.png
+
+# --- tri-cities-temp-chart ---
+# observed.json/forecast.json/climatology.json are live data the fetch_*.py
+# scripts regenerate every run, and the rendered chart is an output too --
+# neither is source, so don't track them.
+tri-cities-temp-chart/observed.json
+tri-cities-temp-chart/forecast.json
+tri-cities-temp-chart/climatology.json
+tri-cities-temp-chart/tri_cities_temp_chart*.png
