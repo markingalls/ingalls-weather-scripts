@@ -11,9 +11,10 @@ NEW_FIRE_HOURS below for why this is a status-category proxy, not a
 literal percentage, for every source except CA), else red if reported in
 the last 24h, else orange. Fires over 25,000 acres get a dashed black
 outline ring, over 100,000 acres a solid one (see LARGE_FIRE_ACRES/
-MEGA_FIRE_ACRES below). Small (<10ac) or stale-contained fires are
-dropped after merging to cut clutter, except new fires, always shown at
-any size (see STALE_CONTAINED_DAYS/MIN_VISIBLE_ACRES/is_visible below).
+MEGA_FIRE_ACRES below). Small (<10ac) or stale (28+ days no update)
+contained fires, and small *and* stale existing fires, are dropped after
+merging to cut clutter, except new fires, always shown at any size (see
+STALE_CONTAINED_DAYS/MIN_VISIBLE_ACRES/is_visible below).
 
   US (WA/OR/ID/w.MT/n.NV/n.UT/nw.WY): WildCAD-E, the interagency dispatch
     CAD system used by essentially every US wildland fire dispatch center.
@@ -302,20 +303,24 @@ MEGA_FIRE_ACRES = 100_000
 # staleness. Missing data never triggers either filter (same "unknown
 # doesn't mean drop it" bias as the rest of this file, e.g. age coloring
 # above) -- both only fire on a concrete acres/last_update_hours value that
-# actually clears the threshold.
-#   - STALE_CONTAINED_DAYS: a contained (gray) fire whose last known status
-#     update is older than this is dropped -- it's not still being worked
+# actually clears the threshold. "Last update" per source, since only CA
+# (ModifiedOnDateTime_dt) exposes a true one (see fetch_*_fires() for each
+# source's proxy):
+#   WildCAD    the fire_status.contain timestamp if contained, else age
+#   BC         IGNITION_DATE (no per-fire edit-date field exists in the
+#              public layer -- falls back to age, a known imperfection)
+#   Alberta    FIRE_STATUS_DATE (already the last-status-change field)
+#   CA         ModifiedOnDateTime_dt, a real last-modified field
+#   - STALE_CONTAINED_DAYS: a contained (gray) fire whose last update is
+#     older than this is dropped outright -- it's not still being worked
 #     and its own record hasn't moved either, so it's just clutter at this
-#     point. "Last update" per source, since only CA (ModifiedOnDateTime_dt)
-#     exposes a true one (see fetch_*_fires() for each source's proxy):
-#       WildCAD    the fire_status.contain timestamp itself
-#       BC         IGNITION_DATE (no per-fire edit-date field exists in the
-#                  public layer -- falls back to age, a known imperfection)
-#       Alberta    FIRE_STATUS_DATE (already the last-status-change field)
-#       CA         ModifiedOnDateTime_dt, a real last-modified field
-#   - MIN_VISIBLE_ACRES: any non-new fire under this size is dropped, gray
-#     or orange alike -- at this scale a fire is visually indistinguishable
-#     from map noise anyway.
+#     point.
+#   - MIN_VISIBLE_ACRES: a non-new fire under this size is dropped only if
+#     it's *also* stale by the same STALE_CONTAINED_DAYS threshold (a
+#     contained fire is small-checked unconditionally, above, so this only
+#     changes anything for existing/orange fires) -- a small fire that's
+#     still getting fresh updates is still worth showing, just not once it
+#     goes quiet too.
 # ---------------------------------------------------------------------------
 STALE_CONTAINED_DAYS = 28
 MIN_VISIBLE_ACRES = 10
@@ -328,14 +333,14 @@ def is_visible(f):
     so a fire's filtering and its display color always agree: a contained
     fire is checked (and can be dropped) as contained even if it's also
     technically <24h old, since it would render gray, not red, either way."""
+    stale = f["last_update_hours"] is not None and f["last_update_hours"] > STALE_CONTAINED_DAYS * 24
+    small = f["acres"] is not None and f["acres"] < MIN_VISIBLE_ACRES
     if f["contained"]:
-        if f["last_update_hours"] is not None and f["last_update_hours"] > STALE_CONTAINED_DAYS * 24:
-            return False
-        return f["acres"] is None or f["acres"] >= MIN_VISIBLE_ACRES
+        return not (stale or small)
     is_new = f["age_hours"] is not None and f["age_hours"] <= NEW_FIRE_HOURS
     if is_new:
         return True
-    return f["acres"] is None or f["acres"] >= MIN_VISIBLE_ACRES
+    return not (stale and small)
 
 
 def load_land():

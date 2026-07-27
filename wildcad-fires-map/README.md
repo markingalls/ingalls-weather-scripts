@@ -10,9 +10,10 @@ Alberta Wildfire. Markers are sized (log scale, no name labels) by
 acreage and colored gray if contained ("Being Held" or better, >75% for
 CA), else red if first reported within the last 24 hours, else orange.
 Fires over 25,000 acres get a dashed black outline ring, over 100,000
-acres a solid one. Small (<10ac) and stale contained fires are dropped
-after merging to cut clutter -- see "Decluttering" below -- except new
-fires, which are always shown regardless of size.
+acres a solid one. Small (<10ac) or stale (28+ days no update) contained
+fires, and small *and* stale existing fires, are dropped after merging
+to cut clutter -- see "Decluttering" below -- except new fires, which
+are always shown regardless of size or staleness.
 
 ## Files
 
@@ -132,31 +133,37 @@ they can't collide with each other, then flattened.
 
 ### Decluttering
 
-`is_visible()` drops two categories of fire after merging, before
-rendering -- both purely to cut clutter, not because these fires aren't
-"real":
+`is_visible()` drops fires after merging, before rendering -- purely to
+cut clutter, not because a dropped fire isn't "real". "Last update" per
+source, since only CA exposes a genuine one:
 
-- A **contained** (gray) fire whose last known status update is more than
-  `STALE_CONTAINED_DAYS` (28) old -- it's not still being worked and its
-  own record hasn't moved either. "Last update" per source, since only CA
-  exposes a genuine one:
-  - WildCAD: the `fire_status.contain` timestamp itself.
-  - BC: `IGNITION_DATE` -- there's no per-fire edit/status-date field in
-    the public layer, so this falls back to age, a known imperfection
-    (it doesn't move when status actually changes).
-  - Alberta: `FIRE_STATUS_DATE` -- already a last-status-change field, so
-    no extra imprecision beyond what it already has as the age proxy.
-  - CA: `ModifiedOnDateTime_dt`, a real last-modified field.
-- Any **non-new** fire (contained or existing) under `MIN_VISIBLE_ACRES`
-  (10 acres) -- too small to read as more than a dot at this map's scale.
+- WildCAD: the `fire_status.contain` timestamp if contained, else age.
+- BC: `IGNITION_DATE` -- there's no per-fire edit/status-date field in
+  the public layer, so this falls back to age, a known imperfection (it
+  doesn't move when status actually changes).
+- Alberta: `FIRE_STATUS_DATE` -- already a last-status-change field, so
+  no extra imprecision beyond what it already has as the age proxy.
+- CA: `ModifiedOnDateTime_dt`, a real last-modified field.
 
-**New fires are exempt from both** -- a fire reported in the last
-`NEW_FIRE_HOURS` is always shown, any size. The exemption follows the
-same contained-wins-over-new priority `fire_color()` uses for coloring
-(see below), so a fire's visibility and its display color never
+The rule differs by category:
+
+- A **contained** (gray) fire is dropped if its last update is more than
+  `STALE_CONTAINED_DAYS` (28) old, *or* if it's under `MIN_VISIBLE_ACRES`
+  (10 acres) -- either alone is enough. It's not still being worked and
+  its own record hasn't moved either, or it's too small to read as more
+  than a dot at this map's scale.
+- An **existing** (orange) fire is dropped only if it's under
+  `MIN_VISIBLE_ACRES` *and* stale by that same `STALE_CONTAINED_DAYS`
+  threshold -- both together. A small fire that's still getting fresh
+  updates stays visible; it only drops once it goes quiet too.
+
+**New fires are exempt from all of it** -- a fire reported in the last
+`NEW_FIRE_HOURS` is always shown, any size, any staleness. The exemption
+follows the same contained-wins-over-new priority `fire_color()` uses for
+coloring (see below), so a fire's visibility and its display color never
 disagree: a fire that's both contained and technically <24h old is
 filtered as contained, since it would render gray, not red, either way.
-Missing acreage or last-update data never triggers either filter --same
+Missing acreage or last-update data never triggers either filter -- same
 "unknown doesn't mean drop it" bias used throughout this file (e.g. age
 coloring below).
 
