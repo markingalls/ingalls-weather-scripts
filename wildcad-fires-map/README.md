@@ -39,7 +39,7 @@ The Ingalls Weather logo (bottom-left on the map) lives in
 ```bash
 bash setup.sh                                    # first time / fresh environment only
 python3 build_map.py                             # current active wildfires
-python3 build_map.py --lookback-days 45          # widen the WildCAD-E query window
+python3 build_map.py --lookback-days 120         # widen the WildCAD-E query window
 python3 build_map.py --file output/snapshot_....json  # re-render, no fetch
 ```
 
@@ -74,10 +74,18 @@ by inspecting the app's JS bundle. It's unauthenticated and returns JSON.
   it's useless as an activity filter. `control` (not yet declared
   controlled) is the more reliable signal that suppression is still
   ongoing.
-- **`--lookback-days`** (default 30) sets how far back each center is
-  queried for incidents -- wide enough to catch a large fire that started
-  weeks into the season and is still uncontrolled, without querying each
-  center's entire multi-year history every run.
+- **`--lookback-days`** (default 90, matching `STALE_CONTAINED_DAYS` --
+  see "Decluttering" below) sets how far back each center is queried for
+  incidents. This has to be at least as wide as the longest staleness
+  threshold the decluttering filters use, or a real, large, still-active
+  fire can be silently missed at the *fetch* stage -- before those filters
+  (the right place to drop stale/small ones) ever get a chance to run.
+  Confirmed live: at the previous default of 30 days, several genuinely
+  active fires reported 30-40+ days ago were missing from the map
+  entirely -- an 8,069-acre uncontrolled fire near Starbuck, WA
+  ("Tucannon Mutual Aid", reported 2026-06-16) among them -- not because
+  they'd dropped out of WildCAD or gotten controlled, but because the API
+  was never even asked for records that old.
 
 ### British Columbia -- BC Wildfire Service
 
@@ -174,11 +182,12 @@ non-contained fire is really just time-since-first-reported (see above),
 so a large fire still uncontained after a few weeks is often exactly the
 one most worth keeping visible, not hiding; this only exists as a
 backstop for a record that's stopped getting touched at all, and only
-kicks in once that's been true a while. As of this writing nothing in the
-live dataset is anywhere near 60 days stale (WildCAD's own 30-day
-`--lookback-days` default already bounds it structurally; the oldest live
-BC/Alberta existing fire seen during testing was ~33 days), so this is
-presently a no-op safety net, not an active filter.
+kicks in once that's been true a while. Note this only fires past
+`--lookback-days` (default 90) worth of WildCAD history, since a fire
+older than that is never fetched in the first place -- see
+`--lookback-days` above; a fire genuinely uncontrolled for 60-90 days is
+rare but real (e.g. a large fire burning most of a season), so this is
+an active filter, not just a theoretical backstop.
 
 **New fires are exempt from all of it** -- a fire reported in the last
 `NEW_FIRE_HOURS` is always shown, any size, any staleness. The exemption

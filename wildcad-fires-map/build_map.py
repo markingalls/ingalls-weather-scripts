@@ -87,8 +87,8 @@ literal >75%, not a status-category proxy.
 
 USAGE
 -----
-    python build_map.py                        # current wildfires
-    python build_map.py --lookback-days 45      # widen the WildCAD-E query window
+    python build_map.py                         # current wildfires
+    python build_map.py --lookback-days 120     # widen the WildCAD-E query window
     python build_map.py --file snapshot.json    # render from a saved fetch
 
 REQUIRES (already checked into /maps at repo root, shared across all
@@ -845,10 +845,14 @@ def build_map(fires, fetched_at, output_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Build an Ingalls Weather current-wildfires map (WildCAD-E).")
-    parser.add_argument("--lookback-days", type=int, default=30,
+    parser.add_argument("--lookback-days", type=int, default=90,
                          help="How many days back to query each dispatch center for incidents "
-                              "(default: 30). Wider windows catch large fires that started "
-                              "earlier in the season but are still uncontrolled.")
+                              "(default: 90, matching STALE_CONTAINED_DAYS -- see module "
+                              "docstring). Wider windows catch large fires that started earlier "
+                              "in the season but are still uncontrolled; a narrower window risks "
+                              "silently missing one at the fetch stage, before the decluttering "
+                              "filters (which are the right place to drop stale/small ones) ever "
+                              "see it.")
     parser.add_argument("--file", type=Path, default=None,
                          help="Render from a local saved snapshot (.json) instead of fetching live.")
     parser.add_argument("--out", type=Path, default=None,
