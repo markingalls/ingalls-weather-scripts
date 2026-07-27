@@ -120,10 +120,15 @@ observed/forecast refreshes for the same station.
   `850-700-temp-chart/build_chart.py` -- edit `build_chart.py` directly to
   adjust. Observed/forecast temperature uses the same forest green
   (`#164f29`) as that chart's ensemble line (solid + filled markers for
-  observed, dashed + hollow markers for forecast); climatology shading and
-  the normal line reuse that chart's climatology orange (`#c9531c`);
-  record highs get their own dark red (`#a3242b`) star markers. The
-  legend is a 6-item, 2-row strip (vs. that chart's 4-item single row),
-  so the title/subtitle sit a bit higher to clear it -- see the comment
-  above `subtitle_y` in `build_chart.py` if you change the legend's item
-  count or column layout.
+  observed, dashed + hollow markers for forecast); the daily-normal line
+  reuses that chart's climatology orange (`#c9531c`); record highs get
+  their own dark red (`#a3242b`) star markers. The three percentile bands
+  are drawn as adjacent (not nested/overlapping) fills, each its own
+  color rather than one hue tapered by alpha: light blue for 10th-25th,
+  neutral gray for 25th-75th, light red for 75th-90th. Every
+  observed/forecast point is labeled with its value (white-halo text, via
+  `matplotlib.patheffects`) so exact highs don't require reading off the
+  axis. The legend is a 7-item, 2-row strip (vs. that chart's 4-item
+  single row), so the title/subtitle sit a bit higher to clear it -- see
+  the comment above `subtitle_y` in `build_chart.py` if you change the
+  legend's item count or column layout.

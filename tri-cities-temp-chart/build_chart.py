@@ -8,6 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
+import matplotlib.patheffects as pe
 import numpy as np
 
 # ---------- fonts ----------
@@ -28,11 +29,16 @@ AXIS_COLOR = "#000000"
 # 850-700-temp-chart uses for its primary data line.
 TEMP_COLOR = "#164f29"
 
-# Warm amber for the climatology band + normal line -- same hue
-# 850-700-temp-chart uses for its climatology line.
-CLIMO_BASE = "#c9531c"
-CLIMO_OUTER_ALPHA = 0.16   # P10-P90
-CLIMO_MID_ALPHA = 0.32     # P25-P75
+# Warm amber for the normal line -- same hue 850-700-temp-chart uses for
+# its climatology line. The three percentile bands get their own distinct
+# colors instead (cool-to-warm: below-normal tercile light blue, the
+# middle tercile neutral gray, above-normal tercile light red), so each
+# band reads as its own thing rather than as a single gradient.
+CLIMO_LINE = "#c9531c"
+BAND_P10_P25 = "#a9c6e8"
+BAND_P25_P75 = "#c7c5c0"
+BAND_P75_P90 = "#e8a3a3"
+BAND_ALPHA = 0.55
 
 RECORD_COLOR = "#a3242b"
 
@@ -98,15 +104,18 @@ def main():
     ax = fig.add_axes([0.075, 0.10, 0.87, 0.65])
     ax.set_facecolor("white")
 
-    # climatology shading sits behind gridlines and the normal line
-    ax.fill_between(all_dates, p10, p90, color=CLIMO_BASE, alpha=CLIMO_OUTER_ALPHA,
-                     linewidth=0, zorder=Z_SHADING, label="10–90th percentile")
-    ax.fill_between(all_dates, p25, p75, color=CLIMO_BASE, alpha=CLIMO_MID_ALPHA,
-                     linewidth=0, zorder=Z_SHADING, label="25–75th percentile")
+    # climatology shading sits behind gridlines and the normal line -- three
+    # adjacent bands (not two nested/overlapping ones), each its own color.
+    ax.fill_between(all_dates, p10, p25, color=BAND_P10_P25, alpha=BAND_ALPHA,
+                     linewidth=0, zorder=Z_SHADING, label="10th–25th percentile")
+    ax.fill_between(all_dates, p25, p75, color=BAND_P25_P75, alpha=BAND_ALPHA,
+                     linewidth=0, zorder=Z_SHADING, label="25th–75th percentile")
+    ax.fill_between(all_dates, p75, p90, color=BAND_P75_P90, alpha=BAND_ALPHA,
+                     linewidth=0, zorder=Z_SHADING, label="75th–90th percentile")
 
     ax.axvline(today_boundary, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
-    ax.plot(all_dates, normal, color=CLIMO_BASE, linewidth=2.0, linestyle="--",
+    ax.plot(all_dates, normal, color=CLIMO_LINE, linewidth=2.0, linestyle="--",
             dashes=(6, 3), zorder=Z_NORMAL, label=f"Daily normal ({cdata['normal_period']})")
 
     ax.scatter(all_dates, record, color=RECORD_COLOR, marker="*", s=110,
@@ -117,6 +126,18 @@ def main():
     ax.plot(fc_dates, fc_vals, color=TEMP_COLOR, linewidth=2.6, linestyle="--", dashes=(5, 2.5),
             marker="o", markersize=5.5, markerfacecolor="white", markeredgewidth=1.6,
             zorder=Z_TEMP, label="Forecast high (WM-6)")
+
+    # value labels on every observed/forecast point -- a white halo keeps
+    # them legible over both the white axes background and the percentile
+    # shading.
+    label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
+    for d, v in zip(obs_dates + fc_dates, np.concatenate([obs_vals, fc_vals])):
+        if np.isnan(v):
+            continue
+        txt = ax.annotate(f"{v:.0f}°", xy=(d, v), xytext=(0, 9), textcoords="offset points",
+                           ha="center", va="bottom", fontproperties=f_med, fontsize=9.5,
+                           color=TEMP_COLOR, zorder=Z_TEMP + 1)
+        txt.set_path_effects(label_stroke)
 
     # ---------- y-axis: fixed to the plotted series' own range, so a couple
     # of record-high spikes don't stretch the axis too far ----------
@@ -156,13 +177,13 @@ def main():
     # ---------- legend (horizontal strip above the plot, out of the data's way) ----------
     handles, labels = ax.get_legend_handles_labels()
     order = ["Observed high (xmACIS)", "Forecast high (WM-6)",
-             f"Daily normal ({cdata['normal_period']})",
-             "25–75th percentile", "10–90th percentile", "Record high"]
+             f"Daily normal ({cdata['normal_period']})", "Record high",
+             "10th–25th percentile", "25th–75th percentile", "75th–90th percentile"]
     by_label = dict(zip(labels, handles))
     handles = [by_label[l] for l in order if l in by_label]
     leg = fig.legend(handles, [l for l in order if l in by_label],
                       loc="lower left", bbox_to_anchor=(left_x, top_y + 0.012),
-                      bbox_transform=fig.transFigure, ncol=3, frameon=False,
+                      bbox_transform=fig.transFigure, ncol=4, frameon=False,
                       prop=f_reg, fontsize=10.5, handlelength=1.6, columnspacing=1.6,
                       labelspacing=0.6)
     for text in leg.get_texts():
