@@ -11,7 +11,9 @@ NEW_FIRE_HOURS below for why this is a status-category proxy, not a
 literal percentage, for every source except CA), else red if reported in
 the last 24h, else orange. Fires over 25,000 acres get a dashed black
 outline ring, over 100,000 acres a solid one (see LARGE_FIRE_ACRES/
-MEGA_FIRE_ACRES below).
+MEGA_FIRE_ACRES below). Small (<10ac) or stale-contained fires are
+dropped after merging to cut clutter, except new fires, always shown at
+any size (see STALE_CONTAINED_DAYS/MIN_VISIBLE_ACRES/is_visible below).
 
   US (WA/OR/ID/w.MT/n.NV/n.UT/nw.WY): WildCAD-E, the interagency dispatch
     CAD system used by essentially every US wildland fire dispatch center.
@@ -293,6 +295,48 @@ CONTAINED_COLOR, CONTAINED_EDGE = "#9a9a92", "#5a5a52"
 LARGE_FIRE_ACRES = 25_000
 MEGA_FIRE_ACRES = 100_000
 
+# ---------------------------------------------------------------------------
+# Decluttering filters -- applied once, after merging all sources (see
+# fetch_all_fires()). New fires (see NEW_FIRE_HOURS above) are exempt from
+# both -- a fire that's genuinely new is worth showing at any size or
+# staleness. Missing data never triggers either filter (same "unknown
+# doesn't mean drop it" bias as the rest of this file, e.g. age coloring
+# above) -- both only fire on a concrete acres/last_update_hours value that
+# actually clears the threshold.
+#   - STALE_CONTAINED_DAYS: a contained (gray) fire whose last known status
+#     update is older than this is dropped -- it's not still being worked
+#     and its own record hasn't moved either, so it's just clutter at this
+#     point. "Last update" per source, since only CA (ModifiedOnDateTime_dt)
+#     exposes a true one (see fetch_*_fires() for each source's proxy):
+#       WildCAD    the fire_status.contain timestamp itself
+#       BC         IGNITION_DATE (no per-fire edit-date field exists in the
+#                  public layer -- falls back to age, a known imperfection)
+#       Alberta    FIRE_STATUS_DATE (already the last-status-change field)
+#       CA         ModifiedOnDateTime_dt, a real last-modified field
+#   - MIN_VISIBLE_ACRES: any non-new fire under this size is dropped, gray
+#     or orange alike -- at this scale a fire is visually indistinguishable
+#     from map noise anyway.
+# ---------------------------------------------------------------------------
+STALE_CONTAINED_DAYS = 28
+MIN_VISIBLE_ACRES = 10
+
+
+def is_visible(f):
+    """Decluttering filter (see STALE_CONTAINED_DAYS/MIN_VISIBLE_ACRES
+    above), applied once in fetch_all_fires() after merging every source.
+    Mirrors fire_color()'s own contained-then-new priority in build_map()
+    so a fire's filtering and its display color always agree: a contained
+    fire is checked (and can be dropped) as contained even if it's also
+    technically <24h old, since it would render gray, not red, either way."""
+    if f["contained"]:
+        if f["last_update_hours"] is not None and f["last_update_hours"] > STALE_CONTAINED_DAYS * 24:
+            return False
+        return f["acres"] is None or f["acres"] >= MIN_VISIBLE_ACRES
+    is_new = f["age_hours"] is not None and f["age_hours"] <= NEW_FIRE_HOURS
+    if is_new:
+        return True
+    return f["acres"] is None or f["acres"] >= MIN_VISIBLE_ACRES
+
 
 def load_land():
     with open(LAND_FILE) as f:
@@ -391,11 +435,22 @@ def fetch_wildcad_fires(lookback_days, now):
                     age_hours = (now - ignition).total_seconds() / 3600
                 except ValueError:
                     pass
+            # For a contained fire, the contain timestamp itself is the best
+            # available "last update" signal (see STALE_CONTAINED_DAYS above)
+            # -- same naive-timestamp-treated-as-UTC caveat as "date" above.
+            last_update_hours = age_hours
+            if status.get("contain"):
+                try:
+                    contained_dt = datetime.fromisoformat(status["contain"]).replace(tzinfo=timezone.utc)
+                    last_update_hours = (now - contained_dt).total_seconds() / 3600
+                except ValueError:
+                    pass
             key = "WC:" + (rec.get("inc_num") or rec.get("uuid") or "")
             by_key[key] = {
                 "name": (rec.get("name") or "UNNAMED").strip(),
                 "lat": lat, "lon": lon, "acres": acres,
-                "age_hours": age_hours, "contained": contained, "source": dc,
+                "age_hours": age_hours, "last_update_hours": last_update_hours,
+                "contained": contained, "source": dc,
             }
     return by_key
 
@@ -438,9 +493,14 @@ def fetch_bc_fires(now):
             ignition = datetime.fromtimestamp(p["IGNITION_DATE"] / 1000, tz=timezone.utc)
             age_hours = (now - ignition).total_seconds() / 3600
         contained = p.get("FIRE_STATUS") in CONTAINED_STATUSES
+        # No per-fire edit/status-date field exists in this public layer --
+        # IGNITION_DATE (age) is the best available "last update" stand-in
+        # (see STALE_CONTAINED_DAYS above), a known imperfection since it
+        # doesn't actually move when a fire's status changes.
         by_key[f"BC:{p.get('FIRE_ID')}"] = {
             "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
-            "age_hours": age_hours, "contained": contained, "source": "BCWS",
+            "age_hours": age_hours, "last_update_hours": age_hours,
+            "contained": contained, "source": "BCWS",
         }
     return by_key
 
@@ -488,9 +548,13 @@ def fetch_ab_fires(now):
             except ValueError:
                 pass
         contained = p.get("FIRE_STATUS") in CONTAINED_STATUSES
+        # FIRE_STATUS_DATE is already a last-status-change field, so it
+        # doubles as the "last update" signal (see STALE_CONTAINED_DAYS
+        # above) with no extra imprecision beyond what age_hours already has.
         by_key[f"AB:{p.get('FIRE_NUMBER')}"] = {
             "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
-            "age_hours": age_hours, "contained": contained, "source": "ABWildfire",
+            "age_hours": age_hours, "last_update_hours": age_hours,
+            "contained": contained, "source": "ABWildfire",
         }
     return by_key
 
@@ -504,7 +568,7 @@ def fetch_calfire_fires(now):
         resp = requests.get(CALFIRE_URL, params={
             "where": "POOState='US-CA' AND IncidentTypeCategory IN ('WF','CX')",
             "outFields": "IrwinID,IncidentName,InitialLatitude,InitialLongitude,IncidentSize,"
-                          "FireDiscoveryDateTime,PercentContained",
+                          "FireDiscoveryDateTime,PercentContained,ModifiedOnDateTime_dt",
             "f": "geojson",
         }, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
         resp.raise_for_status()
@@ -536,9 +600,16 @@ def fetch_calfire_fires(now):
         # in this file.
         pct = p.get("PercentContained")
         contained = pct is not None and pct >= CALFIRE_CONTAINED_PCT
+        # ModifiedOnDateTime_dt is a real last-modified field (epoch ms UTC)
+        # -- unlike the other three sources, no proxy needed here.
+        last_update_hours = age_hours
+        if p.get("ModifiedOnDateTime_dt") is not None:
+            modified = datetime.fromtimestamp(p["ModifiedOnDateTime_dt"] / 1000, tz=timezone.utc)
+            last_update_hours = (now - modified).total_seconds() / 3600
         by_key[f"CA:{p.get('IrwinID')}"] = {
             "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
-            "age_hours": age_hours, "contained": contained, "source": "CAL FIRE/WFIGS",
+            "age_hours": age_hours, "last_update_hours": last_update_hours,
+            "contained": contained, "source": "CAL FIRE/WFIGS",
         }
     return by_key
 
@@ -551,8 +622,11 @@ def fetch_all_fires(lookback_days):
     by_key.update(fetch_ab_fires(now))
     by_key.update(fetch_calfire_fires(now))
 
-    fires = sorted(by_key.values(), key=lambda f: -(f["acres"] or 0))
-    print(f"{len(fires)} active wildfires in domain after filtering/dedup.")
+    all_fires = list(by_key.values())
+    fires = sorted((f for f in all_fires if is_visible(f)), key=lambda f: -(f["acres"] or 0))
+    print(f"{len(fires)} active wildfires in domain after filtering/dedup "
+          f"({len(all_fires) - len(fires)} decluttered: stale/small contained "
+          f"or small existing).")
     return fires, now
 
 

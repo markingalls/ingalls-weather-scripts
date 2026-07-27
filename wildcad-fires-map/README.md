@@ -10,7 +10,9 @@ Alberta Wildfire. Markers are sized (log scale, no name labels) by
 acreage and colored gray if contained ("Being Held" or better, >75% for
 CA), else red if first reported within the last 24 hours, else orange.
 Fires over 25,000 acres get a dashed black outline ring, over 100,000
-acres a solid one.
+acres a solid one. Small (<10ac) and stale contained fires are dropped
+after merging to cut clutter -- see "Decluttering" below -- except new
+fires, which are always shown regardless of size.
 
 ## Files
 
@@ -126,7 +128,37 @@ this one actually publishes a real percent-contained figure
 
 All four sources are fetched into one dict keyed by a source-prefixed ID
 (`WC:<inc_num>`, `CA:<irwin_id>`, `BC:<fire_id>`, `AB:<fire_number>`) so
-they can't collide with each other, then flattened and sorted by acreage.
+they can't collide with each other, then flattened.
+
+### Decluttering
+
+`is_visible()` drops two categories of fire after merging, before
+rendering -- both purely to cut clutter, not because these fires aren't
+"real":
+
+- A **contained** (gray) fire whose last known status update is more than
+  `STALE_CONTAINED_DAYS` (28) old -- it's not still being worked and its
+  own record hasn't moved either. "Last update" per source, since only CA
+  exposes a genuine one:
+  - WildCAD: the `fire_status.contain` timestamp itself.
+  - BC: `IGNITION_DATE` -- there's no per-fire edit/status-date field in
+    the public layer, so this falls back to age, a known imperfection
+    (it doesn't move when status actually changes).
+  - Alberta: `FIRE_STATUS_DATE` -- already a last-status-change field, so
+    no extra imprecision beyond what it already has as the age proxy.
+  - CA: `ModifiedOnDateTime_dt`, a real last-modified field.
+- Any **non-new** fire (contained or existing) under `MIN_VISIBLE_ACRES`
+  (10 acres) -- too small to read as more than a dot at this map's scale.
+
+**New fires are exempt from both** -- a fire reported in the last
+`NEW_FIRE_HOURS` is always shown, any size. The exemption follows the
+same contained-wins-over-new priority `fire_color()` uses for coloring
+(see below), so a fire's visibility and its display color never
+disagree: a fire that's both contained and technically <24h old is
+filtered as contained, since it would render gray, not red, either way.
+Missing acreage or last-update data never triggers either filter --same
+"unknown doesn't mean drop it" bias used throughout this file (e.g. age
+coloring below).
 
 ### Rendering
 
