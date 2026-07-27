@@ -85,6 +85,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
+import matplotlib.patches as mpatches
+from matplotlib.legend_handler import HandlerPatch
 from matplotlib.lines import Line2D
 from matplotlib.transforms import offset_copy
 import numpy as np
@@ -468,6 +470,19 @@ def fetch_all_fires(lookback_days):
     return fires, now
 
 
+class HandlerCircle(HandlerPatch):
+    """Legend handler so a Circle patch (incl. its linestyle -- dashed/solid
+    ring) renders as a small circle in the legend, matching how the other
+    two legend rows already use round marker handles."""
+
+    def create_artists(self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans):
+        center = (width - xdescent) / 2, (height - ydescent) / 2
+        p = mpatches.Circle(center, radius=height / 2.4)
+        self.update_prop(p, orig_handle, legend)
+        p.set_transform(trans)
+        return [p]
+
+
 def build_map(fires, fetched_at, output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
@@ -580,9 +595,18 @@ def build_map(fires, fetched_at, output_path):
     for text in size_leg.get_texts():
         text.set_color("#2b2a26")
 
-    fig.text(frame_center, 0.042,
-              f"Dashed outline: >{LARGE_FIRE_ACRES:,} ac    Solid outline: >{MEGA_FIRE_ACRES:,} ac",
-              fontsize=8.25, fontproperties=poppins_reg, color="#5a584f", ha="center", va="center")
+    outline_handles = [
+        mpatches.Circle((0, 0), radius=1, facecolor="none", edgecolor="black", linewidth=1.1,
+                         linestyle=(0, (2.5, 1.8)), label=f">{LARGE_FIRE_ACRES:,} ac"),
+        mpatches.Circle((0, 0), radius=1, facecolor="none", edgecolor="black", linewidth=1.3,
+                         linestyle="solid", label=f">{MEGA_FIRE_ACRES:,} ac"),
+    ]
+    outline_leg = fig.legend(handles=outline_handles, handler_map={mpatches.Circle: HandlerCircle()},
+                              loc="center", frameon=False, fontsize=8.75, prop=poppins_reg,
+                              ncol=len(outline_handles), handletextpad=0.6, columnspacing=1.4,
+                              bbox_to_anchor=(frame_center, 0.042))
+    for text in outline_leg.get_texts():
+        text.set_color("#2b2a26")
 
     # Title & subtitle above the map
     now_local = fetched_at.astimezone(LOCAL_TZ)

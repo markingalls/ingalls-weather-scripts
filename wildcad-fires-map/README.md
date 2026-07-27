@@ -135,7 +135,9 @@ with each other, then flattened and sorted by acreage.
   `MEGA_FIRE_ACRES` (100,000) gets a solid black ring instead -- drawn on
   top of every fire's own color-coded marker at the same size, so a truly
   major fire stands out regardless of what color its age/containment
-  status happens to give it.
+  status happens to give it. Explained in its own legend row (dashed vs.
+  solid ring swatches, via a small `HandlerCircle` legend handler, since
+  a plain `Line2D` marker handle can't render a dashed edge).
 - **Age coloring**: red if a fire was first reported within
   `NEW_FIRE_HOURS` (24 by default) and isn't contained, orange otherwise
   -- including any fire whose age can't be determined, a safer default
