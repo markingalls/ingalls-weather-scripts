@@ -11,9 +11,10 @@ acreage and colored gray if contained ("Being Held" or better, >75% for
 CA), else red if first reported within the last 24 hours, else orange.
 Fires over 25,000 acres get a dashed black outline ring, over 100,000
 acres a solid one. Small (<10ac) or stale (90+ days no update) contained
-fires, and small *and* stale (28+ days) existing fires, are dropped
-after merging to cut clutter -- see "Decluttering" below -- except new
-fires, which are always shown regardless of size or staleness.
+fires, small *and* stale (28+ days) existing fires, and any existing
+fire stale 60+ days regardless of size, are dropped after merging to
+cut clutter -- see "Decluttering" below -- except new fires, which are
+always shown regardless of size or staleness.
 
 ## Files
 
@@ -152,17 +153,32 @@ The rule differs by category:
   (10 acres) -- either alone is enough, any size. It's not still being
   worked and its own record hasn't moved either, or it's too small to
   read as more than a dot at this map's scale.
-- An **existing** (orange) fire is dropped only if it's under
-  `MIN_VISIBLE_ACRES` *and* stale by `STALE_EXISTING_DAYS` (28) --
-  both together. A small fire that's still getting fresh updates stays
-  visible; it only drops once it goes quiet too.
+- An **existing** (orange) fire is dropped if it's under
+  `MIN_VISIBLE_ACRES` *and* stale by `STALE_EXISTING_SMALL_DAYS` (28)
+  -- both together -- *or* if it's stale by `STALE_EXISTING_ANY_DAYS`
+  (60) regardless of size. A small fire that's still getting fresh
+  updates stays visible; it only drops once it goes quiet too. A large
+  one is never dropped just for being under `STALE_EXISTING_SMALL_DAYS`
+  old -- see below for why -- only once it clears the much longer
+  `STALE_EXISTING_ANY_DAYS` backstop.
 
-`STALE_EXISTING_DAYS` is shorter than `STALE_CONTAINED_DAYS` on purpose:
-an existing fire gone quiet for a few weeks is more likely just
+`STALE_EXISTING_SMALL_DAYS` is shorter than `STALE_CONTAINED_DAYS` on
+purpose: an existing fire gone quiet for a few weeks is more likely just
 under-reported (still burning, no update filed) than actually done, so
 it's dropped sooner if it's also small; a contained fire gone quiet is a
 much stronger done-with-it signal, so it gets more benefit of the doubt
-before being dropped outright, regardless of size.
+before being dropped outright, regardless of size. `STALE_EXISTING_ANY_DAYS`
+is deliberately much longer than that, not shorter than
+`STALE_CONTAINED_DAYS` -- for 3 of the 4 sources, "last update" on a
+non-contained fire is really just time-since-first-reported (see above),
+so a large fire still uncontained after a few weeks is often exactly the
+one most worth keeping visible, not hiding; this only exists as a
+backstop for a record that's stopped getting touched at all, and only
+kicks in once that's been true a while. As of this writing nothing in the
+live dataset is anywhere near 60 days stale (WildCAD's own 30-day
+`--lookback-days` default already bounds it structurally; the oldest live
+BC/Alberta existing fire seen during testing was ~33 days), so this is
+presently a no-op safety net, not an active filter.
 
 **New fires are exempt from all of it** -- a fire reported in the last
 `NEW_FIRE_HOURS` is always shown, any size, any staleness. The exemption
