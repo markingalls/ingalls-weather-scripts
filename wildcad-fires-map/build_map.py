@@ -119,13 +119,13 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # Figure geometry / map domain -- same LON/LAT domain and axes box size
 # (in inches) as ../dew-point-storm-map/build_map.py, so the two products
 # read as a matched pair, but a shorter FIG_HEIGHT_IN/taller AXES_RECT
-# fraction: this map's bottom area only needs two compact legend rows, not
-# a colorbar with two tick axes, so it doesn't need as much room below the
-# map frame.
+# fraction: this map's bottom area only needs three compact legend/caption
+# rows, not a colorbar with two tick axes, so it doesn't need as much room
+# below the map frame.
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.4, 8.5
 FIG_DPI = 200
-AXES_RECT = [0.03, 0.124, 0.94, 0.741]
+AXES_RECT = [0.03, 0.149, 0.94, 0.716]
 MAP_FRAME_INSET_PX = 22
 
 LON_MIN, LON_MAX = -128.2, -108.8
@@ -243,6 +243,16 @@ NEW_FIRE_HOURS = 24.0
 NEW_COLOR, NEW_EDGE = "#e6231e", "#7a0e0a"
 EXISTING_COLOR, EXISTING_EDGE = "#f2892b", "#8a4b0a"
 CONTAINED_COLOR, CONTAINED_EDGE = "#9a9a92", "#5a5a52"
+
+# ---------------------------------------------------------------------------
+# Large-fire outline rings -- an extra black ring traced around a fire's own
+# marker (same size, drawn on top) so a genuinely major fire stands out
+# regardless of what color its age/containment status happens to give it.
+# Two tiers, checked large-first so a >100k-acre fire gets the solid ring,
+# not the dashed one.
+# ---------------------------------------------------------------------------
+LARGE_FIRE_ACRES = 25_000
+MEGA_FIRE_ACRES = 100_000
 
 
 def load_land():
@@ -526,6 +536,13 @@ def build_map(fires, fetched_at, output_path):
         size = marker_size_pts2(f["acres"])
         ax.scatter(f["lon"], f["lat"], s=size, color=color, edgecolor=edge,
                    linewidth=0.7, alpha=0.85, zorder=50, transform=pc)
+        acres = f["acres"] or 0
+        if acres > MEGA_FIRE_ACRES:
+            ax.scatter(f["lon"], f["lat"], s=size, facecolors="none", edgecolors="black",
+                       linewidth=1.3, zorder=51, transform=pc)
+        elif acres > LARGE_FIRE_ACRES:
+            ax.scatter(f["lon"], f["lat"], s=size, facecolors="none", edgecolors="black",
+                       linewidth=1.1, linestyle=(0, (2.5, 1.8)), zorder=51, transform=pc)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
@@ -547,7 +564,7 @@ def build_map(fires, fetched_at, output_path):
     ]
     age_leg = fig.legend(handles=age_handles, loc="center", frameon=False, fontsize=8.75,
                           prop=poppins_reg, ncol=len(age_handles), handletextpad=0.6, columnspacing=1.4,
-                          bbox_to_anchor=(frame_center, 0.100))
+                          bbox_to_anchor=(frame_center, 0.121))
     for text in age_leg.get_texts():
         text.set_color("#2b2a26")
 
@@ -559,9 +576,13 @@ def build_map(fires, fetched_at, output_path):
     ]
     size_leg = fig.legend(handles=size_handles, loc="center", frameon=False, fontsize=8.75,
                            prop=poppins_reg, ncol=len(size_handles), handletextpad=0.6, columnspacing=1.4,
-                           bbox_to_anchor=(frame_center, 0.059))
+                           bbox_to_anchor=(frame_center, 0.078))
     for text in size_leg.get_texts():
         text.set_color("#2b2a26")
+
+    fig.text(frame_center, 0.042,
+              f"Dashed outline: >{LARGE_FIRE_ACRES:,} ac    Solid outline: >{MEGA_FIRE_ACRES:,} ac",
+              fontsize=8.25, fontproperties=poppins_reg, color="#5a584f", ha="center", va="center")
 
     # Title & subtitle above the map
     now_local = fetched_at.astimezone(LOCAL_TZ)

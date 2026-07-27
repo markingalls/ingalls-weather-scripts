@@ -130,6 +130,12 @@ with each other, then flattened and sorted by acreage.
   within each color tier, acreage (descending) is still the tiebreaker,
   same as before, so a small fire isn't buried under a same-colored large
   one nearby either.
+- **Large-fire outline rings**: a fire over `LARGE_FIRE_ACRES` (25,000)
+  gets a dashed black ring traced around its own marker, and one over
+  `MEGA_FIRE_ACRES` (100,000) gets a solid black ring instead -- drawn on
+  top of every fire's own color-coded marker at the same size, so a truly
+  major fire stands out regardless of what color its age/containment
+  status happens to give it.
 - **Age coloring**: red if a fire was first reported within
   `NEW_FIRE_HOURS` (24 by default) and isn't contained, orange otherwise
   -- including any fire whose age can't be determined, a safer default
