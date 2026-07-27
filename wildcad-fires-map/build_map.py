@@ -4,17 +4,24 @@ Ingalls Weather
 
 Same domain as ../dew-point-storm-map/ (Prince George BC to Winnemucca NV,
 Bella Coola BC to Yellowstone WY), plotting currently active wildfires
-from three separate government sources, merged into one map since none of
+from four separate government sources, merged into one map since none of
 them individually covers the whole domain. Markers are colored gray if
 contained ("Being Held" or better -- see "Containment coloring" near
 NEW_FIRE_HOURS below for why this is a status-category proxy, not a
-literal percentage), else red if reported in the last 24h, else orange.
+literal percentage, for every source except CA), else red if reported in
+the last 24h, else orange. Fires over 25,000 acres get a dashed black
+outline ring, over 100,000 acres a solid one (see LARGE_FIRE_ACRES/
+MEGA_FIRE_ACRES below).
 
   US (WA/OR/ID/w.MT/n.NV/n.UT/nw.WY): WildCAD-E, the interagency dispatch
     CAD system used by essentially every US wildland fire dispatch center.
     There's no single national feed -- each dispatch center publishes its
     own incident list, so this queries every center whose area overlaps
     the domain and merges the results.
+  California: WildCAD-E doesn't cover CA, but the domain's southern edge
+    dips into the northernmost strip of it -- filled in from NIFC's
+    nationwide WFIGS feature service, scoped to CA only (see CALFIRE_URL
+    below for why WFIGS instead of CAL FIRE's own site).
   British Columbia: BC Wildfire Service's public "Fire Locations - Current"
     ArcGIS feature service.
   Alberta: Alberta Wildfire's public "wildfire_location_active" ArcGIS
@@ -57,6 +64,21 @@ This layer is already curated to active fires only (its name says so, and
 querying it shows no "Out"-equivalent status among its ~9 current
 records), so no extra activity filtering is applied. Size (AREA_ESTIMATE)
 is in hectares, converted to acres the same way as BC's.
+
+California, via NIFC's WFIGS "Incident Locations Current" layer (the same
+IRWIN-backed data CAL FIRE's own map draws from -- CAL FIRE's own site
+returned "Access Denied" to unauthenticated requests during development):
+    https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0
+This is a nationwide layer, so it's queried with where=POOState='US-CA'
+to pull only the California fires -- every other state in the domain is
+already covered by WildCAD-E, and querying this layer unscoped would just
+duplicate those fires under a different ID. Already pre-filtered to
+current/active incidents (every CA record's FireOutDateTime is null here,
+same unreliable-as-a-filter behavior as WildCAD's own "out" field, so it's
+not used). Size (IncidentSize) is already in acres, no conversion needed.
+Unlike the other three sources, this one actually publishes a real percent-
+contained figure (PercentContained), so CA's gray/contained threshold is a
+literal >75%, not a status-category proxy.
 
 USAGE
 -----
@@ -207,6 +229,21 @@ INCLUDED_TYPES = {"Wildfire"}
 BC_FIRES_URL = "https://services6.arcgis.com/ubm4tcTYICKBpist/arcgis/rest/services/BCWS_ActiveFires_PublicView/FeatureServer/0/query"
 AB_FIRES_URL = "https://services.arcgis.com/Eb8P5h4CJk8utIBz/arcgis/rest/services/wildfire_location_active/FeatureServer/0/query"
 HECTARES_TO_ACRES = 2.47105
+
+# ---------------------------------------------------------------------------
+# California -- WildCAD-E doesn't cover CA (it's a PNW interagency dispatch
+# system), but the map domain's southern edge (LAT_MIN 39.7) dips into the
+# northernmost strip of CA (Redding / Shasta-Trinity-Siskiyou-Modoc area).
+# CAL FIRE's own site (fire.ca.gov) returned "Access Denied" to
+# unauthenticated requests during development, so this pulls from NIFC's
+# nationwide WFIGS "Incident Locations Current" layer instead -- the same
+# IRWIN-backed incident data CAL FIRE's own map draws from -- filtered to
+# POOState='US-CA' only, since every other state in the domain is already
+# covered by WildCAD-E/BC/Alberta and including them here too would just
+# duplicate those fires under a different ID.
+# ---------------------------------------------------------------------------
+CALFIRE_URL = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0/query"
+CALFIRE_CONTAINED_PCT = 75
 
 # BC's and Alberta's "Stage of Control"/"Fire Status" values that count as
 # "Being Held or better" for the gray contained-fire category (see
@@ -458,12 +495,61 @@ def fetch_ab_fires(now):
     return by_key
 
 
+def fetch_calfire_fires(now):
+    """California fires -- via NIFC's WFIGS layer, scoped to POOState=
+    'US-CA' only (see CALFIRE_URL comment for why WFIGS and why CA-only)."""
+    print("Fetching California (WFIGS) ...")
+    by_key = {}
+    try:
+        resp = requests.get(CALFIRE_URL, params={
+            "where": "POOState='US-CA' AND IncidentTypeCategory IN ('WF','CX')",
+            "outFields": "IrwinID,IncidentName,InitialLatitude,InitialLongitude,IncidentSize,"
+                          "FireDiscoveryDateTime,PercentContained",
+            "f": "geojson",
+        }, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        resp.raise_for_status()
+        features = resp.json().get("features", [])
+    except Exception as e:
+        print(f"  WARNING: California (WFIGS) fetch failed ({e}), skipping.")
+        return by_key
+
+    for feat in features:
+        p = feat["properties"]
+        try:
+            lat, lon = float(p["InitialLatitude"]), float(p["InitialLongitude"])
+        except (TypeError, ValueError, KeyError):
+            continue
+        if not (LON_MIN <= lon <= LON_MAX and LAT_MIN <= lat <= LAT_MAX):
+            continue
+        acres = p.get("IncidentSize")
+        name = p.get("IncidentName") or "UNNAMED"
+        # FireDiscoveryDateTime is epoch milliseconds UTC (standard Esri date field).
+        age_hours = None
+        if p.get("FireDiscoveryDateTime") is not None:
+            discovery = datetime.fromtimestamp(p["FireDiscoveryDateTime"] / 1000, tz=timezone.utc)
+            age_hours = (now - discovery).total_seconds() / 3600
+        # Unlike WildCAD/BC/Alberta, this source actually publishes a real
+        # percent-contained figure, so CA fires use that literal threshold
+        # instead of the status-category proxy the other sources need (see
+        # CONTAINED_STATUSES above). Missing percent reads as not-contained
+        # -- same "safer default on missing data" rule used everywhere else
+        # in this file.
+        pct = p.get("PercentContained")
+        contained = pct is not None and pct >= CALFIRE_CONTAINED_PCT
+        by_key[f"CA:{p.get('IrwinID')}"] = {
+            "name": name.strip(), "lat": lat, "lon": lon, "acres": acres,
+            "age_hours": age_hours, "contained": contained, "source": "CAL FIRE/WFIGS",
+        }
+    return by_key
+
+
 def fetch_all_fires(lookback_days):
     now = datetime.now(timezone.utc)
     by_key = {}
     by_key.update(fetch_wildcad_fires(lookback_days, now))
     by_key.update(fetch_bc_fires(now))
     by_key.update(fetch_ab_fires(now))
+    by_key.update(fetch_calfire_fires(now))
 
     fires = sorted(by_key.values(), key=lambda f: -(f["acres"] or 0))
     print(f"{len(fires)} active wildfires in domain after filtering/dedup.")
@@ -612,12 +698,12 @@ def build_map(fires, fetched_at, output_path):
     now_local = fetched_at.astimezone(LOCAL_TZ)
     fig.text(0.03, 0.977, f"{now_local.strftime('%A')} Active Wildfires", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.940, f"{len(fires)} fires • WildCAD-E (US) + BC Wildfire Service + Alberta Wildfire",
-              fontsize=12.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
+    fig.text(0.03, 0.940, f"{len(fires)} fires • WildCAD-E (US) + CAL FIRE + BC Wildfire Service + Alberta Wildfire",
+              fontsize=11.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
     fig.text(0.03, 0.909, f"Fetched {now_local.strftime('%Y-%m-%d %H:%M')} Pacific",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.014, "WildCAD-E, BC Wildfire Service, Alberta Wildfire — Ingalls Weather", fontsize=9,
+    fig.text(0.5, 0.014, "WildCAD-E, CAL FIRE, BC Wildfire Service, Alberta Wildfire — Ingalls Weather", fontsize=9,
               fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

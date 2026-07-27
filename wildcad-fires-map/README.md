@@ -2,21 +2,24 @@
 
 The canonical map of currently active wildfires across the same domain as
 [`../dew-point-storm-map/`](../dew-point-storm-map/) (Prince George BC to
-Winnemucca NV, Bella Coola BC to Yellowstone WY), merged from three
+Winnemucca NV, Bella Coola BC to Yellowstone WY), merged from four
 government sources since none of them alone covers the whole domain:
-WildCAD-E (US dispatch centers), BC Wildfire Service, and Alberta
-Wildfire. Markers are sized (log scale, no name labels) by acreage and
-colored gray if contained ("Being Held" or better), else red if first
-reported within the last 24 hours, else orange.
+WildCAD-E (US dispatch centers), CAL FIRE (via NIFC WFIGS, for the strip
+of northern California the domain dips into), BC Wildfire Service, and
+Alberta Wildfire. Markers are sized (log scale, no name labels) by
+acreage and colored gray if contained ("Being Held" or better, >75% for
+CA), else red if first reported within the last 24 hours, else orange.
+Fires over 25,000 acres get a dashed black outline ring, over 100,000
+acres a solid one.
 
 ## Files
 
 - `build_map.py` -- queries every WildCAD-E dispatch center whose area
-  overlaps the map domain plus the BC and Alberta wildfire feature
-  services, filters each to active wildfires, merges and dedups them, and
-  renders the map. Also saves a `.json` snapshot of the fetched/filtered
-  fire list to `output/` each run, so `--file` can re-render without
-  re-fetching.
+  overlaps the map domain plus the CAL FIRE/WFIGS, BC, and Alberta
+  wildfire feature services, filters each to active wildfires, merges and
+  dedups them, and renders the map. Also saves a `.json` snapshot of the
+  fetched/filtered fire list to `output/` each run, so `--file` can
+  re-render without re-fetching.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
   needs GDAL, apt-only). `setup.sh` also installs the Poppins font used
   for map labels, since it isn't packaged for apt.
@@ -98,11 +101,32 @@ exposes no true ignition/discovery date field -- `FIRE_STATUS_DATE` (last
 status change) is used as the age proxy instead (see "Age coloring"
 below), a known imperfection.
 
+### California -- via NIFC WFIGS
+
+WildCAD-E is a Pacific Northwest interagency dispatch system and doesn't
+cover California, but the map domain's southern edge (`LAT_MIN` 39.7)
+dips into the northernmost strip of it (Redding / Shasta-Trinity-Siskiyou-
+Modoc). CAL FIRE's own site (fire.ca.gov) returned "Access Denied" to
+unauthenticated requests when this was built, so this pulls from NIFC's
+nationwide WFIGS "Incident Locations Current" feature service instead --
+the same IRWIN-backed incident data CAL FIRE's own map draws from:
+`https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0`.
+It's nationwide, so it's queried with `where=POOState='US-CA'` -- every
+other state in the domain is already covered by WildCAD-E, and pulling
+this layer unscoped would just duplicate those fires under a different
+ID. Already pre-filtered to current/active incidents (every CA record's
+`FireOutDateTime` is null here, same unreliable-as-a-filter behavior as
+WildCAD's own `out` field, so it isn't used as one). Size
+(`IncidentSize`) is already in acres. Unlike the other three sources,
+this one actually publishes a real percent-contained figure
+(`PercentContained`), so CA's gray/contained threshold is a literal
+`>75%` (`CALFIRE_CONTAINED_PCT`), not a status-category proxy.
+
 ### Merging
 
-All three sources are fetched into one dict keyed by a source-prefixed ID
-(`WC:<inc_num>`, `BC:<fire_id>`, `AB:<fire_number>`) so they can't collide
-with each other, then flattened and sorted by acreage.
+All four sources are fetched into one dict keyed by a source-prefixed ID
+(`WC:<inc_num>`, `CA:<irwin_id>`, `BC:<fire_id>`, `AB:<fire_number>`) so
+they can't collide with each other, then flattened and sorted by acreage.
 
 ### Rendering
 
@@ -110,10 +134,11 @@ with each other, then flattened and sorted by acreage.
   fire size spans several orders of magnitude (0.1 to 10,000+ acres) in
   the combined dataset -- `marker_size_pts2()`.
 - **Containment coloring (checked first, wins over age)**: gray if a fire
-  is contained -- "Being Held" or better. **None of the three sources
-  publishes an actual percent-contained figure** -- confirmed directly
-  against all three live APIs, not assumed -- so this is a status-category
-  proxy, not a literal percentage threshold:
+  is contained -- "Being Held" or better (or, for CA, actually >75%
+  contained). **WildCAD/BC/Alberta don't publish an actual
+  percent-contained figure** -- confirmed directly against their live
+  APIs, not assumed -- so those three use a status-category proxy, not a
+  literal percentage threshold:
   - WildCAD: `fire_status.contain` timestamp is set. Its `control`
     timestamp (fully controlled) is never set on any fire shown here,
     since WildCAD fires marked controlled are filtered out entirely as no
@@ -121,6 +146,10 @@ with each other, then flattened and sorted by acreage.
     far up the containment ladder as a WildCAD fire in this dataset gets.
   - BC / Alberta: `FIRE_STATUS` in `CONTAINED_STATUSES`
     (`"Being Held"`, `"Under Control"`).
+  - CA: `PercentContained > CALFIRE_CONTAINED_PCT` (75) -- a real number,
+    unlike the other three, since WFIGS actually publishes one. Missing
+    percent reads as not-contained, the same safer-default-on-missing-data
+    rule used everywhere else here.
 - **Draw order**: markers are drawn red on top of orange on top of gray,
   so in a dense, overlapping cluster the most operationally urgent fires
   (new, uncontained) are never hidden underneath older or contained ones.
@@ -153,6 +182,7 @@ with each other, then flattened and sorted by acreage.
     fire this is usually close to its actual start (the first status is
     set on initial report); for an old fire that just had a status
     change, it can understate age and wrongly read as "new."
+  - CA: `FireDiscoveryDateTime`, a real Esri epoch-ms field -- exact.
 - **No name labels.** With 300+ active fires typically on the map at once,
   no label-density threshold reads as anything but clutter -- size/color
   plus the legends carry the useful signal instead.
