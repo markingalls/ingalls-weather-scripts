@@ -89,7 +89,7 @@ def main():
     p25 = np.array([climo_lookup(cdata, d.strftime("%Y-%m-%d"), "p25") for d in all_dates])
     p75 = np.array([climo_lookup(cdata, d.strftime("%Y-%m-%d"), "p75") for d in all_dates])
     p90 = np.array([climo_lookup(cdata, d.strftime("%Y-%m-%d"), "p90") for d in all_dates])
-    normal = np.array([climo_lookup(cdata, d.strftime("%Y-%m-%d"), "mean_normal_f") for d in all_dates])
+    normal = np.array([climo_lookup(cdata, d.strftime("%Y-%m-%d"), "p50") for d in all_dates])
     record = np.array([climo_lookup(cdata, d.strftime("%Y-%m-%d"), "record_f") for d in all_dates])
 
     today_boundary = fc_dates[0] if fc_dates else obs_dates[-1] + timedelta(days=1)
@@ -116,7 +116,7 @@ def main():
     ax.axvline(today_boundary, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
     ax.plot(all_dates, normal, color=CLIMO_LINE, linewidth=2.0, linestyle="--",
-            dashes=(6, 3), zorder=Z_NORMAL, label=f"Daily normal ({cdata['normal_period']})")
+            dashes=(6, 3), zorder=Z_NORMAL, label=f"Daily normal (P50, {cdata['percentile_years']})")
 
     ax.scatter(all_dates, record, color=RECORD_COLOR, marker="*", s=110,
                zorder=Z_RECORD, label="Record high", edgecolors="white", linewidths=0.6)
@@ -177,7 +177,7 @@ def main():
     # ---------- legend (horizontal strip above the plot, out of the data's way) ----------
     handles, labels = ax.get_legend_handles_labels()
     order = ["Observed high (xmACIS)", "Forecast high (WM-6)",
-             f"Daily normal ({cdata['normal_period']})", "Record high",
+             f"Daily normal (P50, {cdata['percentile_years']})", "Record high",
              "10th–25th percentile", "25th–75th percentile", "75th–90th percentile"]
     by_label = dict(zip(labels, handles))
     handles = [by_label[l] for l in order if l in by_label]
@@ -215,7 +215,7 @@ def main():
 
     # ---------- title / subtitle ----------
     # More vertical clearance than a single-row legend needs (850-700-temp-chart
-    # uses top_y + 0.058) since this chart's 6-item legend wraps to two rows.
+    # uses top_y + 0.058) since this chart's 7-item legend wraps to two rows.
     subtitle_y = top_y + 0.104
     title_y = subtitle_y + 0.035
     title = f"Tri-Cities Daily High Temperature at {title_loc}"

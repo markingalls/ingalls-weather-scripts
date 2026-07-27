@@ -3,17 +3,17 @@ Fetches Tri-Cities (KPSC) daily-high climatology from ACIS (the same
 backend behind xmacis.rcc-acis.org) and writes climatology.json: for every
 calendar day of the year --
 
-  - P10 / P25 / P75 / P90 percentiles of daily high temperature, computed
-    client-side from the raw multi-year daily series. ACIS has no
+  - P10 / P25 / P50 / P75 / P90 percentiles of daily high temperature,
+    computed client-side from the raw multi-year daily series. ACIS has no
     precomputed percentile-of-distribution element (its "normal" flag only
     exposes NCEI's mean-based normals, and its "pct_xx_yyy" reduce code is
     a threshold-exceedance count, not a statistical percentile) -- so this
     pulls the full period-of-record daily maxt series in one call and
-    computes percentiles per (month, day) in Python.
-  - The NCEI 1991-2020 daily normal (smoothed mean), one call for all 366
-    days via ACIS's own "normal" element -- this comes from NCEI's
-    official smoothed-normals product, independent of whatever raw daily
-    obs ACIS has on file.
+    computes percentiles per (month, day) in Python. P50 (the median) is
+    what the chart plots as the "daily normal" line -- sampled from the
+    same raw series as the other percentiles, rather than NCEI's separate
+    smoothed-mean normals product, so the whole climatology backdrop (band
+    edges and the normal line alike) comes from one consistent sample.
   - The record high + record year per calendar day, via ACIS's own
     groupby=year period-of-record reduction (one call, no client-side scan
     needed).
@@ -80,21 +80,6 @@ def fetch_records(sid):
     return out
 
 
-def fetch_normals(sid):
-    """NCEI 1991-2020 smoothed daily normal mean, one call for all 366
-    days (2020 is a leap year, so Feb 29 comes back too)."""
-    resp = acis_query({
-        "sid": sid, "sdate": "2020-01-01", "edate": "2020-12-31",
-        "elems": [{"name": "maxt", "normal": "1"}],
-    })
-    out = {}
-    for date_str, v in resp["data"]:
-        if v == "M":
-            continue
-        out[date_str[5:]] = float(v)
-    return out
-
-
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--sid", default=DEFAULT_SID, help='ACIS station id, e.g. "KPSC 5"')
@@ -105,8 +90,6 @@ if __name__ == "__main__":
     raw_by_day, years_seen = fetch_raw_series(args.sid)
     print("Fetching per-calendar-day record highs...")
     records = fetch_records(args.sid)
-    print("Fetching 1991-2020 daily normal means...")
-    normals = fetch_normals(args.sid)
 
     days = {}
     thin_days = []
@@ -116,6 +99,7 @@ if __name__ == "__main__":
             entry.update({
                 "p10": round(float(np.percentile(values, 10)), 1),
                 "p25": round(float(np.percentile(values, 25)), 1),
+                "p50": round(float(np.percentile(values, 50)), 1),
                 "p75": round(float(np.percentile(values, 75)), 1),
                 "p90": round(float(np.percentile(values, 90)), 1),
             })
@@ -123,8 +107,6 @@ if __name__ == "__main__":
             thin_days.append(month_day)
         if month_day in records:
             entry.update(records[month_day])
-        if month_day in normals:
-            entry["mean_normal_f"] = normals[month_day]
         days[month_day] = entry
 
     year_list = sorted(years_seen)
@@ -133,7 +115,6 @@ if __name__ == "__main__":
         "sid": args.sid,
         "percentile_years": f"{year_list[0]}-{year_list[-1]}" if year_list else None,
         "n_percentile_years": len(year_list),
-        "normal_period": "1991-2020",
         "record_note": ("Record highs reflect ACIS's period-of-record maximum for this "
                          "station, which has large historical gaps -- treat as a record "
                          "for the years actually on file (see percentile_years), not "

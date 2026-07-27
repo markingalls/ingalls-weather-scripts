@@ -4,7 +4,8 @@ Generates a styled 14-day temperature chart for Ingalls Weather's
 Instagram: the last 7 days of **observed** daily highs from xmACIS, the
 next 7 days of **forecast** highs from WindBorne WeatherMesh-6 (WM-6), and
 a 30-year climatology backdrop (also from xmACIS) -- daily P10/P25/P75/P90
-percentile shading, the daily normal (mean), and the daily record high.
+percentile shading, the daily normal (sampled as P50, the median), and the
+daily record high.
 Same canvas footprint, fonts, and visual grammar as the
 [850 mb chart](../850-700-temp-chart/) (climatology shading behind the
 data line, a dotted vertical divider, a horizontal legend strip above the
@@ -23,12 +24,12 @@ side) works.
   Defaults to ending yesterday, since today's high is usually still
   incomplete.
 - `fetch_climatology.py` -- pulls, per calendar day of the year, the
-  P10/P25/P75/P90 percentiles (computed client-side from ACIS's full
-  period-of-record daily series -- see Notes), the 1991-2020 daily normal
-  mean (ACIS's own precomputed `normal` element), and the record high +
-  year (via ACIS's period-of-record `groupby` reduction). Writes
-  `climatology.json`. No API key needed. Only needs re-running if you
-  change station -- it has nothing to do with the current forecast run.
+  P10/P25/P50/P75/P90 percentiles (computed client-side from ACIS's full
+  period-of-record daily series -- see Notes; P50 is what the chart plots
+  as the "daily normal"), and the record high + year (via ACIS's
+  period-of-record `groupby` reduction). Writes `climatology.json`. No
+  API key needed. Only needs re-running if you change station -- it has
+  nothing to do with the current forecast run.
 - `fetch_forecast.py` -- pulls the next 7 days of WM-6 forecast highs
   (max of `temperature_2m` in the 8am-8pm local window, same daytime-high
   definition [`columbia-basin-temps`](../columbia-basin-temps/) uses) and
@@ -69,28 +70,30 @@ observed/forecast refreshes for the same station.
   xmacis.rcc-acis.org), station `KPSC 5` (ACIS's ICAO-code identifier for
   Tri-Cities Airport -- also known to ACIS as `PSC 3`, WBAN `24163 1`, or
   GHCN `USW00024163 6`, all interchangeable).
-- **Percentiles have no direct ACIS element** -- ACIS's `normal` flag only
-  exposes NCEI's mean-based normals, and its `pct_xx_yyy` reduce code is a
+- **Percentiles (including the daily normal) have no direct ACIS
+  element** -- ACIS's `normal` flag only exposes NCEI's separate
+  mean-based normals product, and its `pct_xx_yyy` reduce code is a
   threshold-exceedance count, not a statistical percentile. So
   `fetch_climatology.py` pulls the full period-of-record daily `maxt`
-  series in one call and computes P10/P25/P75/P90 per calendar day in
+  series in one call and computes P10/P25/P50/P75/P90 per calendar day in
   Python (`numpy.percentile`), skipping any calendar day with fewer than 5
-  years of data (mainly a Feb 29 concern).
+  years of data (mainly a Feb 29 concern). The chart's "daily normal" line
+  is this P50 (median), not a mean -- deliberately sampled from the same
+  raw series as the percentile bands and record highs, so the whole
+  climatology backdrop is internally consistent rather than mixing a
+  station-specific empirical sample with NCEI's independently-smoothed
+  normals product.
 - **KPSC's raw daily data has a large historical gap**: ACIS reports a
   period of record back to 1945, but daily `maxt` is essentially all
   missing from 1947 through 1997 (confirmed by pulling the full series --
   a small usable fragment covers 1945-46, then nothing again until 1998).
-  So both the percentile band and the record highs are effectively drawn
-  from **~1998-present** (plus that small 1940s fragment) rather than a
-  clean, continuous 30 or 80 year record. The chart's subtitle reports the
-  actual sample size (years, not just the min/max year span) so this is
-  visible at a glance; `climatology.json`'s `record_note` field spells it
-  out further. If you point this at a station with a cleaner period of
-  record, this caveat may not apply.
-- **The daily normal (mean)** is unaffected by that gap -- it's NCEI's own
-  smoothed 1991-2020 normals product, independent of what ACIS has on file
-  for the raw daily series, pulled via `elems: [{"name": "maxt",
-  "normal": "1"}]`.
+  So the percentile bands, the daily normal, and the record highs are all
+  effectively drawn from **~1998-present** (plus that small 1940s
+  fragment) rather than a clean, continuous 30 or 80 year record. The
+  chart's subtitle reports the actual sample size (years, not just the
+  min/max year span) so this is visible at a glance; `climatology.json`'s
+  `record_note` field spells it out further. If you point this at a
+  station with a cleaner period of record, this caveat may not apply.
 - **Record highs** come from ACIS's own `groupby: "year"` period-of-record
   reduction (one call covers all 366 calendar days), not a client-side
   scan -- see the query in `fetch_records()` in `fetch_climatology.py`.
