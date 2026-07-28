@@ -156,24 +156,27 @@ def daily_columns(periods):
     return columns
 
 
-def wm6_median_series(wm6_data):
-    """(time, median °C) pairs from a WindBorne point-forecast response,
-    sorted chronologically. Falls back to the ensemble mean for any
-    timestep that's missing p50 (shouldn't normally happen, but the
-    distribution's exact key set isn't contractually guaranteed)."""
-    points = wm6_data["forecasts"][0]
-    series = []
-    for p in points:
-        dist = p["distribution"]
-        median_c = dist["p50"] if "p50" in dist else dist["mean"]
-        series.append((datetime.fromisoformat(p["time"].replace("Z", "+00:00")), median_c))
+def metamesh_temp_series(data):
+    """(time, temperature_2m °C) pairs from a MetaMesh point-forecast
+    response, sorted chronologically. MetaMesh is a deterministic
+    multi-model blend rather than an ensemble, so there's a single value
+    per timestep, not a distribution to reduce. Handles both a flat list
+    of per-timestep records and a WM-6-style nested list (one inner list
+    per requested station), since MetaMesh's exact response envelope isn't
+    documented publicly and this was reverse-engineered against the API."""
+    records = data.get("forecasts", [])
+    if records and isinstance(records[0], list):
+        records = records[0]
+    series = [(datetime.fromisoformat(p["time"].replace("Z", "+00:00")), p["temperature_2m"])
+              for p in records]
+    series.sort(key=lambda item: item[0])
     return series
 
 
-def reduce_wm6_window(series, start, end, fn):
-    """fn (max/min) over every WM-6 median sample whose time falls in
-    [start, end). None if the window and the fetched series don't overlap
-    (e.g. wm6_forecast.json wasn't fetched far enough out)."""
+def reduce_temp_window(series, start, end, fn):
+    """fn (max/min) over every sample whose time falls in [start, end).
+    None if the window and the fetched series don't overlap (e.g.
+    metamesh_forecast.json wasn't fetched far enough out)."""
     if start is None or end is None:
         return None
     values = [v for t, v in series if start <= t < end]
@@ -184,10 +187,10 @@ def c_to_f(celsius):
     return round(celsius * 9 / 5 + 32)
 
 
-def attach_wm6_temps(columns, wm6_series):
+def attach_metamesh_temps(columns, temp_series):
     for col in columns:
-        high_c = reduce_wm6_window(wm6_series, col["day_start"], col["day_end"], max)
-        low_c = reduce_wm6_window(wm6_series, col["night_start"], col["night_end"], min)
+        high_c = reduce_temp_window(temp_series, col["day_start"], col["day_end"], max)
+        low_c = reduce_temp_window(temp_series, col["night_start"], col["night_end"], min)
         col["high"] = c_to_f(high_c) if high_c is not None else None
         col["low"] = c_to_f(low_c) if low_c is not None else None
 
@@ -196,8 +199,8 @@ def parse_args():
     ap = argparse.ArgumentParser(description="Render the Tri-Cities TV-style 7-day forecast graphic.")
     ap.add_argument("--forecast", default="forecast.json",
                      help="NWS forecast (day/night periods, condition icons) from fetch_forecast.py")
-    ap.add_argument("--wm6-forecast", default="wm6_forecast.json",
-                     help="WM-6 point temperature forecast (high/low source) from fetch_wm6_forecast.py")
+    ap.add_argument("--metamesh-forecast", default="metamesh_forecast.json",
+                     help="MetaMesh point temperature forecast (high/low source) from fetch_metamesh_forecast.py")
     ap.add_argument("--output", default="tri_cities_7day_forecast.png")
     return ap.parse_args()
 
@@ -208,8 +211,8 @@ def main():
     props = data["properties"]
     columns = daily_columns(props["periods"])
 
-    wm6_series = wm6_median_series(json.load(open(args.wm6_forecast)))
-    attach_wm6_temps(columns, wm6_series)
+    temp_series = metamesh_temp_series(json.load(open(args.metamesh_forecast)))
+    attach_metamesh_temps(columns, temp_series)
 
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
