@@ -75,3 +75,9 @@ dew-point-storm-map/output/*.png
 # PNGs are outputs -- neither is source, so don't track them.
 wildcad-fires-map/output/*.json
 wildcad-fires-map/output/*.png
+
+# --- hrrr-smoke-chart ---
+# smoke.json is live data fetch_smoke.py regenerates every run, and the
+# rendered chart is an output too -- neither is source, so don't track them.
+hrrr-smoke-chart/smoke.json
+hrrr-smoke-chart/hrrr_*_smoke_*.png

@@ -36,6 +36,10 @@ workflows. Each project lives in its own directory with its own README.
   currently active wildfires across the same domain as
   `dew-point-storm-map/`, merged from WildCAD-E (US dispatch centers),
   CAL FIRE (via NIFC WFIGS), BC Wildfire Service, and Alberta Wildfire.
+- [`hrrr-smoke-chart/`](hrrr-smoke-chart/) — generates styled meteograms of
+  NOAA HRRR smoke (near-surface as AQI or raw µg/m³, or vertically
+  integrated) for one or more points over a full 48-hour HRRR cycle
+  (defaults to Kennewick, WA and Hermiston, OR).
 
 ## Shared resources
 
