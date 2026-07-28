@@ -449,7 +449,7 @@ def main():
     DATE_Y = CARD_TOP - 0.086
     ICON_Y = 0.565
     PRECIP_CHANCE_Y = 0.45
-    PRECIP_RANGE_Y = 0.40
+    PRECIP_RANGE_Y = 0.425
     HIGH_Y = CARD_BOTTOM + 0.085
     LOW_Y = CARD_BOTTOM + 0.03
 
