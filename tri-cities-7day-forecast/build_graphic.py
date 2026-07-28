@@ -562,18 +562,18 @@ def main():
         show_sun_backing = precip and col.get("sun_relevant") and (is_low_chance or is_partial_day)
         if show_sun_backing:
             sun_text = ax.text(cx - 0.016, ICON_Y + 0.016, chr(GLYPHS["CLEARday"]), ha="center", va="center",
-                                fontproperties=ICON_FONT, fontsize=60, color=COLOR_SUN, zorder=2.6)
+                                fontproperties=ICON_FONT, fontsize=48, color=COLOR_SUN, zorder=2.6)
             sun_text.set_path_effects([pe.withStroke(linewidth=2.2, foreground=COLOR_SUN)])
 
-            # White halo cut into the sun in the shape of the foreground
-            # icon, so the icon's own colored line art doesn't have to fight
-            # the sun's color/rays right up against it -- drawn between the
-            # sun (behind) and the real icon (in front), same shape and
-            # size as the real icon but white fill + white outline, wider
-            # than the icon's own bold stroke so the halo actually shows.
-            halo_text = ax.text(cx, ICON_Y, col["glyph"], ha="center", va="center",
-                                 fontproperties=ICON_FONT, fontsize=46, color="white", zorder=2.8)
-            halo_text.set_path_effects([pe.withStroke(linewidth=4, foreground="white")])
+            # Solid white disc between the sun and the real icon, sized to
+            # fully cover the icon's footprint. The icon font is thin-line
+            # outline art -- mostly negative space inside the glyph -- so a
+            # thickened copy of the glyph itself still leaves gaps the sun
+            # shows through; a solid disc blocks it cleanly instead. Marker
+            # size is in points (not data units), so it stays circular
+            # regardless of the axes' non-square aspect ratio.
+            ax.plot([cx], [ICON_Y], marker="o", markersize=50, markerfacecolor="white",
+                     markeredgewidth=0, zorder=2.8)
 
         icon_text = ax.text(cx, ICON_Y, col["glyph"], ha="center", va="center",
                              fontproperties=ICON_FONT, fontsize=46, color=col["glyph_color"], zorder=3)
