@@ -847,7 +847,7 @@ def main():
               fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
-    fig.text((LEFT + RIGHT) / 2, 0.045, "National Weather Service — Ingalls Weather",
+    fig.text((LEFT + RIGHT) / 2, 0.045, "NWS/ECMWF/WM-6 • Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
     plt.savefig(args.output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
