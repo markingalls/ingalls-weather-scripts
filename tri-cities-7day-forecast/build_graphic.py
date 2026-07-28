@@ -742,7 +742,7 @@ def main():
                 speed_text = f"{speed_lo}-{speed_hi} mph"
             wind_text = f"{wind['dir']} {speed_text}" if wind["dir"] else speed_text
             ax.text(cx, WIND_SPEED_Y, wind_text, ha="center", va="center",
-                     fontproperties=f_med, fontsize=10.5, color=COLOR_WIND, zorder=3)
+                     fontproperties=f_med, fontsize=9.5, color=COLOR_WIND, zorder=3)
 
             if wind["gust"] is not None:
                 ax.text(cx, WIND_GUST_Y, f"Gusts: {wind['gust']} mph", ha="center", va="center",
