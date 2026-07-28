@@ -1,7 +1,8 @@
 import argparse
 import json
 import os
-from datetime import datetime
+from datetime import datetime, time as dtime, timedelta
+from zoneinfo import ZoneInfo
 
 import matplotlib
 matplotlib.use("Agg")
@@ -69,6 +70,12 @@ GLYPHS = {
     "HAZEday": 0xe952,
     "FOGGYday": 0xe94c,
     "BLOWING_SNOWday": 0xe93d,
+    "DRIZZLEday": 0xe922,
+    "HEAVY_SHOWERSday": 0xe931,
+    "SNOW_FLURRIESday": 0xe934,
+    "HEAVY_SNOWday": 0xe97c,
+    "SNOW_SHOWERSday": 0xe988,
+    "SEVERE_THUNDERSTORMSday": 0xe90d,
 }
 
 # NWS forecast icon code (from the last path segment of the "icon" URL,
@@ -127,22 +134,75 @@ def glyph_for(icon_url):
     return chr(GLYPHS[name]), color
 
 
-def daily_columns(periods):
+# Open-Meteo's daily "weathercode" -> (glyph, color). Standard WMO weather
+# interpretation codes (https://open-meteo.com/en/docs -> WMO Weather
+# interpretation codes). Only used to backfill a condition icon for the one
+# day beyond NWS's ~7-day coverage (see the after-3pm window shift below).
+WMO_ICON_MAP = {
+    0: ("CLEARday", COLOR_SUN),
+    1: ("FAIRday", COLOR_SUN),
+    2: ("PARTLY_CLOUDYday", COLOR_CLOUD),
+    3: ("CLOUDYday", COLOR_CLOUD),
+    45: ("FOGGYday", COLOR_MUTED),
+    48: ("FOGGYday", COLOR_MUTED),
+    51: ("DRIZZLEday", COLOR_RAIN),
+    53: ("DRIZZLEday", COLOR_RAIN),
+    55: ("DRIZZLEday", COLOR_RAIN),
+    56: ("FREEZING_RAINday", COLOR_SNOW),
+    57: ("FREEZING_RAINday", COLOR_SNOW),
+    61: ("RAINday", COLOR_RAIN),
+    63: ("RAINday", COLOR_RAIN),
+    65: ("HEAVY_SHOWERSday", COLOR_RAIN),
+    66: ("FREEZING_RAINday", COLOR_SNOW),
+    67: ("FREEZING_RAINday", COLOR_SNOW),
+    71: ("SNOWday", COLOR_SNOW),
+    73: ("SNOWday", COLOR_SNOW),
+    75: ("HEAVY_SNOWday", COLOR_SNOW),
+    77: ("SNOW_FLURRIESday", COLOR_SNOW),
+    80: ("SHOWERSday", COLOR_RAIN),
+    81: ("SHOWERSday", COLOR_RAIN),
+    82: ("HEAVY_SHOWERSday", COLOR_RAIN),
+    85: ("SNOW_SHOWERSday", COLOR_SNOW),
+    86: ("HEAVY_SNOWday", COLOR_SNOW),
+    95: ("THUNDERSTORMSday", COLOR_STORM),
+    96: ("SEVERE_THUNDERSTORMSday", COLOR_STORM),
+    99: ("SEVERE_THUNDERSTORMSday", COLOR_STORM),
+}
+
+
+def glyph_for_wmo(weathercode):
+    name, color = WMO_ICON_MAP.get(weathercode, ("UNKNOWNday", INK_SECONDARY))
+    return chr(GLYPHS[name]), color
+
+
+def daily_columns(periods, drop_today=False):
     """Pairs sequential (daytime, following-night) periods into up to 7 day
-    columns: label/date/icon from the daytime period, plus each period's own
-    start/end so the caller can reduce a separate temperature series (e.g.
-    WM-6's median) over the same windows instead of using NWS's own
+    columns: label/date/glyph from the daytime period, plus each period's
+    own start/end so the caller can reduce a separate temperature series
+    (MetaMesh's) over the same windows instead of using NWS's own
     temperature. If the feed starts overnight (fetched after sunset, before
     a Today period exists), that leading night period is dropped -- it has
-    no daytime pair to lead a column."""
+    no daytime pair to lead a column.
+
+    drop_today additionally drops the Today/Tonight pair, so the window
+    starts tomorrow (renders after 3pm local -- see README). This only
+    actually drops something if NWS's own feed still has a "Today" period;
+    if the feed was fetched late enough that NWS has already moved past
+    today on its own (periods[0] is already tomorrow, because today's day
+    period no longer exists in the feed once it's over), there's nothing
+    further to drop."""
     if periods and not periods[0]["isDaytime"]:
         periods = periods[1:]
+
+    if drop_today and periods and periods[0]["name"] == "Today":
+        periods = periods[2:]
 
     columns = []
     i = 0
     while i < len(periods) and len(columns) < 7:
         day = periods[i]
         night = periods[i + 1] if i + 1 < len(periods) and not periods[i + 1]["isDaytime"] else None
+        glyph, color = glyph_for(day["icon"])
         columns.append({
             "label": day["name"],
             "date": datetime.fromisoformat(day["startTime"]),
@@ -150,10 +210,55 @@ def daily_columns(periods):
             "day_end": datetime.fromisoformat(day["endTime"]),
             "night_start": datetime.fromisoformat(night["startTime"]) if night else None,
             "night_end": datetime.fromisoformat(night["endTime"]) if night else None,
-            "icon": day["icon"],
+            "glyph": glyph,
+            "glyph_color": color,
         })
         i += 2
     return columns
+
+
+# NWS's own day/night split for future (non-current) days -- confirmed
+# against real fetched data (e.g. "Wednesday" 06:00-18:00, "Wednesday
+# Night" 18:00-06:00 local). Reused for the synthetic day added beyond
+# NWS's own coverage so every column reduces temperature over the same
+# local-hour convention.
+DAY_START_HOUR, DAY_END_HOUR = 6, 18
+LOCAL_TZ = ZoneInfo("America/Los_Angeles")
+
+
+def local_day_window(date):
+    """(day_start, day_end, night_start, night_end) tz-aware datetimes for
+    one calendar date, using NWS's own 6am-6pm/6pm-6am local split."""
+    day_start = datetime.combine(date, dtime(DAY_START_HOUR), tzinfo=LOCAL_TZ)
+    day_end = datetime.combine(date, dtime(DAY_END_HOUR), tzinfo=LOCAL_TZ)
+    night_start = day_end
+    night_end = datetime.combine(date + timedelta(days=1), dtime(DAY_START_HOUR), tzinfo=LOCAL_TZ)
+    return day_start, day_end, night_start, night_end
+
+
+def openmeteo_weathercode_for_date(data, date):
+    daily = data["daily"]
+    idx = daily["time"].index(date.isoformat())
+    return daily["weathercode"][idx]
+
+
+def synthetic_column(date, openmeteo_data):
+    """A day/night column beyond NWS's own coverage: condition icon from
+    Open-Meteo's daily weathercode (temperature gets filled in by
+    attach_metamesh_temps() same as every other column, since MetaMesh's
+    15-day horizon already reaches this far)."""
+    day_start, day_end, night_start, night_end = local_day_window(date)
+    glyph, color = glyph_for_wmo(openmeteo_weathercode_for_date(openmeteo_data, date))
+    return {
+        "label": date.strftime("%A"),
+        "date": datetime.combine(date, dtime(0), tzinfo=LOCAL_TZ),
+        "day_start": day_start,
+        "day_end": day_end,
+        "night_start": night_start,
+        "night_end": night_end,
+        "glyph": glyph,
+        "glyph_color": color,
+    }
 
 
 def metamesh_temp_series(data):
@@ -201,6 +306,9 @@ def parse_args():
                      help="NWS forecast (day/night periods, condition icons) from fetch_forecast.py")
     ap.add_argument("--metamesh-forecast", default="metamesh_forecast.json",
                      help="MetaMesh point temperature forecast (high/low source) from fetch_metamesh_forecast.py")
+    ap.add_argument("--openmeteo-forecast", default="openmeteo_forecast.json",
+                     help="Open-Meteo daily weathercode forecast, from fetch_openmeteo_forecast.py -- only "
+                          "read when the window shift (see main()) needs a 7th day beyond NWS's coverage")
     ap.add_argument("--output", default="tri_cities_7day_forecast.png")
     return ap.parse_args()
 
@@ -209,10 +317,35 @@ def main():
     args = parse_args()
     data = json.load(open(args.forecast))
     props = data["properties"]
-    columns = daily_columns(props["periods"])
+
+    # Local-time-of-day policy for what "today" means in the graphic:
+    #  - before 7am: today's high hasn't happened yet and its low (tonight's,
+    #    per the day/night pairing above) is still ahead too -- show both.
+    #  - 7am-3pm: this morning's low already happened (the pre-dawn trough
+    #    lands ~6-7am -- see the trough/peak timing check earlier in this
+    #    project's history) and tonight's low is still hours off, so showing
+    #    a "low" here would be neither a completed nor a near-term forecast
+    #    -- blank it instead.
+    #  - after 3pm: today's high has already happened or is happening (the
+    #    peak lands ~3-5pm), so today stops being a forward-looking forecast
+    #    at all -- drop it and start the window tomorrow, backfilling the
+    #    resulting 7th day (beyond NWS's ~7-day coverage) from Open-Meteo.
+    now_local = datetime.now(LOCAL_TZ)
+    drop_today = now_local.hour >= 15
+    suppress_today_low = 7 <= now_local.hour < 15
+
+    columns = daily_columns(props["periods"], drop_today=drop_today)
+
+    if drop_today and len(columns) < 7:
+        last_date = columns[-1]["date"].date() if columns else now_local.date()
+        openmeteo_data = json.load(open(args.openmeteo_forecast))
+        columns.append(synthetic_column(last_date + timedelta(days=1), openmeteo_data))
 
     temp_series = metamesh_temp_series(json.load(open(args.metamesh_forecast)))
     attach_metamesh_temps(columns, temp_series)
+
+    if suppress_today_low and columns:
+        columns[0]["low"] = None
 
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
@@ -247,13 +380,12 @@ def main():
         ax.text(cx, CARD_TOP - 0.093, col["date"].strftime("%b %-d"), ha="center", va="top",
                  fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
-        glyph, color = glyph_for(col["icon"])
-        icon_text = ax.text(cx, (CARD_TOP + CARD_BOTTOM) / 2 + 0.045, glyph, ha="center", va="center",
-                             fontproperties=ICON_FONT, fontsize=46, color=color, zorder=3)
+        icon_text = ax.text(cx, (CARD_TOP + CARD_BOTTOM) / 2 + 0.045, col["glyph"], ha="center", va="center",
+                             fontproperties=ICON_FONT, fontsize=46, color=col["glyph_color"], zorder=3)
         # the icon font is a thin-stroke outline face with no bold weight of
         # its own -- stroking each glyph in its own fill color fattens the
         # outline so it reads as bold instead of drawing it twice.
-        icon_text.set_path_effects([pe.withStroke(linewidth=1.8, foreground=color)])
+        icon_text.set_path_effects([pe.withStroke(linewidth=1.8, foreground=col["glyph_color"])])
 
         high_text = f"{col['high']}°" if col["high"] is not None else "—"
         ax.text(cx, CARD_BOTTOM + 0.085, high_text, ha="center", va="bottom",
