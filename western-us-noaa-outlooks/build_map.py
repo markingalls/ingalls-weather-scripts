@@ -14,8 +14,10 @@ frame/style. Pick one with --product:
     temp_wk34     CPC Week 3-4 Temperature Outlook
     precip_wk34   CPC Week 3-4 Precipitation Outlook
     spc_fire      SPC Day 1 Fire Weather Outlook
+    spc_fire_day2 SPC Day 2 Fire Weather Outlook
     spc_severe    SPC Day 1 Categorical (Severe Weather) Outlook
     wpc_precip    WPC Day 1 Excessive Rainfall Outlook
+    drought_monitor  U.S. Drought Monitor (NDMC weekly D0-D4 categories)
 
 USAGE
 -----
@@ -54,12 +56,15 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
 import matplotlib.colors as mcolors
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, PathPatch
+from matplotlib.axes import Axes
 import numpy as np
 import requests
 
 import cartopy.crs as ccrs
-from shapely.geometry import shape, box, Polygon as ShPolygon, MultiPolygon as ShMultiPolygon
+from cartopy.mpl.path import shapely_to_path
+import shapely
+from shapely.geometry import shape, box, MultiPolygon, Polygon as ShPolygon, MultiPolygon as ShMultiPolygon
 from shapely.ops import unary_union
 from PIL import Image
 
@@ -78,6 +83,35 @@ STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
+
+# Natural Earth's admin-1 polygons aren't a clean topological coverage --
+# neighboring state/province polygons (same country or, worse, across a
+# country line) don't share identical boundary vertices, even at full 10m
+# resolution. Rendering each polygon's own edge independently then shows a
+# visible double line everywhere two of them meet. shapely.coverage_simplify
+# (called per country, below) simplifies a set of polygons while snapping
+# their shared edges together, which fixes state/province pairs within a
+# country; it happens to also clean up most of the cross-country jitter
+# along the international border (though that's not guaranteed the way the
+# within-country case is, since the US/Canada/Mexico polygons aren't
+# simplified as one shared coverage). Also used as a plain .simplify()
+# tolerance for the land layer, which has no adjacency to preserve.
+GEOM_SIMPLIFY_TOLERANCE_DEG = 0.02
+
+# Simplifying can leave a very long, nearly-straight run reduced to just its
+# two endpoints (e.g. Montana's entire ~12-degree-long northern border).
+# Under this map's curved perspective projection a 2-point chord that long
+# visibly cuts the corner relative to a neighboring polygon's border that
+# happens to keep more points along the same stretch, reading as a second,
+# offset line even though the underlying geography now matches. Re-densifying
+# afterwards so no straight run exceeds this length fixes the projected curve.
+BORDER_DENSIFY_SEGMENT_DEG = 0.5
+
+# Buffer-out-then-in amount used to close leftover slivers before tracing
+# each country's outline -- see the comment at its use in
+# load_states_lakes_and_countries(). Small relative to state-sized features,
+# big enough to bridge the gaps actually seen in this dataset.
+COUNTRY_UNION_CLOSE_DEG = 0.01
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -199,6 +233,31 @@ def parse_kml_extended_data(text):
     return results
 
 
+def parse_usdm_geojson(text):
+    """U.S. Drought Monitor's ArcGIS FeatureServer returns plain GeoJSON
+    rather than KML: one feature per DM category (0-4), each already the
+    full cumulative extent of that category or worse. Only exterior rings
+    are kept per part (holes are dropped), matching the same simplification
+    the KML parsers above make for polygons with interior boundaries."""
+    data = json.loads(text)
+    results = []
+    for feat in data.get("features", []):
+        geom = feat.get("geometry")
+        if not geom:
+            continue
+        if geom["type"] == "Polygon":
+            parts = [geom["coordinates"]]
+        elif geom["type"] == "MultiPolygon":
+            parts = geom["coordinates"]
+        else:
+            continue
+        rings = [part[0] for part in parts if part and len(part[0]) >= 3]
+        if not rings:
+            continue
+        results.append({"fields": feat.get("properties", {}), "rings": rings})
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Date formatting per source
 # ---------------------------------------------------------------------------
@@ -245,6 +304,148 @@ def date_from_fetch_time(placemarks, fetched_at):
     """WPC's Excessive Rainfall Outlook KML carries no embedded date --
     fall back to today (the outlook is always for the current cycle)."""
     return f"issued {datetime.now().strftime('%b %d, %Y')}"
+
+
+def date_from_usdm_fields(placemarks, fetched_at):
+    """USDM's ValidStart/ValidEnd come through as epoch-millisecond ints
+    (ArcGIS's GeoJSON date encoding), one pair per DM feature but always
+    the same pair -- the whole weekly release shares one valid period."""
+    starts, ends = [], []
+    for pm in placemarks:
+        f = pm["fields"]
+        if f.get("ValidStart") is not None:
+            starts.append(datetime.utcfromtimestamp(f["ValidStart"] / 1000))
+        if f.get("ValidEnd") is not None:
+            ends.append(datetime.utcfromtimestamp(f["ValidEnd"] / 1000))
+    if not starts or not ends:
+        return "valid date range unavailable"
+    return _format_range(min(starts), max(ends))
+
+
+# ---------------------------------------------------------------------------
+# Overlap striping -- for products with more than one independent hazard
+# axis (e.g. SPC's fire-weather-index tiers vs. its separate dry-thunderstorm
+# risk), alpha-stacking two overlapping fills blends into a color matching
+# neither hazard. Same diagonal-candy-stripe technique as
+# columbia-basin-alerts-map uses for overlapping NWS alerts.
+# ---------------------------------------------------------------------------
+
+def hex_to_rgb(hexcolor):
+    hexcolor = hexcolor.lstrip("#")
+    return tuple(int(hexcolor[i:i+2], 16) for i in (0, 2, 4))
+
+
+# Degree^2 area floor for keeping a polygon from an overlay op. Real slivers
+# of interest are many orders of magnitude bigger than this; anything under
+# it is floating-point noise from touching boundaries.
+MIN_POLY_AREA = 1e-8
+
+
+def polygons_only(geom):
+    """Drop degenerate Point/LineString/near-zero-area slivers that
+    shapely's intersection and difference ops leave behind at touching
+    polygon boundaries. Left in, cartopy's projection code can't cut a
+    degenerate ring cleanly and falls back to covering the entire
+    projection disk instead of the sliver's true (near-zero) extent --
+    which is what made overlap-stripe fills bleed across the whole map."""
+    if geom.geom_type == "GeometryCollection":
+        parts = [g for g in geom.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        geom = unary_union(parts) if parts else ShPolygon()
+    if geom.geom_type not in ("Polygon", "MultiPolygon"):
+        return ShPolygon()
+    polys = list(geom.geoms) if geom.geom_type == "MultiPolygon" else [geom]
+    kept = [p for p in polys if p.area > MIN_POLY_AREA]
+    if not kept:
+        return ShPolygon()
+    return unary_union(kept) if len(kept) > 1 else kept[0]
+
+
+def make_stripe_image(colors, width_px, height_px, stripe_px=20):
+    """Diagonal candy-stripe raster alternating full-opacity bands of
+    each color in `colors`, sized to cover width_px x height_px."""
+    yy, xx = np.mgrid[0:height_px, 0:width_px]
+    band = ((xx + yy) // stripe_px) % len(colors)
+    img = np.zeros((height_px, width_px, 3), dtype=np.uint8)
+    for i, c in enumerate(colors):
+        img[band == i] = hex_to_rgb(c)
+    return img
+
+
+def draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px, stripe_overlaps):
+    """Draw the parsed hazard polygons. When stripe_overlaps is set, regions
+    where two different hazard axes overlap (see the "axis" style field) are
+    drawn as candy-stripe fills instead of alpha-stacking; regions where
+    same-axis categories overlap (i.e. ordinary nested severity, like
+    Critical sitting inside Elevated) still just let the more severe one's
+    solid color win, unchanged from the non-striped path."""
+    if not stripe_overlaps:
+        for i, item in enumerate(styled):
+            ax.add_geometries([item["geom"]], crs=pc, facecolor=item["color"], edgecolor=item["color"],
+                               linewidth=1.2, alpha=item["alpha"], zorder=3 + i)
+        return
+
+    # Union polygons sharing a label (defensive -- each category is
+    # typically already a single placemark) before partitioning.
+    by_label = {}
+    for item in styled:
+        entry = by_label.setdefault(item["label"], {**item, "geoms": []})
+        entry["geoms"].append(item["geom"])
+    labels = []
+    for label, entry in by_label.items():
+        geom = entry["geoms"][0] if len(entry["geoms"]) == 1 else unary_union(entry["geoms"])
+        labels.append({**entry, "geom": geom})
+    labels.sort(key=lambda d: d["order_key"])
+
+    # Partition into disjoint regions, each tagged with the labels covering it.
+    partition = []  # list of (geom, tuple of label dicts)
+    for lab in labels:
+        next_partition = []
+        remaining = lab["geom"]
+        for cell_geom, cell_labels in partition:
+            overlap = polygons_only(cell_geom.intersection(remaining))
+            if not overlap.is_empty:
+                next_partition.append((overlap, cell_labels + (lab,)))
+            rest = polygons_only(cell_geom.difference(remaining))
+            if not rest.is_empty:
+                next_partition.append((rest, cell_labels))
+            remaining = polygons_only(remaining.difference(cell_geom))
+        if not remaining.is_empty:
+            next_partition.append((remaining, (lab,)))
+        partition = next_partition
+
+    OVERLAP_EDGE = "#4a4a4a"
+    for i, (geom, cell_labels) in enumerate(partition):
+        if geom.is_empty:
+            continue
+        axes_present = {l.get("axis", "primary") for l in cell_labels}
+        if len(axes_present) <= 1:
+            # Single axis (including the common single-label case) -- the
+            # most severe category's solid color wins, same as unstriped.
+            top = max(cell_labels, key=lambda l: l["order_key"])
+            ax.add_geometries([geom], crs=pc, facecolor=top["color"], edgecolor=top["color"],
+                               linewidth=1.2, alpha=top["alpha"], zorder=3 + i)
+            continue
+
+        # Cross-axis overlap: stripe with one representative (most severe
+        # within its own axis) color per axis present.
+        rep_by_axis = {}
+        for l in cell_labels:
+            axis = l.get("axis", "primary")
+            if axis not in rep_by_axis or l["order_key"] > rep_by_axis[axis]["order_key"]:
+                rep_by_axis[axis] = l
+        colors = [rep_by_axis[a]["color"] for a in sorted(rep_by_axis)]
+        alpha = max(l["alpha"] for l in cell_labels)
+        stripe_img = make_stripe_image(colors, ax_w_px, ax_h_px)
+        proj_geom = ax.projection.project_geometry(geom, pc)
+        clip_path = shapely_to_path(proj_geom)
+        clip_patch = PathPatch(clip_path, transform=ax.transData)
+        # GeoAxes overrides imshow to require a CRS transform; this is
+        # plain axes-fraction space, so call the base Axes.imshow.
+        im = Axes.imshow(ax, stripe_img, extent=(0, 1, 0, 1), transform=ax.transAxes,
+                          origin="upper", interpolation="nearest", alpha=alpha, zorder=3 + i)
+        im.set_clip_path(clip_patch)
+        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
+                           linewidth=1.2, alpha=1.0, zorder=3 + i + 0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -307,12 +508,18 @@ def cpc_prob_style(cmap_by_direction):
 
 
 SPC_FIRE_STYLE = {
-    "ELEV": {"color": "#e0b04a", "alpha": 0.60, "order_key": 1, "label": "Elevated"},
-    "CRIT": {"color": "#dd7a2e", "alpha": 0.62, "order_key": 2, "label": "Critical"},
-    "EXTM": {"color": "#c13a2b", "alpha": 0.65, "order_key": 3, "label": "Extreme"},
+    # Official SPC categorical colors, from the fire_weather/SPC_firewx
+    # MapServer renderer (mapservices.weather.noaa.gov) rather than a
+    # hand-picked approximation. "axis" marks which independent hazard
+    # dimension a category belongs to -- see stripe_overlaps in PRODUCTS.
+    "ELEV": {"color": "#e69800", "alpha": 0.65, "order_key": 1, "label": "Elevated", "axis": "index"},
+    "CRIT": {"color": "#ff0000", "alpha": 0.65, "order_key": 2, "label": "Critical", "axis": "index"},
+    "EXTM": {"color": "#e600a9", "alpha": 0.65, "order_key": 3, "label": "Extreme", "axis": "index"},
     # Dry thunderstorm risk is a separate hazard axis (lightning without
     # rain), not a more severe fire-weather-index tier -- distinct hue.
-    "IDRT": {"color": "#6a4c93", "alpha": 0.45, "order_key": 4, "label": "Isolated Dry Thunderstorms"},
+    # ("Iso DryT" in SPC's own renderer; "Scattered DryT" reuses Critical's red.)
+    "IDRT": {"color": "#732600", "alpha": 0.55, "order_key": 4, "label": "Isolated Dry Thunderstorms",
+              "axis": "dry_thunder"},
 }
 
 SPC_SEVERE_STYLE = {
@@ -351,6 +558,28 @@ def wpc_ero_style(pm):
             return {**sty, "order_key": i + 1, "label": name}
     print(f"WARNING: unrecognized excessive rainfall category '{name}', skipping.")
     return None
+
+
+# Official USDM palette (droughtmonitor.unl.edu legend). Categories are
+# cumulative -- each DM polygon is "this category or worse" -- so, like the
+# SPC severe tiers, drawing least to most severe with the more severe one on
+# top is exactly right with no overlap striping needed.
+USDM_STYLE = {
+    0: {"color": "#ffff00", "alpha": 0.65, "order_key": 1, "label": "D0 — Abnormally Dry"},
+    1: {"color": "#fcd37f", "alpha": 0.65, "order_key": 2, "label": "D1 — Moderate Drought"},
+    2: {"color": "#ffaa00", "alpha": 0.65, "order_key": 3, "label": "D2 — Severe Drought"},
+    3: {"color": "#e60000", "alpha": 0.65, "order_key": 4, "label": "D3 — Extreme Drought"},
+    4: {"color": "#730000", "alpha": 0.65, "order_key": 5, "label": "D4 — Exceptional Drought"},
+}
+
+
+def usdm_style(pm):
+    dm = pm["fields"].get("DM")
+    sty = USDM_STYLE.get(dm)
+    if sty is None:
+        print(f"WARNING: unrecognized drought category DM={dm}, skipping.")
+        return None
+    return dict(sty)
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +669,18 @@ PRODUCTS = {
         style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire.png",
+        stripe_overlaps=True,
+    ),
+    "spc_fire_day2": dict(
+        title="Western U.S. Fire Weather Outlook — Day 2",
+        subtitle_prefix="NWS Storm Prediction Center — Day 2 Outlook",
+        agency="SPC",
+        urls=["https://www.spc.noaa.gov/products/fire_wx/day2fireotlk.kmz"],
+        parser=parse_kml_extended_data,
+        style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_fire_day2.png",
+        stripe_overlaps=True,
     ),
     "spc_severe": dict(
         title="Western U.S. Severe Weather Outlook",
@@ -460,6 +701,20 @@ PRODUCTS = {
         style=wpc_ero_style,
         date=date_from_fetch_time,
         output="western_us_wpc_precip.png",
+    ),
+    "drought_monitor": dict(
+        title="Western U.S. Drought Monitor",
+        subtitle_prefix="National Drought Mitigation Center — U.S. Drought Monitor",
+        agency="NDMC",
+        urls=[
+            "https://services5.arcgis.com/0OTVzJS4K09zlixn/arcgis/rest/services/"
+            "USDM_current/FeatureServer/0/query?where=1%3D1&outFields=DM,ValidStart,ValidEnd"
+            "&returnGeometry=true&outSR=4326&f=geojson"
+        ],
+        parser=parse_usdm_geojson,
+        style=usdm_style,
+        date=date_from_usdm_fields,
+        output="western_us_drought_monitor.png",
     ),
 }
 
@@ -500,7 +755,26 @@ def fetch_source(cfg, override_path):
 def load_land():
     with open(LAND_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
+    return [shape(feat["geometry"]).simplify(GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+                                     .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+            for feat in data["features"] if feat.get("geometry")]
+
+
+def _as_coverage_ready(geom):
+    """coverage_simplify requires clean Polygon/MultiPolygon input -- fix up
+    the one known-invalid admin-1 polygon in this dataset (Michigan) rather
+    than letting it error out or silently drop that state."""
+    if not geom.is_valid:
+        geom = shapely.make_valid(geom)
+    if geom.geom_type == "GeometryCollection":
+        parts = []
+        for part in geom.geoms:
+            if part.geom_type == "Polygon":
+                parts.append(part)
+            elif part.geom_type == "MultiPolygon":
+                parts.extend(part.geoms)
+        geom = MultiPolygon(parts)
+    return geom
 
 
 def load_states_lakes_and_countries():
@@ -508,11 +782,17 @@ def load_states_lakes_and_countries():
     TARGET_COUNTRIES dissolved from those same state/province polygons
     (rather than a separately-sourced country layer) so the international
     border lines up exactly with the state/province borders drawn on top
-    of it -- two independently-simplified datasets of the same border
-    otherwise drift apart and leave a visible seam."""
+    of it.
+
+    Each country's polygons are run through coverage_simplify together (not
+    one at a time) so shared state/province edges are snapped identical
+    rather than merely close -- see GEOM_SIMPLIFY_TOLERANCE_DEG. Re-densified
+    afterwards per BORDER_DENSIFY_SEGMENT_DEG so the simplified border still
+    projects as a smooth curve instead of a handful of long, corner-cutting
+    chords."""
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
-    state_geoms, lake_geoms = [], []
+    lake_geoms = []
     by_country = {c: [] for c in TARGET_COUNTRIES}
     for feat in data["features"]:
         props = feat["properties"]
@@ -522,10 +802,26 @@ def load_states_lakes_and_countries():
             continue
         admin = props.get("admin")
         if admin in TARGET_COUNTRIES:
-            geom = shape(feat["geometry"])
-            state_geoms.append(geom)
-            by_country[admin].append(geom)
-    country_geoms = [unary_union(geoms) for geoms in by_country.values() if geoms]
+            by_country[admin].append(_as_coverage_ready(shape(feat["geometry"])))
+
+    state_geoms, country_geoms = [], []
+    for geoms in by_country.values():
+        if not geoms:
+            continue
+        simplified = [g.segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+                      for g in shapely.coverage_simplify(geoms, tolerance=GEOM_SIMPLIFY_TOLERANCE_DEG)]
+        state_geoms.extend(simplified)
+        # coverage_simplify guarantees matching edges only where the *input*
+        # already roughly agrees. A few state/province pairs disagree by
+        # tens of km even in the raw data (e.g. Idaho's and Montana's claims
+        # about their shared border don't quite meet Wyoming's dead-straight
+        # 111st-meridian line), which leaves unary_union unable to fully
+        # dissolve that internal seam -- the leftover sliver's edges then
+        # draw as a second, thicker-looking line right on top of the normal
+        # state line. Buffering out and back in by a small amount closes
+        # slivers like that before we trace the country outline from it.
+        country_geoms.append(unary_union([g.buffer(COUNTRY_UNION_CLOSE_DEG) for g in simplified])
+                              .buffer(-COUNTRY_UNION_CLOSE_DEG))
     return state_geoms, lake_geoms, country_geoms
 
 
@@ -546,6 +842,14 @@ def build_map(product_key, output_path, override_path=None):
             continue
         polys = [ShPolygon(ring) for ring in pm["rings"]]
         geom = polys[0] if len(polys) == 1 else ShMultiPolygon(polys)
+        if not geom.is_valid:
+            # Self-intersecting rings (seen in USDM's multi-hundred-part
+            # category polygons) make matplotlib/cartopy fill well beyond
+            # the geometry's real extent -- e.g. D0 bled into Canada,
+            # Mexico, and the Pacific despite genuinely stopping at the
+            # US border. make_valid resolves the self-intersections rather
+            # than papering over them with a buffer(0) hull-ish fudge.
+            geom = polygons_only(shapely.make_valid(geom))
         if not geom.intersects(MAP_BBOX):
             continue  # outside the Western US frame -- drop so it doesn't pad out the legend
         styled.append({**sty, "geom": geom})
@@ -571,16 +875,21 @@ def build_map(product_key, output_path, override_path=None):
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
     ax.patch.set_facecolor("white")
 
+    # Pixel size of the map's plotted area, used for candy-stripe fills
+    # (draw_hazard_layers) at a consistent on-screen stripe width.
+    fig.canvas.draw()
+    ax_bbox = ax.get_window_extent()
+    ax_w_px, ax_h_px = int(ax_bbox.width), int(ax_bbox.height)
+
     ax.add_geometries(land_geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", linewidth=0, zorder=1)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=2)
     ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac", linewidth=0.7, zorder=2.2)
     ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=2.5)
 
     # Outlook polygons, least to most severe so more severe areas draw on top
-    # where categories overlap.
-    for i, item in enumerate(styled):
-        ax.add_geometries([item["geom"]], crs=pc, facecolor=item["color"], edgecolor=item["color"],
-                           linewidth=1.2, alpha=item["alpha"], zorder=3 + i)
+    # where same-axis categories overlap; cross-axis overlaps get striped
+    # instead when the product opts in (see PRODUCTS[...]["stripe_overlaps"]).
+    draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px, cfg.get("stripe_overlaps", False))
 
     # City labels
     for name, lon, lat, pos in CITIES:
@@ -616,9 +925,14 @@ def build_map(product_key, output_path, override_path=None):
         (frame_px.x0 + MAP_FRAME_INSET_PX) / (FIG_WIDTH_IN * FIG_DPI),
         (frame_px.y0 + MAP_FRAME_INSET_PX) / (FIG_HEIGHT_IN * FIG_DPI),
     )
+    # Products with more than a handful of categories (e.g. the drought
+    # monitor's five D0-D4 tiers) get a second column so the box stays
+    # short enough not to grow up into a city label near the bottom-left
+    # corner, instead of just getting taller.
+    legend_ncols = 2 if len(handles) > 4 else 1
     leg = fig.legend(handles=handles, loc="lower left", frameon=True, fontsize=8.25,
                       prop=poppins_reg, handlelength=1.05, handleheight=1.05, borderpad=0.3,
-                      facecolor="white", framealpha=0.7, edgecolor="none",
+                      facecolor="white", framealpha=0.7, edgecolor="none", ncols=legend_ncols,
                       bbox_to_anchor=legend_anchor)
     for text in leg.get_texts():
         text.set_color("#2b2a26")
