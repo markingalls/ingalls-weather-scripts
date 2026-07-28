@@ -7,14 +7,20 @@ temperatures. Same canvas footprint and fonts as the other Ingalls Weather
 graphics (`columbia-basin-alerts-map/`, `850-700-temp-chart/`).
 
 Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA), but any lat/lon works.
+Conditions/icons come from the NWS forecast; high/low temperatures come from
+the WindBorne WM-6 ensemble median at the same point.
 
 ## Files
 
 - `fetch_forecast.py` — pulls the current NWS 7-day forecast (day/night
-  periods, temperatures, icon codes) for a point from api.weather.gov and
-  writes `forecast.json`. No API key needed. Run this first, any time you
-  want the graphic to reflect the latest forecast package.
-- `build_graphic.py` — renders `forecast.json` into
+  periods, condition icon codes) for a point from api.weather.gov and
+  writes `forecast.json`. No API key needed.
+- `fetch_wm6_forecast.py` — pulls the WM-6 ensemble 2m-temperature
+  distribution for the same point from WindBorne and writes
+  `wm6_forecast.json`. Requires `WB_API_KEY` in the environment (get one at
+  https://app.windbornesystems.com/api_tokens). Run both fetch scripts any
+  time you want the graphic to reflect the latest forecast/model run.
+- `build_graphic.py` — renders `forecast.json` + `wm6_forecast.json` into
   `tri_cities_7day_forecast.png`. Icon/color mapping and card layout are
   defined near the top — edit directly to adjust.
 - `fonts/easy_weather_icons_font.ttf` — the day/night condition icon glyphs,
@@ -27,29 +33,25 @@ Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA), but any lat/lon works.
 
 ```bash
 bash setup.sh                      # first time / fresh environment only
+export WB_API_KEY=...              # your WindBorne API key
 
 python3 fetch_forecast.py
+python3 fetch_wm6_forecast.py
 python3 build_graphic.py
 
 # Anywhere else
 python3 fetch_forecast.py --lat 45.5898 --lon -122.5951 --label "Portland, OR"
+python3 fetch_wm6_forecast.py --lat 45.5898 --lon -122.5951
 python3 build_graphic.py
 ```
 
 ## Notes
 
-- **Data source**: NWS's `/gridpoints/.../forecast` endpoint, which returns
-  14 alternating day/night periods (7 of each) with a temperature, a
-  `shortForecast`, and an `icon` URL per period. `daily_columns()` in
-  `build_graphic.py` pairs each daytime period with the night immediately
-  following it — that night's temperature becomes the "low" shown under
-  that day's card, matching how TV weathercasts pair them (not a true
-  overnight low spanning the previous evening into that morning). If the
-  feed happens to start overnight (fetched after sunset before a "Today"
-  period exists), that leading night period is dropped since it has no
-  daytime pair to lead a column.
-- **Icon mapping**: the NWS `icon` URL's last path segment before the query
-  string (e.g. `.../land/day/tsra,40?size=medium` → `tsra`) is looked up in
+- **Conditions/icons**: NWS's `/gridpoints/.../forecast` endpoint, which
+  returns 14 alternating day/night periods (7 of each) with a
+  `shortForecast` and an `icon` URL per period. The NWS `icon` URL's last
+  path segment before the query string (e.g.
+  `.../land/day/tsra,40?size=medium` → `tsra`) is looked up in
   `NWS_ICON_MAP` to pick a glyph name and color from the
   easy-weather-icons-font set and the palette defined near the top of
   `build_graphic.py`. Only "day" glyph variants are used, since the graphic
@@ -57,10 +59,26 @@ python3 build_graphic.py
   NWS's less common codes (`hot`, `cold`) don't have a close equivalent in
   the icon set and fall back to a plain clear/wind glyph; anything
   completely unmapped falls back to the font's `UNKNOWN` glyph rather than
-  raising.
+  raising. Icons are drawn bold: the font itself is a thin-stroke outline
+  face with no bold weight, so each glyph is stroked in its own fill color
+  (`set_path_effects([pe.withStroke(...)])`) to fatten the outline instead.
+- **High/low temperatures**: come from WM-6's ensemble median (`p50`), not
+  from NWS's own temperature fields. `daily_columns()` in `build_graphic.py`
+  keeps each NWS period's start/end time (rather than its temperature) and
+  pairs each daytime period with the night immediately following it, same
+  as TV weathercasts (the paired night's window becomes the "low" shown
+  under that day's card — not a true overnight low spanning the previous
+  evening into that morning). `attach_wm6_temps()` then reduces the WM-6
+  median series over each period's exact window (max for the high, min for
+  the low) and converts °C to °F. If `wm6_forecast.json` wasn't fetched far
+  enough out to cover a given period, that card shows "—" instead of
+  guessing. If the feed happens to start overnight (fetched after sunset
+  before a "Today" period exists), that leading night period is dropped
+  since it has no daytime pair to lead a column.
 - Today's card gets a green outline (`TODAY_EDGE`, the same forest green as
-  the logo's pine tree) instead of the day-of-week name, so it stands out
-  as the current conditions column.
+  the logo's pine tree) and a green day label, so it stands out as the
+  current-conditions column. Every card, including today's, shows the
+  three-letter day abbreviation (`TUE`, `WED`, ...).
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_graphic.py`
   directly to adjust.

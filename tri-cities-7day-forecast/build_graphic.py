@@ -7,6 +7,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import matplotlib.patheffects as pe
 from matplotlib.patches import FancyBboxPatch
 
 # ---------- fonts ----------
@@ -128,10 +129,12 @@ def glyph_for(icon_url):
 
 def daily_columns(periods):
     """Pairs sequential (daytime, following-night) periods into up to 7 day
-    columns: label/date/icon from the daytime period, high from its temp,
-    low from the paired night's temp. If the feed starts overnight (fetched
-    after sunset, before a Today period exists), that leading night period
-    is dropped -- it has no daytime pair to lead a column."""
+    columns: label/date/icon from the daytime period, plus each period's own
+    start/end so the caller can reduce a separate temperature series (e.g.
+    WM-6's median) over the same windows instead of using NWS's own
+    temperature. If the feed starts overnight (fetched after sunset, before
+    a Today period exists), that leading night period is dropped -- it has
+    no daytime pair to lead a column."""
     if periods and not periods[0]["isDaytime"]:
         periods = periods[1:]
 
@@ -139,21 +142,62 @@ def daily_columns(periods):
     i = 0
     while i < len(periods) and len(columns) < 7:
         day = periods[i]
-        low = periods[i + 1]["temperature"] if i + 1 < len(periods) and not periods[i + 1]["isDaytime"] else None
+        night = periods[i + 1] if i + 1 < len(periods) and not periods[i + 1]["isDaytime"] else None
         columns.append({
             "label": day["name"],
             "date": datetime.fromisoformat(day["startTime"]),
-            "high": day["temperature"],
-            "low": low,
+            "day_start": datetime.fromisoformat(day["startTime"]),
+            "day_end": datetime.fromisoformat(day["endTime"]),
+            "night_start": datetime.fromisoformat(night["startTime"]) if night else None,
+            "night_end": datetime.fromisoformat(night["endTime"]) if night else None,
             "icon": day["icon"],
         })
         i += 2
     return columns
 
 
+def wm6_median_series(wm6_data):
+    """(time, median °C) pairs from a WindBorne point-forecast response,
+    sorted chronologically. Falls back to the ensemble mean for any
+    timestep that's missing p50 (shouldn't normally happen, but the
+    distribution's exact key set isn't contractually guaranteed)."""
+    points = wm6_data["forecasts"][0]
+    series = []
+    for p in points:
+        dist = p["distribution"]
+        median_c = dist["p50"] if "p50" in dist else dist["mean"]
+        series.append((datetime.fromisoformat(p["time"].replace("Z", "+00:00")), median_c))
+    return series
+
+
+def reduce_wm6_window(series, start, end, fn):
+    """fn (max/min) over every WM-6 median sample whose time falls in
+    [start, end). None if the window and the fetched series don't overlap
+    (e.g. wm6_forecast.json wasn't fetched far enough out)."""
+    if start is None or end is None:
+        return None
+    values = [v for t, v in series if start <= t < end]
+    return fn(values) if values else None
+
+
+def c_to_f(celsius):
+    return round(celsius * 9 / 5 + 32)
+
+
+def attach_wm6_temps(columns, wm6_series):
+    for col in columns:
+        high_c = reduce_wm6_window(wm6_series, col["day_start"], col["day_end"], max)
+        low_c = reduce_wm6_window(wm6_series, col["night_start"], col["night_end"], min)
+        col["high"] = c_to_f(high_c) if high_c is not None else None
+        col["low"] = c_to_f(low_c) if low_c is not None else None
+
+
 def parse_args():
     ap = argparse.ArgumentParser(description="Render the Tri-Cities TV-style 7-day forecast graphic.")
-    ap.add_argument("--forecast", default="forecast.json")
+    ap.add_argument("--forecast", default="forecast.json",
+                     help="NWS forecast (day/night periods, condition icons) from fetch_forecast.py")
+    ap.add_argument("--wm6-forecast", default="wm6_forecast.json",
+                     help="WM-6 point temperature forecast (high/low source) from fetch_wm6_forecast.py")
     ap.add_argument("--output", default="tri_cities_7day_forecast.png")
     return ap.parse_args()
 
@@ -163,6 +207,9 @@ def main():
     data = json.load(open(args.forecast))
     props = data["properties"]
     columns = daily_columns(props["periods"])
+
+    wm6_series = wm6_median_series(json.load(open(args.wm6_forecast)))
+    attach_wm6_temps(columns, wm6_series)
 
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
@@ -190,18 +237,23 @@ def main():
             linewidth=1.8 if is_today else 1.0, zorder=2)
         ax.add_patch(card)
 
-        day_label = col["label"].upper() if is_today else col["date"].strftime("%A").upper()
-        ax.text(cx, CARD_TOP - 0.045, day_label, ha="center", va="top",
-                 fontproperties=f_bold, fontsize=13.5,
+        day_label = col["date"].strftime("%a").upper()
+        ax.text(cx, CARD_TOP - 0.05, day_label, ha="center", va="top",
+                 fontproperties=f_bold, fontsize=17,
                  color=TODAY_EDGE if is_today else INK, zorder=3)
-        ax.text(cx, CARD_TOP - 0.085, col["date"].strftime("%b %-d"), ha="center", va="top",
+        ax.text(cx, CARD_TOP - 0.093, col["date"].strftime("%b %-d"), ha="center", va="top",
                  fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
         glyph, color = glyph_for(col["icon"])
-        ax.text(cx, (CARD_TOP + CARD_BOTTOM) / 2 + 0.045, glyph, ha="center", va="center",
-                 fontproperties=ICON_FONT, fontsize=40, color=color, zorder=3)
+        icon_text = ax.text(cx, (CARD_TOP + CARD_BOTTOM) / 2 + 0.045, glyph, ha="center", va="center",
+                             fontproperties=ICON_FONT, fontsize=46, color=color, zorder=3)
+        # the icon font is a thin-stroke outline face with no bold weight of
+        # its own -- stroking each glyph in its own fill color fattens the
+        # outline so it reads as bold instead of drawing it twice.
+        icon_text.set_path_effects([pe.withStroke(linewidth=1.8, foreground=color)])
 
-        ax.text(cx, CARD_BOTTOM + 0.085, f"{col['high']}°", ha="center", va="bottom",
+        high_text = f"{col['high']}°" if col["high"] is not None else "—"
+        ax.text(cx, CARD_BOTTOM + 0.085, high_text, ha="center", va="bottom",
                  fontproperties=f_bold, fontsize=20, color=INK, zorder=3)
         low_text = f"{col['low']}°" if col["low"] is not None else "—"
         ax.text(cx, CARD_BOTTOM + 0.03, low_text, ha="center", va="bottom",
