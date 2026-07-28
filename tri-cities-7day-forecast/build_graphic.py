@@ -703,7 +703,10 @@ def main():
 
     if (suppress_today_am and columns and columns[0]["date"].date() == now_local.date()
             and columns[0].get("precip") and columns[0]["precip"]["timing"] == "AM"):
-        columns[0]["precip"]["timing"] = None
+        # Not just the label -- an "AM" chance-of-precip card is entirely
+        # about a window that's now over, so the raindrop/probability/amount
+        # would be stale too, not just the tag naming when it was going to happen.
+        columns[0]["precip"] = None
 
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
