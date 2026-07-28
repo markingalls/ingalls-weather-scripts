@@ -56,6 +56,7 @@ GLYPHS = {
     "CLEARday": 0xe96d,
     "FAIRday": 0xe970,
     "PARTLY_CLOUDYday": 0xe967,
+    "PCLOUDYday": 0xe96a,
     "MOSTLY_CLOUDYday": 0xe961,
     "CLOUDYday": 0xe95e,
     "WINDYday": 0xe95b,
@@ -116,7 +117,7 @@ TIMING_DOMINANT_FRAC = 0.75
 NWS_ICON_MAP = {
     "skc": ("CLEARday", COLOR_SUN),
     "few": ("FAIRday", COLOR_SUN),
-    "sct": ("PARTLY_CLOUDYday", COLOR_CLOUD),
+    "sct": ("PCLOUDYday", COLOR_SUN),
     "bkn": ("MOSTLY_CLOUDYday", COLOR_CLOUD),
     "ovc": ("CLOUDYday", COLOR_CLOUD),
     "wind_skc": ("WINDYday", COLOR_WIND),
