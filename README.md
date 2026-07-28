@@ -20,6 +20,9 @@ workflows. Each project lives in its own directory with its own README.
   meteogram of the WindBorne WM-6 ensemble spread for a pressure-level
   temperature at a point (defaults to KPSC / 850 mb), compared against
   long-term climatology.
+- [`tri-cities-7day-forecast/`](tri-cities-7day-forecast/) — generates a
+  TV-style 7-day forecast graphic for the Tri-Cities: day-of-week, high/low
+  temps, and a daytime-condition icon per day, from the NWS forecast.
 
 ## Shared resources
 
