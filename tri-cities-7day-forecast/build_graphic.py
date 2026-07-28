@@ -207,35 +207,33 @@ def main():
         ax.text(cx, CARD_BOTTOM + 0.03, low_text, ha="center", va="bottom",
                  fontproperties=f_med, fontsize=15, color=INK_SECONDARY, zorder=3)
 
-    # ---------- logo (bottom-right) ----------
+    # ---------- logo (top-left, sized to the title block) + title / subtitle ----------
+    TITLE_BLOCK_TOP, TITLE_BLOCK_BOTTOM = 0.965, 0.878
+    title_x = LEFT
+
     LOGO_PATH = "../assets/ingalls_weather_logo.png"
     if os.path.exists(LOGO_PATH):
         logo_img = plt.imread(LOGO_PATH)
         img_h, img_w = logo_img.shape[0], logo_img.shape[1]
         fig_w_in, fig_h_in = fig.get_size_inches()
-        dpi = fig.get_dpi()
-        inset_px = 22
-        inset_x = inset_px / (fig_w_in * dpi)
-        inset_y = inset_px / (fig_h_in * dpi)
 
-        logo_width_fig = 0.08 * (RIGHT - LEFT)
-        logo_width_in = logo_width_fig * fig_w_in
-        logo_height_in = logo_width_in * (img_h / img_w)
-        logo_height_fig = logo_height_in / fig_h_in
+        logo_height_fig = TITLE_BLOCK_TOP - TITLE_BLOCK_BOTTOM
+        logo_height_in = logo_height_fig * fig_h_in
+        logo_width_in = logo_height_in * (img_w / img_h)
+        logo_width_fig = logo_width_in / fig_w_in
 
-        logo_x0 = RIGHT - inset_x - logo_width_fig
-        logo_y0 = 0.045
-        logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
+        logo_ax = fig.add_axes([LEFT, TITLE_BLOCK_BOTTOM, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
         logo_ax.axis("off")
+
+        title_x = LEFT + logo_width_fig + 0.018
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
-    # ---------- title / subtitle ----------
     generated = datetime.fromisoformat(props["generatedAt"])
-    fig.text(LEFT, 0.935, f"{data.get('label', 'Tri-Cities')} 7-Day Forecast",
+    fig.text(title_x, 0.935, f"{data.get('label', 'Tri-Cities')} 7-Day Forecast",
               fontproperties=f_bold, fontsize=24, color=INK)
-    fig.text(LEFT, 0.895, f"Updated {generated.strftime('%A, %B %-d')} at {generated.strftime('%-I:%M %p %Z')}",
+    fig.text(title_x, 0.895, f"Updated {generated.strftime('%A, %B %-d')} at {generated.strftime('%-I:%M %p %Z')}",
               fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
