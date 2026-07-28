@@ -1,13 +1,19 @@
 """
-Fetches WindBorne WeatherMesh-6 (WM-6) forecast daily high temperatures for
-the next N days at a point and writes forecast.json. Run this any time you
-want the chart to reflect the latest model run.
+Fetches WindBorne MetaMesh forecast daily high temperatures for the next N
+days at a station and writes forecast.json. Run this any time you want the
+chart to reflect the latest model run.
 
-A day's forecast high is the max of WM-6's point-forecast temperature_2m
-samples (native 3-hourly cadence) falling in the 8am-8pm local window --
-same daytime-high definition used by columbia-basin-temps/build_map.py's
-"high" metric, so this chart's forecast segment and that project's maps
-stay consistent with each other.
+MetaMesh is WindBorne's multi-model blended forecast product (not a
+single model like WeatherMesh-6/WM-6) -- it fuses WM-6 with other leading
+NWP/AI models and, when queried by station ID (as this script does),
+returns the bias-corrected "Station Forecast" mode, trained on that
+station's own METAR observations rather than the coordinate-based
+ERA5-trained mode. See https://api.windbornesystems.com/models-measurements/about-our-models/metamesh/
+
+A day's forecast high is the max of MetaMesh's hourly temperature_2m
+samples falling in the 8am-8pm local window -- same daytime-high
+definition columbia-basin-temps/build_map.py's "high" metric uses, so
+this chart's forecast segment stays consistent with that project's maps.
 
 Requires WB_API_KEY in the environment. Get a key at
 https://app.windbornesystems.com/api_tokens.
@@ -20,13 +26,14 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-API_URL = "https://api.windbornesystems.com/forecasts/v1/wm-6/point_forecast/interpolated"
+API_URL = "https://api.windbornesystems.com/forecasts/v1/point_forecast"
 
-# Default point: KPSC (Tri-Cities Airport, Pasco, WA)
-DEFAULT_LAT = 46.2647
-DEFAULT_LON = -119.1189
+# Default: KPSC (Tri-Cities Airport, Pasco, WA) -- one of the ~349 METAR
+# stations MetaMesh serves bias-corrected station forecasts for.
 DEFAULT_STATION = "KPSC"
 DEFAULT_LABEL = "Pasco, WA"
+DEFAULT_LAT = 46.2647
+DEFAULT_LON = -119.1189
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 HIGH_WINDOW = (8, 20)  # local hours
@@ -36,15 +43,19 @@ def c_to_f(c):
     return c * 9 / 5 + 32
 
 
-def fetch(lat, lon, max_forecast_hour):
+def fetch(station, lat, lon, max_forecast_time):
     api_key = os.environ.get("WB_API_KEY")
     if not api_key:
         raise SystemExit("Set WB_API_KEY in your environment before running this script.")
-    params = {
-        "coordinates": f"{lat},{lon}",
-        "variable": "temperature_2m",
-        "max_forecast_hour": max_forecast_hour,
-    }
+    # Station forecasts (bias-corrected against that station's own METAR
+    # obs) are preferred when a station id is given; coordinates fall back
+    # to MetaMesh's ERA5-trained dynamic mode for locations with no
+    # station coverage.
+    params = {"max_forecast_time": max_forecast_time.strftime("%Y-%m-%dT%H:%M:%SZ")}
+    if station:
+        params["stations"] = station
+    else:
+        params["coordinates"] = f"{lat},{lon}"
     headers = {"Authorization": f"Bearer {api_key}"}
     r = requests.get(API_URL, headers=headers, params=params, timeout=60)
     r.raise_for_status()
@@ -53,10 +64,11 @@ def fetch(lat, lon, max_forecast_hour):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--lat", type=float, default=DEFAULT_LAT)
-    ap.add_argument("--lon", type=float, default=DEFAULT_LON)
     ap.add_argument("--station", default=DEFAULT_STATION,
-                     help="Short station identifier shown in the chart title, e.g. KPSC")
+                     help="ICAO METAR station id for a bias-corrected MetaMesh station forecast, e.g. KPSC")
+    ap.add_argument("--lat", type=float, default=DEFAULT_LAT,
+                     help="Used only if --station is not a MetaMesh-covered station (pass --station '' to force coordinate mode)")
+    ap.add_argument("--lon", type=float, default=DEFAULT_LON)
     ap.add_argument("--label", default=None,
                      help="Human-readable location, e.g. 'Pasco, WA' (defaults to blank unless --station is left at KPSC)")
     ap.add_argument("--days", type=int, default=7, help="Number of forecast days, starting today")
@@ -69,7 +81,8 @@ if __name__ == "__main__":
 
     # +1 day of buffer past the requested window, since 8pm local on the
     # last requested day can fall into the next UTC calendar day.
-    data = fetch(args.lat, args.lon, (args.days + 1) * 24)
+    max_forecast_time = datetime.now(LOCAL_TZ) + timedelta(days=args.days + 1)
+    data = fetch(args.station, args.lat, args.lon, max_forecast_time)
     points = data["forecasts"][0]
 
     by_local_date = {}
@@ -91,7 +104,7 @@ if __name__ == "__main__":
         })
 
     out = {
-        "source": "WindBorne WeatherMesh-6 (WM-6), temperature_2m, 8am-8pm local max",
+        "source": "WindBorne MetaMesh, temperature_2m, 8am-8pm local max",
         "station": args.station,
         "label": label,
         "lat": args.lat,

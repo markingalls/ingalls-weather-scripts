@@ -116,7 +116,7 @@ def main():
     ax.axvline(today_boundary, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
     ax.plot(all_dates, normal, color=CLIMO_LINE, linewidth=2.0, linestyle="--",
-            dashes=(6, 3), zorder=Z_NORMAL, label=f"Daily normal (P50, {cdata['percentile_years']})")
+            dashes=(6, 3), zorder=Z_NORMAL, label=f"Daily normal (P50, {cdata['percentile_period']})")
 
     ax.scatter(all_dates, record, color=RECORD_COLOR, marker="*", s=110,
                zorder=Z_RECORD, label="Record high", edgecolors="white", linewidths=0.6)
@@ -125,7 +125,7 @@ def main():
             zorder=Z_TEMP, label="Observed high (xmACIS)")
     ax.plot(fc_dates, fc_vals, color=TEMP_COLOR, linewidth=2.6, linestyle="--", dashes=(5, 2.5),
             marker="o", markersize=5.5, markerfacecolor="white", markeredgewidth=1.6,
-            zorder=Z_TEMP, label="Forecast high (WM-6)")
+            zorder=Z_TEMP, label="Forecast high (MetaMesh)")
 
     # value labels on every observed/forecast point -- a white halo keeps
     # them legible over both the white axes background and the percentile
@@ -176,8 +176,8 @@ def main():
 
     # ---------- legend (horizontal strip above the plot, out of the data's way) ----------
     handles, labels = ax.get_legend_handles_labels()
-    order = ["Observed high (xmACIS)", "Forecast high (WM-6)",
-             f"Daily normal (P50, {cdata['percentile_years']})", "Record high",
+    order = ["Observed high (xmACIS)", "Forecast high (MetaMesh)",
+             f"Daily normal (P50, {cdata['percentile_period']})", "Record high",
              "10th–25th percentile", "25th–75th percentile", "75th–90th percentile"]
     by_label = dict(zip(labels, handles))
     handles = [by_label[l] for l in order if l in by_label]
@@ -221,14 +221,15 @@ def main():
     title = f"Tri-Cities Daily High Temperature at {title_loc}"
     fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     ns, ew = ("N" if lat >= 0 else "S"), ("E" if lon >= 0 else "W")
-    subtitle = (f"xmACIS Observed + Climatology ({cdata['n_percentile_years']} yrs, {cdata['percentile_years']}) • "
-                f"WeatherMesh-6 Forecast Init {init_time.strftime('%Y-%m-%d')} {init_time.strftime('%H')}z"
+    subtitle = (f"xmACIS Observed + Climatology ({cdata['percentile_period']} normals, "
+                f"{cdata['n_percentile_years']} yrs on file) • "
+                f"MetaMesh Forecast Init {init_time.strftime('%Y-%m-%d')} {init_time.strftime('%H')}z"
                 f" • {ns}{abs(lat):.2f}°, {ew}{abs(lon):.2f}°")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
     fig.text(center_x, 0.02,
-              "ACIS/xmACIS (observed & climatology) / WindBorne WeatherMesh-6 (forecast) — Ingalls Weather",
+              "ACIS/xmACIS (observed & climatology) / WindBorne MetaMesh (forecast) — Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
     plt.savefig(args.output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)

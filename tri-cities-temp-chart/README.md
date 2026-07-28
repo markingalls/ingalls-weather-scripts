@@ -2,10 +2,10 @@
 
 Generates a styled 14-day temperature chart for Ingalls Weather's
 Instagram: the last 7 days of **observed** daily highs from xmACIS, the
-next 7 days of **forecast** highs from WindBorne WeatherMesh-6 (WM-6), and
-a 30-year climatology backdrop (also from xmACIS) -- daily P10/P25/P75/P90
+next 7 days of **forecast** highs from WindBorne MetaMesh, and a
+1991-2020 climatology backdrop (also from xmACIS) -- daily P10/P25/P75/P90
 percentile shading, the daily normal (sampled as P50, the median), and the
-daily record high.
+daily record high (pooled across the Tri-Cities area -- see Notes).
 Same canvas footprint, fonts, and visual grammar as the
 [850 mb chart](../850-700-temp-chart/) (climatology shading behind the
 data line, a dotted vertical divider, a horizontal legend strip above the
@@ -13,8 +13,8 @@ plot) -- just adapted for a two-source, two-segment (observed/forecast)
 series instead of one ensemble.
 
 Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA), but any ACIS station
-(for the observed/climatology side) and any lat/lon (for the forecast
-side) works.
+(for the observed/climatology side) and any MetaMesh-covered METAR station
+or lat/lon (for the forecast side) works.
 
 ## Files
 
@@ -24,18 +24,21 @@ side) works.
   Defaults to ending yesterday, since today's high is usually still
   incomplete.
 - `fetch_climatology.py` -- pulls, per calendar day of the year, the
-  P10/P25/P50/P75/P90 percentiles (computed client-side from ACIS's full
-  period-of-record daily series -- see Notes; P50 is what the chart plots
-  as the "daily normal"), and the record high + year (via ACIS's
-  period-of-record `groupby` reduction). Writes `climatology.json`. No
-  API key needed. Only needs re-running if you change station -- it has
+  P10/P25/P50/P75/P90 percentiles for the 1991-2020 climate normals period
+  (computed client-side from KPSC's daily series in that window -- see
+  Notes; P50 is what the chart plots as the "daily normal"), and the
+  record high + year, pooled across KPSC and the other long-running
+  Tri-Cities-area stations (Kennewick, Richland) via ACIS's
+  period-of-record `groupby` reduction. Writes `climatology.json`. No API
+  key needed. Only needs re-running if you change station -- it has
   nothing to do with the current forecast run.
-- `fetch_forecast.py` -- pulls the next 7 days of WM-6 forecast highs
-  (max of `temperature_2m` in the 8am-8pm local window, same daytime-high
-  definition [`columbia-basin-temps`](../columbia-basin-temps/) uses) and
-  writes `forecast.json`. Requires `WB_API_KEY` in the environment (get
-  one at https://app.windbornesystems.com/api_tokens). Run this any time
-  you want the chart to reflect the latest model run.
+- `fetch_forecast.py` -- pulls the next 7 days of WindBorne MetaMesh
+  forecast highs (max of `temperature_2m` in the 8am-8pm local window,
+  same daytime-high definition
+  [`columbia-basin-temps`](../columbia-basin-temps/) uses) and writes
+  `forecast.json`. Requires `WB_API_KEY` in the environment (get one at
+  https://app.windbornesystems.com/api_tokens). Run this any time you
+  want the chart to reflect the latest model run.
 - `build_chart.py` -- renders `observed.json` + `forecast.json` +
   `climatology.json` into `tri_cities_temp_chart.png`.
 - `requirements.txt` / `setup.sh` -- Python dependencies (no system
@@ -56,7 +59,7 @@ python3 build_chart.py
 # Anywhere else -- e.g. KPDX
 python3 fetch_observed.py --sid "KPDX 5" --station KPDX --label "Portland, OR"
 python3 fetch_climatology.py --sid "KPDX 5"
-python3 fetch_forecast.py --lat 45.5898 --lon -122.5951 --station KPDX --label "Portland, OR"
+python3 fetch_forecast.py --station KPDX --label "Portland, OR"
 python3 build_chart.py
 ```
 
@@ -74,35 +77,44 @@ observed/forecast refreshes for the same station.
   element** -- ACIS's `normal` flag only exposes NCEI's separate
   mean-based normals product, and its `pct_xx_yyy` reduce code is a
   threshold-exceedance count, not a statistical percentile. So
-  `fetch_climatology.py` pulls the full period-of-record daily `maxt`
-  series in one call and computes P10/P25/P50/P75/P90 per calendar day in
-  Python (`numpy.percentile`), skipping any calendar day with fewer than 5
-  years of data (mainly a Feb 29 concern). The chart's "daily normal" line
-  is this P50 (median), not a mean -- deliberately sampled from the same
-  raw series as the percentile bands and record highs, so the whole
-  climatology backdrop is internally consistent rather than mixing a
-  station-specific empirical sample with NCEI's independently-smoothed
-  normals product.
-- **KPSC's raw daily data has a large historical gap**: ACIS reports a
-  period of record back to 1945, but daily `maxt` is essentially all
-  missing from 1947 through 1997 (confirmed by pulling the full series --
-  a small usable fragment covers 1945-46, then nothing again until 1998).
-  So the percentile bands, the daily normal, and the record highs are all
-  effectively drawn from **~1998-present** (plus that small 1940s
-  fragment) rather than a clean, continuous 30 or 80 year record. The
-  chart's subtitle reports the actual sample size (years, not just the
-  min/max year span) so this is visible at a glance; `climatology.json`'s
-  `record_note` field spells it out further. If you point this at a
-  station with a cleaner period of record, this caveat may not apply.
-- **Record highs** come from ACIS's own `groupby: "year"` period-of-record
-  reduction (one call covers all 366 calendar days), not a client-side
-  scan -- see the query in `fetch_records()` in `fetch_climatology.py`.
-- **Forecast source**: WM-6's point-forecast `temperature_2m`, at its
-  native ~3-hourly cadence, reduced to a daily high by taking the max
-  across each local day's 8am-8pm samples -- not an ensemble spread (WM-6
-  does have ensemble percentiles, like `850-700-temp-chart` uses, but this
-  chart's forecast segment is a single line to keep it visually distinct
-  from the climatology shading).
+  `fetch_climatology.py` pulls KPSC's daily `maxt` series for the
+  1991-2020 climate normals window in one call and computes
+  P10/P25/P50/P75/P90 per calendar day in Python (`numpy.percentile`),
+  skipping any calendar day with fewer than 5 years of data (mainly a
+  Feb 29 concern). The chart's "daily normal" line is this P50 (median),
+  not a mean -- deliberately sampled from the same 1991-2020 series as the
+  percentile bands, so the whole percentile backdrop comes from one
+  consistent sample and period.
+- **KPSC's raw daily data has a large historical gap** that eats into the
+  nominal 1991-2020 window: daily `maxt` is essentially all missing
+  1991-1997 (confirmed by pulling the full series), so the percentiles and
+  daily normal are really drawn from **1998-2020 (~23 years)**, not a full
+  30. `climatology.json`'s `percentile_years` field reports the real
+  sample (vs. `percentile_period`, the nominal 1991-2020 target), and the
+  chart's subtitle shows both.
+- **Record highs are pooled across the Tri-Cities area, not KPSC alone**,
+  and deliberately are *not* restricted to 1991-2020 -- KPSC's own usable
+  record only goes back to 1998, which would understate true record highs
+  for most of the year. `fetch_climatology.py` also pulls the full
+  period-of-record daily series (via ACIS's `groupby: "year"`
+  period-of-record reduction, one call per station) for Kennewick (COOP
+  454154, back to 1894) and Richland (COOP 457015, back to 1944) -- both a
+  few miles from KPSC in the same metro area -- and takes the max across
+  all three per calendar day. Each day's `record_station` field in
+  `climatology.json` records which station it came from; in practice
+  Kennewick's much longer history supplies most of the year's records.
+- **Forecast source**: WindBorne MetaMesh -- not a single model like
+  WeatherMesh-6/WM-6, but WindBorne's multi-model blend, which fuses WM-6
+  with other leading NWP/AI models. Queried by station ID (`stations=KPSC`
+  on the plain `point_forecast` endpoint, not the model-specific
+  `wm-6/point_forecast/interpolated` one `850-700-temp-chart` uses), which
+  gets MetaMesh's bias-corrected "Station Forecast" mode (trained on that
+  station's own METAR observations) rather than its coordinate-based
+  ERA5-trained mode. Hourly `temperature_2m`, reduced to a daily high by
+  taking the max across each local day's 8am-8pm samples. Deterministic
+  (MetaMesh doesn't publish an ensemble spread the way WM-6 does), so the
+  forecast segment is a single line, visually distinct from the
+  climatology shading.
 - **Today's split**: `observed.json` defaults to ending yesterday and
   `forecast.json` starts today, so the 14-day x-axis has no overlapping or
   double-counted day. A dotted vertical line marks the boundary. Today's

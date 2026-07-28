@@ -22,9 +22,9 @@ workflows. Each project lives in its own directory with its own README.
   long-term climatology.
 - [`tri-cities-temp-chart/`](tri-cities-temp-chart/) — generates a styled
   14-day chart of Tri-Cities daily high temperature: 7 days observed
-  (xmACIS) and 7 days forecast (WindBorne WM-6), against 30-year daily
-  climatology (percentile shading, normal, and record highs, all from
-  xmACIS).
+  (xmACIS) and 7 days forecast (WindBorne MetaMesh), against 1991-2020
+  daily climatology (percentile shading and normal from xmACIS; record
+  highs pooled across Tri-Cities-area stations).
 
 ## Shared resources
 
