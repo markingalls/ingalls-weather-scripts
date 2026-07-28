@@ -30,6 +30,16 @@ def is_weekend_or_holiday(date):
     return date.weekday() >= 5 or date in US_HOLIDAYS
 
 
+def short_tz_abbr(tzname):
+    """'PDT'/'PST' -> 'PT', 'AKDT'/'AKST' -> 'AKT', etc -- collapses the
+    standard/daylight distinction a %Z abbreviation carries, since a TV-style
+    graphic doesn't need to distinguish them. Non-DST abbreviations without
+    that S/D pattern (e.g. 'UTC') pass through unchanged."""
+    if len(tzname) >= 3 and tzname[-1] == "T" and tzname[-2] in "SD":
+        return tzname[:-2] + "T"
+    return tzname
+
+
 # ---------- palette ----------
 BG = "#f7f6f2"
 INK = "#2b2a26"
@@ -840,10 +850,10 @@ def main():
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
-    generated = datetime.fromisoformat(props["generatedAt"])
+    generated = datetime.fromisoformat(props["generatedAt"]).astimezone(local_tz)
     fig.text(title_x, 0.935, f"{data.get('label', 'Tri-Cities')} 7-Day Forecast",
               fontproperties=f_bold, fontsize=24, color=INK)
-    fig.text(title_x, 0.895, f"Updated {generated.strftime('%A, %B %-d')} at {generated.strftime('%-I:%M %p %Z')}",
+    fig.text(title_x, 0.895, f"Updated {generated.strftime('%d %B %Y %H:%M')} {short_tz_abbr(generated.strftime('%Z'))}",
               fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
