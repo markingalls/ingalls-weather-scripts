@@ -571,6 +571,52 @@ def attach_precip(columns, ecmwf_data):
             col["sun_relevant"] = False
 
 
+# ---------- wildfire smoke override (NOAA HRRR VIS -- vertically-integrated smoke) ----------
+# May-Oct only (wildfire smoke season) -- see fetch_hrrr_smoke_forecast.py.
+# HRRR only runs 48h out, so in practice this only ever has data for the
+# first day or two of the strip; later columns are simply left alone.
+SMOKE_SEASON_MONTHS = {5, 6, 7, 8, 9, 10}
+SMOKE_SUSTAINED_THRESHOLD_MG = 50   # mg/m^2 sustained for 3+ hours
+SMOKE_SUSTAINED_HOURS = 3
+SMOKE_SPIKE_THRESHOLD_MG = 200      # mg/m^2 in any single hour
+PRECIP_GLYPH_COLORS = {COLOR_RAIN, COLOR_SNOW, COLOR_STORM}
+
+
+def smoke_daytime_values(hourly, day_start, day_end):
+    """(time, vis_smoke_mg_m2) pairs whose valid_time falls within a
+    column's daytime window, sorted chronologically."""
+    values = []
+    for entry in hourly:
+        t = datetime.strptime(entry["valid_time"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=ZoneInfo("UTC"))
+        if day_start <= t < day_end:
+            values.append((t, entry["vis_smoke_mg_m2"]))
+    values.sort(key=lambda item: item[0])
+    return values
+
+
+def smoke_triggered(values):
+    if any(v > SMOKE_SPIKE_THRESHOLD_MG for _, v in values):
+        return True
+    for i in range(len(values) - SMOKE_SUSTAINED_HOURS + 1):
+        window = values[i:i + SMOKE_SUSTAINED_HOURS]
+        if all(v > SMOKE_SUSTAINED_THRESHOLD_MG for _, v in window):
+            return True
+    return False
+
+
+def attach_smoke(columns, smoke_data):
+    for col in columns:
+        if col["date"].date().month not in SMOKE_SEASON_MONTHS:
+            continue
+        if col["glyph_color"] in PRECIP_GLYPH_COLORS:
+            continue
+        values = smoke_daytime_values(smoke_data["hourly"], col["day_start"], col["day_end"])
+        if smoke_triggered(values):
+            col["glyph"] = chr(GLYPHS["SMOKYday"])
+            col["glyph_color"] = COLOR_MUTED
+            col["sun_relevant"] = False
+
+
 def parse_args():
     ap = argparse.ArgumentParser(description="Render the Tri-Cities TV-style 7-day forecast graphic.")
     ap.add_argument("--forecast", default="forecast.json",
@@ -583,6 +629,10 @@ def parse_args():
     ap.add_argument("--ecmwf-ensemble-forecast", default="ecmwf_ensemble_forecast.json",
                      help="Open-Meteo ECMWF ensemble forecast (chance-of-precip source), "
                           "from fetch_ecmwf_ensemble_forecast.py")
+    ap.add_argument("--hrrr-smoke-forecast", default="hrrr_smoke_forecast.json",
+                     help="NOAA HRRR vertically-integrated smoke forecast, from "
+                          "fetch_hrrr_smoke_forecast.py -- only read May-Oct, and only if present "
+                          "(HRRR only reaches 48h out, so most columns never use it anyway)")
     ap.add_argument("--output", default="tri_cities_7day_forecast.png")
     return ap.parse_args()
 
@@ -626,6 +676,13 @@ def main():
     attach_precip(columns, ecmwf_data)
 
     attach_wind(columns, data.get("wind", {"speed": [], "gust": [], "direction": []}))
+
+    # Per-column month gating happens inside attach_smoke() itself (not here),
+    # so a strip spanning a season boundary (e.g. late Oct into early Nov)
+    # still gets the right columns checked -- this just skips the file
+    # entirely on the (common) days it won't exist at all.
+    if os.path.exists(args.hrrr_smoke_forecast):
+        attach_smoke(columns, json.load(open(args.hrrr_smoke_forecast)))
 
     if suppress_today_low and columns:
         columns[0]["low"] = None

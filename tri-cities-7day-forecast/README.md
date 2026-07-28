@@ -35,15 +35,21 @@ wherever it's pointed.
   IFS ensemble (hourly precipitation + snowfall) for a point and writes
   `ecmwf_ensemble_forecast.json`. No API key needed. Source for the
   chance-of-precip indicator (see below).
+- `fetch_hrrr_smoke_forecast.py` — pulls NOAA HRRR's vertically-integrated
+  smoke forecast (hourly, out to 48h) for a point via Herbie and writes
+  `hrrr_smoke_forecast.json`. No API key needed. Only worth running May-Oct
+  (wildfire smoke season) — see the smoke override below.
 - `build_graphic.py` — renders `forecast.json` + `metamesh_forecast.json` +
-  `ecmwf_ensemble_forecast.json` (+ `openmeteo_forecast.json`, conditionally)
-  into `tri_cities_7day_forecast.png`. Icon/color mapping and card layout
-  are defined near the top — edit directly to adjust.
+  `ecmwf_ensemble_forecast.json` (+ `openmeteo_forecast.json`, conditionally,
+  + `hrrr_smoke_forecast.json`, conditionally) into
+  `tri_cities_7day_forecast.png`. Icon/color mapping and card layout are
+  defined near the top — edit directly to adjust.
 - `fonts/easy_weather_icons_font.ttf` — the day/night condition icon glyphs,
   from [easy-weather-icons-font](https://github.com/boxbot6/easy-weather-icons-font)
   (MIT license, see `fonts/LICENSE-easy-weather-icons-font.txt`).
-- `requirements.txt` / `setup.sh` — Python dependencies (no system packages
-  needed here, unlike the map projects).
+- `requirements.txt` / `setup.sh` — Python dependencies. The HRRR smoke fetch
+  needs `cfgrib`/`eccodes` for GRIB2 decoding, which can need `libeccodes` at
+  the system level on some platforms — `setup.sh` installs it via apt.
 
 ## Usage
 
@@ -55,6 +61,7 @@ python3 fetch_forecast.py
 python3 fetch_metamesh_forecast.py
 python3 fetch_openmeteo_forecast.py
 python3 fetch_ecmwf_ensemble_forecast.py
+python3 fetch_hrrr_smoke_forecast.py    # May-Oct only -- skip off-season
 python3 build_graphic.py
 
 # Anywhere else MetaMesh has a supported METAR station
@@ -62,6 +69,7 @@ python3 fetch_forecast.py --lat 45.5898 --lon -122.5951 --label "Portland, OR"
 python3 fetch_metamesh_forecast.py --station kpdx
 python3 fetch_openmeteo_forecast.py --lat 45.5898 --lon -122.5951
 python3 fetch_ecmwf_ensemble_forecast.py --lat 45.5898 --lon -122.5951
+python3 fetch_hrrr_smoke_forecast.py --lat 45.5898 --lon -122.5951
 python3 build_graphic.py
 ```
 
@@ -261,6 +269,40 @@ python3 build_graphic.py
   - Blank (no wind row at all) when neither threshold is crossed, same as
     the precip indicator being blank below 20% — the reserved vertical zone
     just stays empty rather than the layout shifting to fill it.
+- **Wildfire smoke override**: May-Oct only (`SMOKE_SEASON_MONTHS` in
+  `build_graphic.py`), a day's condition icon gets replaced with a smoke
+  icon (`SMOKYday`, `COLOR_MUTED`) when NOAA HRRR's forecast for that day's
+  daytime window (6am-6pm local, same as the icon itself) shows either a
+  vertically-integrated smoke (VIS — the HRRR `COLMD` field, i.e. total
+  column smoke mass, not near-surface concentration) value over 50mg/m²
+  sustained for 3+ consecutive hours, or over 200mg/m² in any single hour
+  (`SMOKE_SUSTAINED_THRESHOLD_MG`/`SMOKE_SPIKE_THRESHOLD_MG`, checked by
+  `smoke_triggered()`). `attach_smoke()` applies this per column, so a strip
+  spanning a season boundary (e.g. late Oct into early Nov) still checks the
+  right days even though the overall fetch/render happened in-season.
+  - **Only overrides non-precip icons** — a day already showing rain, snow,
+    or a storm icon (`PRECIP_GLYPH_COLORS`) keeps that icon regardless of
+    smoke, since actual precipitation is the more useful thing to show (and
+    often clears smoke out anyway). A hazy-but-dry day (sunny, cloudy,
+    foggy, windy, etc.) does get overridden.
+  - **Sourced from HRRR directly**, not through WindBorne — regular HRRR
+    distributions elsewhere in this project (via WindBorne's API) don't
+    carry smoke fields, but NOAA's own HRRR "sfc" GRIB output does (it's
+    been part of operational HRRR since 2023, not a separate "HRRR-Smoke"
+    product), fetched the same way `columbia-basin-temps/build_map.py`
+    fetches HRRR temperature — via Herbie, straight from NOAA's free AWS
+    Open Data/NOMADS distribution, byte-range subsetting so only the COLMD
+    record is downloaded from each hourly file. `select_hrrr_run()` in
+    `fetch_hrrr_smoke_forecast.py` picks the most recent synoptic-hour cycle
+    (00/06/12/18z), since only those reach HRRR's full 48h horizon (other
+    cycles stop at 18h) — this feature needs the full 48h to have any chance
+    of covering "today" and "tomorrow" both.
+  - **48h horizon means this rarely affects more than the first 1-2 columns**
+    of the 7-day strip — later days simply have no HRRR data to check, so
+    `attach_smoke()` leaves them untouched rather than guessing.
+  - HRRR's GRIB2 `COLMD` value comes back in kg/m² (raw SI units);
+    `fetch_hrrr_smoke_forecast.py` converts to mg/m² so the stored numbers
+    match how NOAA's own smoke guidance is normally quoted.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_graphic.py`
   directly to adjust.

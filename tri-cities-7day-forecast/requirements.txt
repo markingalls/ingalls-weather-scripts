@@ -3,3 +3,6 @@ numpy
 requests
 Pillow
 holidays
+herbie-data
+cfgrib
+eccodes
