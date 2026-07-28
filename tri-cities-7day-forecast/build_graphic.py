@@ -484,9 +484,10 @@ def main():
         if precip:
             precip_glyph = chr(GLYPHS["SNOWFLAKEday" if precip["is_snow"] else "RAINDROPday"])
             precip_color = COLOR_SNOW if precip["is_snow"] else COLOR_RAIN
-            ax.text(cx - 0.026, PRECIP_CHANCE_Y, precip_glyph, ha="center", va="center",
+            pop_pct = round(precip["pop"] * 100 / 5) * 5
+            ax.text(cx - 0.011, PRECIP_CHANCE_Y, precip_glyph, ha="right", va="center",
                      fontproperties=ICON_FONT, fontsize=15, color=precip_color, zorder=3)
-            ax.text(cx + 0.018, PRECIP_CHANCE_Y, f"{precip['pop'] * 100:.0f}%", ha="left", va="center",
+            ax.text(cx - 0.005, PRECIP_CHANCE_Y, f"{pop_pct:.0f}%", ha="left", va="center",
                      fontproperties=f_med, fontsize=11.5, color=precip_color, zorder=3)
             p25_in, p75_in = precip["p25_in"], precip["p75_in"]
             amount_text = (f'{p75_in:g}"' if p25_in == p75_in else f'{p25_in:g}"–{p75_in:g}"')
