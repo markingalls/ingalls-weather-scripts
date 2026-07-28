@@ -132,11 +132,14 @@ python3 build_graphic.py
     nothing further to drop, so a render at, say, 9pm doesn't double-skip
     to the day after tomorrow just because the underlying fetch also
     happened in the evening.
-- Today's card (when present) gets a green outline (`TODAY_EDGE`, the same
-  forest green as the logo's pine tree) and a green day label, so it stands
-  out as the current-conditions column; the window-shift case above has no
-  "today" card at all, so nothing gets the highlight. Every card, including
-  today's, shows the three-letter day abbreviation (`TUE`, `WED`, ...).
+- Saturdays, Sundays, and US federal holidays get a green outline
+  (`HIGHLIGHT_EDGE`, the same forest green as the logo's pine tree) and a
+  green day label (`is_weekend_or_holiday()`), rather than today getting
+  singled out. Holidays (including floating ones like Memorial Day and
+  Thanksgiving, with observed-date shifting) come from the `holidays`
+  package's `holidays.US()` — hand-rolling the US federal holiday calendar
+  isn't worth it. Every card shows the three-letter day abbreviation
+  (`TUE`, `WED`, ...) regardless of highlighting.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_graphic.py`
   directly to adjust.

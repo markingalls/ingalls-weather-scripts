@@ -4,6 +4,7 @@ import os
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
+import holidays
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -19,13 +20,20 @@ f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
 
 ICON_FONT = fm.FontProperties(fname="fonts/easy_weather_icons_font.ttf")
 
+US_HOLIDAYS = holidays.US()
+
+
+def is_weekend_or_holiday(date):
+    return date.weekday() >= 5 or date in US_HOLIDAYS
+
+
 # ---------- palette ----------
 BG = "#f7f6f2"
 INK = "#2b2a26"
 INK_SECONDARY = "#5a584f"
 CARD_FILL = "#ffffff"
 CARD_EDGE = "#d8d5cc"
-TODAY_EDGE = "#164f29"  # forest green, in the spirit of the logo's pine tree
+HIGHLIGHT_EDGE = "#164f29"  # forest green, in the spirit of the logo's pine tree
 
 # icon color by condition category
 COLOR_SUN = "#e8a33d"
@@ -364,19 +372,19 @@ def main():
         x0 = LEFT + idx * (card_w + GUTTER)
         x1 = x0 + card_w
         cx = (x0 + x1) / 2
-        is_today = col["label"] == "Today"
+        is_highlighted = is_weekend_or_holiday(col["date"].date())
 
         card = FancyBboxPatch(
             (x0, CARD_BOTTOM), card_w, CARD_TOP - CARD_BOTTOM,
             boxstyle="round,pad=0,rounding_size=0.012",
-            facecolor=CARD_FILL, edgecolor=TODAY_EDGE if is_today else CARD_EDGE,
-            linewidth=1.8 if is_today else 1.0, zorder=2)
+            facecolor=CARD_FILL, edgecolor=HIGHLIGHT_EDGE if is_highlighted else CARD_EDGE,
+            linewidth=1.8 if is_highlighted else 1.0, zorder=2)
         ax.add_patch(card)
 
         day_label = col["date"].strftime("%a").upper()
         ax.text(cx, CARD_TOP - 0.05, day_label, ha="center", va="top",
                  fontproperties=f_bold, fontsize=17,
-                 color=TODAY_EDGE if is_today else INK, zorder=3)
+                 color=HIGHLIGHT_EDGE if is_highlighted else INK, zorder=3)
         ax.text(cx, CARD_TOP - 0.093, col["date"].strftime("%b %-d"), ha="center", va="top",
                  fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
