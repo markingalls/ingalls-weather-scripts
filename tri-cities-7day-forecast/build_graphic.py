@@ -98,6 +98,10 @@ GLYPHS = {
 POP_THRESHOLD_MM = 0.5    # per-member daily total above which a member "has precip"
 POP_DISPLAY_THRESHOLD = 0.20  # only show the indicator at all above this chance
 LOW_POP_THRESHOLD = 0.5   # "low chance" for sun-backing purposes (see main())
+# Above this, override NWS's own condition icon with a plain rain/snow icon
+# entirely -- NWS's icon reflects its own forecast text, which can undersell
+# the chance our ensemble-derived probability shows.
+SIGNIFICANT_POP_THRESHOLD = 0.70
 MM_PER_INCH = 25.4
 CM_PER_INCH = 2.54
 
@@ -452,7 +456,16 @@ def precip_summary(ecmwf_data, date):
 
 def attach_precip(columns, ecmwf_data):
     for col in columns:
-        col["precip"] = precip_summary(ecmwf_data, col["date"].date())
+        precip = precip_summary(ecmwf_data, col["date"].date())
+        col["precip"] = precip
+        if precip and precip["pop"] >= SIGNIFICANT_POP_THRESHOLD:
+            name = "SNOWday" if precip["is_snow"] else "RAINday"
+            col["glyph"] = chr(GLYPHS[name])
+            col["glyph_color"] = COLOR_SNOW if precip["is_snow"] else COLOR_RAIN
+            # a plain rain/snow icon is persistent/guaranteed precip, not
+            # "chance of" -- no sun to show behind it (same reasoning as
+            # excluding rain/tsra from SUN_RELEVANT_NWS_CODES).
+            col["sun_relevant"] = False
 
 
 def parse_args():
@@ -590,7 +603,7 @@ def main():
         icon_text.set_path_effects([pe.withStroke(linewidth=1.8, foreground=col["glyph_color"])])
 
         if precip and precip["timing"]:
-            ax.text(cx + 0.030, ICON_Y - 0.042, precip["timing"], ha="left", va="top",
+            ax.text(cx + 0.022, ICON_Y - 0.032, precip["timing"], ha="left", va="top",
                      fontproperties=f_bold, fontsize=10, color=INK_SECONDARY, zorder=3.1)
 
         if precip:

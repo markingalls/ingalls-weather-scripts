@@ -198,6 +198,15 @@ python3 build_graphic.py
     chance where even the 75th percentile member is still ~dry),
     `precip_summary()` returns `None` instead of a probability with a blank
     amount under it.
+  - **Overrides NWS's own condition icon** when the chance of precip is
+    ≥70% (`SIGNIFICANT_POP_THRESHOLD`), replacing it with a plain
+    `RAINday`/`SNOWday` regardless of what NWS's `icon` field says —
+    `attach_precip()` does this right after computing `precip_summary()`.
+    NWS's icon reflects its own forecast text, which can undersell the
+    chance our ensemble-derived probability shows (e.g. NWS says "Sunny" but
+    the ensemble says 85% chance of rain); at that level of confidence the
+    ensemble wins. Also sets `sun_relevant` to `False` for that column, same
+    reasoning as excluding persistent rain from `SUN_RELEVANT_NWS_CODES`.
   - **AM/PM timing**: `precip_timing()` splits each day's precip-weighted
     signal (each hour's precipitation averaged across members) at noon; if
     ≥75% (`TIMING_DOMINANT_FRAC`) of it falls before noon the card gets an
