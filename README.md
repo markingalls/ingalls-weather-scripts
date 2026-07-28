@@ -43,6 +43,11 @@ workflows. Each project lives in its own directory with its own README.
 - [`tri-cities-7day-forecast/`](tri-cities-7day-forecast/) — generates a
   TV-style 7-day forecast graphic for the Tri-Cities: day-of-week, high/low
   temps, and a daytime-condition icon per day, from the NWS forecast.
+- [`tri-cities-temp-chart/`](tri-cities-temp-chart/) — generates a styled
+  14-day chart of Tri-Cities daily high temperature: 7 days observed
+  (xmACIS) and 7 days forecast (WindBorne MetaMesh), against 1991-2020
+  daily climatology (percentile shading and normal from xmACIS; record
+  highs pooled across Tri-Cities-area stations).
 
 ## Shared resources
 
