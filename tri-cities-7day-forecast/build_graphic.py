@@ -222,7 +222,12 @@ def main():
         logo_width_in = logo_height_in * (img_w / img_h)
         logo_width_fig = logo_width_in / fig_w_in
 
-        logo_ax = fig.add_axes([LEFT, TITLE_BLOCK_BOTTOM, logo_width_fig, logo_height_fig], zorder=20)
+        # nudged up from TITLE_BLOCK_BOTTOM -- the title+subtitle text doesn't
+        # fill the full reserved block (there's dead space below the
+        # subtitle's descender), so top-aligning the logo to the block reads
+        # as sitting low; this centers it on the text's actual visual span.
+        logo_y0 = TITLE_BLOCK_BOTTOM + 0.025
+        logo_ax = fig.add_axes([LEFT, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
         logo_ax.axis("off")
 
