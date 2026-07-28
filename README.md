@@ -28,6 +28,14 @@ workflows. Each project lives in its own directory with its own README.
   — real-time companion to `columbia-basin-lightning-map/`: the last 2
   hours of GLM flash detections, with finer 0-30/30-60/60-120 minute
   recency bands for watching an active storm right now.
+- [`dew-point-storm-map/`](dew-point-storm-map/) — one-off map of today's
+  maximum dew point depression across British Columbia, Washington,
+  Oregon, and Idaho, with a dashed red outline where ECMWF IFS's fields
+  are consistent with thunderstorms today.
+- [`wildcad-fires-map/`](wildcad-fires-map/) — the canonical map of
+  currently active wildfires across the same domain as
+  `dew-point-storm-map/`, merged from WildCAD-E (US dispatch centers),
+  CAL FIRE (via NIFC WFIGS), BC Wildfire Service, and Alberta Wildfire.
 
 ## Shared resources
 

@@ -61,3 +61,17 @@ columbia-basin-lightning-map/columbia_basin_lightning*.png
 # same reasoning as columbia-basin-lightning-map above.
 columbia-basin-lightning-realtime-map/lightning_last2h.json
 columbia-basin-lightning-realtime-map/columbia_basin_lightning_realtime*.png
+
+# --- dew-point-storm-map ---
+# build_map.py fetches its source grids live; output/ only holds saved
+# snapshots for a --file override (testing / avoiding re-fetching), and the
+# rendered PNGs are outputs -- neither is source, so don't track them.
+dew-point-storm-map/output/*.npz
+dew-point-storm-map/output/*.png
+
+# --- wildcad-fires-map ---
+# build_map.py fetches live fire data; output/ only holds saved snapshots
+# for a --file override (testing / avoiding re-fetching), and the rendered
+# PNGs are outputs -- neither is source, so don't track them.
+wildcad-fires-map/output/*.json
+wildcad-fires-map/output/*.png
