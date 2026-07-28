@@ -81,3 +81,13 @@ wildcad-fires-map/output/*.png
 # rendered chart is an output too -- neither is source, so don't track them.
 hrrr-smoke-chart/smoke.json
 hrrr-smoke-chart/hrrr_*_smoke_*.png
+# --- tri-cities-7day-forecast ---
+# forecast.json/metamesh_forecast.json/openmeteo_forecast.json are live data
+# the fetch_*.py scripts regenerate every run, and the rendered graphic is
+# an output too -- neither is source, so don't track them.
+tri-cities-7day-forecast/forecast.json
+tri-cities-7day-forecast/metamesh_forecast.json
+tri-cities-7day-forecast/openmeteo_forecast.json
+tri-cities-7day-forecast/ecmwf_ensemble_forecast.json
+tri-cities-7day-forecast/hrrr_smoke_forecast.json
+tri-cities-7day-forecast/tri_cities_7day_forecast*.png

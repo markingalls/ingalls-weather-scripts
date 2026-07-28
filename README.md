@@ -40,6 +40,9 @@ workflows. Each project lives in its own directory with its own README.
   NOAA HRRR smoke (near-surface as AQI or raw µg/m³, or vertically
   integrated) for one or more points over a full 48-hour HRRR cycle
   (defaults to Kennewick, WA and Hermiston, OR).
+- [`tri-cities-7day-forecast/`](tri-cities-7day-forecast/) — generates a
+  TV-style 7-day forecast graphic for the Tri-Cities: day-of-week, high/low
+  temps, and a daytime-condition icon per day, from the NWS forecast.
 
 ## Shared resources
 
