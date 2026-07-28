@@ -671,6 +671,10 @@ def main():
     now_local = datetime.now(local_tz)
     drop_today = now_local.hour >= 15
     suppress_today_low = 7 <= now_local.hour < 15
+    # An "AM" precip-timing label on today's card stops being useful once
+    # the morning's already over -- past this hour, whatever "AM" signal
+    # drove it is stale, not a forward-looking part of today's forecast.
+    suppress_today_am = now_local.hour >= 10
 
     columns = daily_columns(props["periods"], drop_today=drop_today)
 
@@ -696,6 +700,10 @@ def main():
 
     if suppress_today_low and columns:
         columns[0]["low"] = None
+
+    if (suppress_today_am and columns and columns[0]["date"].date() == now_local.date()
+            and columns[0].get("precip") and columns[0]["precip"]["timing"] == "AM"):
+        columns[0]["precip"]["timing"] = None
 
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)

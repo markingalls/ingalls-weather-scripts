@@ -224,6 +224,12 @@ python3 build_graphic.py
     "AM" label at the bottom-right of the main condition icon, ≥75% at/after
     noon gets "PM", and anything more evenly split (spans midday, or runs
     through most of the day) gets no label.
+  - Today's own "AM" label specifically gets dropped once it's rendered at
+    or after 10am local (`suppress_today_am` in `main()`) — past that hour
+    whatever drove the "AM" signal is stale, not a forward-looking part of
+    what's left of today, and the render keeps the 40%/etc. probability and
+    amount either way. Only today's card is affected; a future day's "AM"
+    label is untouched regardless of what time today's render happens to run.
   - **Sun behind the main icon**: when a day's condition is an
     isolated/scattered storm (`SUN_RELEVANT_NWS_CODES`:
     `tsra_hi`/`tsra_sct`/`rain_showers_hi`) and the precip is either a
