@@ -24,11 +24,13 @@ def fetch(lat, lon):
     points = requests.get(f"https://api.weather.gov/points/{lat},{lon}",
                            headers=HEADERS, timeout=30)
     points.raise_for_status()
-    forecast_url = points.json()["properties"]["forecast"]
+    point_props = points.json()["properties"]
 
-    forecast = requests.get(forecast_url, headers=HEADERS, timeout=30)
+    forecast = requests.get(point_props["forecast"], headers=HEADERS, timeout=30)
     forecast.raise_for_status()
-    return forecast.json()
+    data = forecast.json()
+    data["timezone"] = point_props["timeZone"]
+    return data
 
 
 if __name__ == "__main__":
@@ -50,4 +52,4 @@ if __name__ == "__main__":
 
     n_periods = len(data["properties"]["periods"])
     print(f"Saved {args.output}: {n_periods} periods for {args.label} "
-          f"(updated {data['properties'].get('updateTime')})")
+          f"(updated {data['properties'].get('updateTime')}, timezone {data['timezone']})")

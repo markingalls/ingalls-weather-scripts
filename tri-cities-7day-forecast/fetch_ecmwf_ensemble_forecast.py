@@ -31,7 +31,7 @@ def fetch(lat, lon, forecast_days):
         "longitude": lon,
         "models": "ecmwf_ifs025",
         "hourly": "precipitation,snowfall",
-        "timezone": "America/Los_Angeles",
+        "timezone": "auto",  # resolves to the point's own local timezone
         "forecast_days": forecast_days,
     }
     r = requests.get(API_URL, params=params, timeout=30)
@@ -57,4 +57,5 @@ if __name__ == "__main__":
     hourly = data["hourly"]
     n_members = sum(1 for k in hourly if k.startswith("precipitation_member"))
     print(f"Saved {args.output}: {len(hourly['time'])} hourly steps, "
-          f"{n_members} ensemble members, at {args.lat},{args.lon}")
+          f"{n_members} ensemble members, at {args.lat},{args.lon} "
+          f"(timezone {data['timezone']})")

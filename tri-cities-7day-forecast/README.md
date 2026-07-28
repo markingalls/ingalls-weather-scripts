@@ -6,15 +6,19 @@ with day-of-week, date, a daytime-condition icon, and the high/low
 temperatures. Same canvas footprint and fonts as the other Ingalls Weather
 graphics (`columbia-basin-alerts-map/`, `850-700-temp-chart/`).
 
-Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA). Conditions/icons come
-from the NWS forecast; high/low temperatures come from WindBorne's MetaMesh,
-queried directly by station ID.
+Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA), but works anywhere NWS
+covers — pass different `--lat`/`--lon` (and a MetaMesh `--station`) to the
+fetch scripts. Conditions/icons come from the NWS forecast; high/low
+temperatures come from WindBorne's MetaMesh, queried directly by station ID.
+The local timezone is resolved per-location from NWS's own `/points`
+response, not hardcoded, so the time-of-day logic below works correctly
+wherever it's pointed.
 
 ## Files
 
 - `fetch_forecast.py` — pulls the current NWS 7-day forecast (day/night
-  periods, condition icon codes) for a point from api.weather.gov and
-  writes `forecast.json`. No API key needed.
+  periods, condition icon codes, and the point's IANA timezone) for a point
+  from api.weather.gov and writes `forecast.json`. No API key needed.
 - `fetch_metamesh_forecast.py` — pulls the MetaMesh point temperature
   forecast for a station from WindBorne and writes `metamesh_forecast.json`.
   Requires `WB_API_KEY` in the environment (get one at
@@ -104,13 +108,15 @@ python3 build_graphic.py
     `distribution` sub-object, since it's deterministic). Since a future
     account/plan or multi-station query could plausibly return a flat list
     instead, `metamesh_temp_series()` still handles both shapes.
-- **What "today" means depends on when the graphic is rendered** (local
-  Pacific time, `LOCAL_TZ` in `build_graphic.py`), because a "forecast" high
+- **What "today" means depends on when the graphic is rendered**, in the
+  forecast location's own local time (`local_tz` in `main()`, resolved from
+  `forecast.json`'s `timezone` field — see below), because a "forecast" high
   or low that's already happened isn't really a forecast anymore. The
   Tri-Cities' daily trough lands ~6-7am local and the peak ~3-5pm (checked
   against real MetaMesh hourly data — the sampled extremes were within
   ~0.1°F of a continuous curve fit, so hourly resolution isn't the limiting
-  factor here, the clock is):
+  factor here, the clock is) — the 7am/3pm cutoffs below are pinned to that
+  check and haven't been re-verified for other latitudes/climates:
   - **Before 7am**: today's high hasn't happened yet and its low (tonight's,
     per the day/night pairing above) is still hours off too — show both
     normally, no special-casing.
@@ -138,6 +144,15 @@ python3 build_graphic.py
     nothing further to drop, so a render at, say, 9pm doesn't double-skip
     to the day after tomorrow just because the underlying fetch also
     happened in the evening.
+- **Timezone resolution**: `fetch_forecast.py` stores NWS's own
+  `properties.timeZone` (from the `/points` lookup it already makes) as
+  `forecast.json`'s `timezone` field, and `build_graphic.py` reads it into
+  `local_tz` at the top of `main()` — nothing is hardcoded to Pacific time
+  anymore. `fetch_openmeteo_forecast.py` and `fetch_ecmwf_ensemble_forecast.py`
+  independently pass `timezone=auto` to Open-Meteo, which resolves the same
+  way from the lat/lon given (confirmed against the live API for both
+  Tri-Cities and a Virginia Beach, VA test render — both endpoints agreed
+  with NWS's own timezone).
 - Saturdays, Sundays, and US federal holidays get a green outline
   (`HIGHLIGHT_EDGE`, the same forest green as the logo's pine tree) and a
   green day label (`is_weekend_or_holiday()`), rather than today getting
@@ -167,15 +182,38 @@ python3 build_graphic.py
     indicator.
   - **P25-P75 total**: the 25th/75th percentile (via `numpy.percentile`)
     across the 50 members' daily totals, in inches, for whichever of
-    rain/snow applies. Rain rounds to the nearest quarter inch (nearest
-    tenth below 0.3") via `round_rain_inches()`; snow rounds to the nearest
-    half inch via `round_snow_inches()`. Shown as a single value instead of
-    a range when both ends round to the same number.
-  - Each ensemble member's daily total is summed over the full local
-    calendar date (00:00-24:00), not the NWS 6am-6pm/6pm-6am day/night
-    split used for temperature — precipitation totals are conventionally
-    reported per calendar day, and a single combined day+night indicator
-    per card doesn't need the day/night split temperature uses.
+    rain/snow applies. Rain always shows two decimal places (nearest quarter
+    inch, nearest tenth below 0.3") via `round_rain_inches()`; snow always
+    shows one decimal place (nearest half inch) via `round_snow_inches()`.
+    Shown as a single value instead of a range when both ends round to the
+    same number.
+  - Each ensemble member's daily total is summed over `PRECIP_DAY_START_HOUR`
+    (05:00) through 23:59 local, not the full calendar day and not the NWS
+    6am-6pm/6pm-6am day/night split used for temperature — the 00:00-04:59
+    stretch reads more like "overnight" than "today" on a TV-style forecast,
+    and a single combined day+night indicator per card doesn't need
+    temperature's day/night split.
+  - **Suppressed when it would just read "0.00"**: if the rounded P75 total
+    is zero (common at the low end of `POP_DISPLAY_THRESHOLD`, e.g. a 25%
+    chance where even the 75th percentile member is still ~dry),
+    `precip_summary()` returns `None` instead of a probability with a blank
+    amount under it.
+  - **AM/PM timing**: `precip_timing()` splits each day's precip-weighted
+    signal (each hour's precipitation averaged across members) at noon; if
+    ≥75% (`TIMING_DOMINANT_FRAC`) of it falls before noon the card gets an
+    "AM" label at the bottom-right of the main condition icon, ≥75% at/after
+    noon gets "PM", and anything more evenly split (spans midday, or runs
+    through most of the day) gets no label.
+  - **Sun behind the main icon**: when a day's condition is fundamentally
+    "chance of/isolated/scattered X" (`SUN_RELEVANT_NWS_CODES`:
+    `tsra_hi`/`tsra_sct`/`rain_showers_hi`, plus the already-sunny
+    `skc`/`few`/`sct`) and the precip is either a low-confidence chance
+    (`pop < LOW_POP_THRESHOLD`, 50%) or confined to part of the day (has an
+    AM/PM label), a larger `CLEARday` sun glyph is drawn behind the main
+    icon (lower `zorder`) so a day coded as, say, isolated thunderstorms
+    still reads as "mostly sunny" rather than "guaranteed storm." Excludes
+    persistent/guaranteed conditions (`bkn`/`ovc`/`rain`/`tsra` etc.) where
+    there's no real sun to show.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_graphic.py`
   directly to adjust.

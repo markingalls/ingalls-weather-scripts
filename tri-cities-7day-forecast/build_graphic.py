@@ -96,8 +96,20 @@ GLYPHS = {
 # ECMWF ensemble instead.
 POP_THRESHOLD_MM = 0.5    # per-member daily total above which a member "has precip"
 POP_DISPLAY_THRESHOLD = 0.20  # only show the indicator at all above this chance
+LOW_POP_THRESHOLD = 0.5   # "low chance" for sun-backing purposes (see main())
 MM_PER_INCH = 25.4
 CM_PER_INCH = 2.54
+
+# Only give a chance-of-precip for the 05:00-23:59 local stretch of the day
+# (excludes the 00:00-04:59 hours, which read more like "overnight" than
+# "today" on a TV-style forecast). Also used to split into an AM/PM half for
+# precip_timing() below.
+PRECIP_DAY_START_HOUR = 5
+MIDDAY_HOUR = 12
+# AM/PM only gets labeled when the day's precip signal is lopsided toward
+# one half; a 50/50-ish split (spans midday, or runs most of the day) gets
+# no label at all.
+TIMING_DOMINANT_FRAC = 0.75
 
 # NWS forecast icon code (from the last path segment of the "icon" URL,
 # e.g. https://api.weather.gov/icons/land/day/tsra,40 -> "tsra") -> (glyph, color)
@@ -149,10 +161,19 @@ def icon_code_from_url(url):
     return first_condition.split(",")[0]
 
 
+# NWS codes (and WMO codes below) for conditions that are fundamentally
+# "chance of/isolated/scattered X" rather than persistent, guaranteed sky
+# cover -- used to decide whether stacking a sun glyph behind the main
+# condition icon makes sense (see the sun-backing logic in main()'s render
+# loop). Excludes bkn/ovc/rain/tsra (persistent -- no real sun to show) even
+# though they're daytime icons too.
+SUN_RELEVANT_NWS_CODES = {"skc", "few", "sct", "tsra_hi", "tsra_sct", "rain_showers_hi"}
+
+
 def glyph_for(icon_url):
     code = icon_code_from_url(icon_url)
     name, color = NWS_ICON_MAP.get(code, ("UNKNOWNday", INK_SECONDARY))
-    return chr(GLYPHS[name]), color
+    return chr(GLYPHS[name]), color, code in SUN_RELEVANT_NWS_CODES
 
 
 # Open-Meteo's daily "weathercode" -> (glyph, color). Standard WMO weather
@@ -191,9 +212,12 @@ WMO_ICON_MAP = {
 }
 
 
+SUN_RELEVANT_WMO_CODES = {0, 1, 2}  # clear, mainly clear, partly cloudy
+
+
 def glyph_for_wmo(weathercode):
     name, color = WMO_ICON_MAP.get(weathercode, ("UNKNOWNday", INK_SECONDARY))
-    return chr(GLYPHS[name]), color
+    return chr(GLYPHS[name]), color, weathercode in SUN_RELEVANT_WMO_CODES
 
 
 def daily_columns(periods, drop_today=False):
@@ -223,7 +247,7 @@ def daily_columns(periods, drop_today=False):
     while i < len(periods) and len(columns) < 7:
         day = periods[i]
         night = periods[i + 1] if i + 1 < len(periods) and not periods[i + 1]["isDaytime"] else None
-        glyph, color = glyph_for(day["icon"])
+        glyph, color, sun_relevant = glyph_for(day["icon"])
         columns.append({
             "label": day["name"],
             "date": datetime.fromisoformat(day["startTime"]),
@@ -233,6 +257,7 @@ def daily_columns(periods, drop_today=False):
             "night_end": datetime.fromisoformat(night["endTime"]) if night else None,
             "glyph": glyph,
             "glyph_color": color,
+            "sun_relevant": sun_relevant,
         })
         i += 2
     return columns
@@ -242,18 +267,18 @@ def daily_columns(periods, drop_today=False):
 # against real fetched data (e.g. "Wednesday" 06:00-18:00, "Wednesday
 # Night" 18:00-06:00 local). Reused for the synthetic day added beyond
 # NWS's own coverage so every column reduces temperature over the same
-# local-hour convention.
+# local-hour convention. The actual local timezone is resolved per-location
+# from forecast.json's NWS-provided "timezone" (see main()), not hardcoded.
 DAY_START_HOUR, DAY_END_HOUR = 6, 18
-LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 
-def local_day_window(date):
+def local_day_window(date, local_tz):
     """(day_start, day_end, night_start, night_end) tz-aware datetimes for
     one calendar date, using NWS's own 6am-6pm/6pm-6am local split."""
-    day_start = datetime.combine(date, dtime(DAY_START_HOUR), tzinfo=LOCAL_TZ)
-    day_end = datetime.combine(date, dtime(DAY_END_HOUR), tzinfo=LOCAL_TZ)
+    day_start = datetime.combine(date, dtime(DAY_START_HOUR), tzinfo=local_tz)
+    day_end = datetime.combine(date, dtime(DAY_END_HOUR), tzinfo=local_tz)
     night_start = day_end
-    night_end = datetime.combine(date + timedelta(days=1), dtime(DAY_START_HOUR), tzinfo=LOCAL_TZ)
+    night_end = datetime.combine(date + timedelta(days=1), dtime(DAY_START_HOUR), tzinfo=local_tz)
     return day_start, day_end, night_start, night_end
 
 
@@ -263,22 +288,23 @@ def openmeteo_weathercode_for_date(data, date):
     return daily["weathercode"][idx]
 
 
-def synthetic_column(date, openmeteo_data):
+def synthetic_column(date, openmeteo_data, local_tz):
     """A day/night column beyond NWS's own coverage: condition icon from
     Open-Meteo's daily weathercode (temperature gets filled in by
     attach_metamesh_temps() same as every other column, since MetaMesh's
     15-day horizon already reaches this far)."""
-    day_start, day_end, night_start, night_end = local_day_window(date)
-    glyph, color = glyph_for_wmo(openmeteo_weathercode_for_date(openmeteo_data, date))
+    day_start, day_end, night_start, night_end = local_day_window(date, local_tz)
+    glyph, color, sun_relevant = glyph_for_wmo(openmeteo_weathercode_for_date(openmeteo_data, date))
     return {
         "label": date.strftime("%A"),
-        "date": datetime.combine(date, dtime(0), tzinfo=LOCAL_TZ),
+        "date": datetime.combine(date, dtime(0), tzinfo=local_tz),
         "day_start": day_start,
         "day_end": day_end,
         "night_start": night_start,
         "night_end": night_end,
         "glyph": glyph,
         "glyph_color": color,
+        "sun_relevant": sun_relevant,
     }
 
 
@@ -321,16 +347,49 @@ def attach_metamesh_temps(columns, temp_series):
         col["low"] = c_to_f(low_c) if low_c is not None else None
 
 
-def ensemble_member_daily_totals(hourly, variable, date):
+def ensemble_member_daily_totals(hourly, variable, date, start_hour=0):
     """Each ensemble member's total for `variable` (precipitation or
-    snowfall) summed over one local calendar date's hourly values. Open-Meteo's
-    ensemble times are plain local strings (no offset) since the fetch
-    requests a fixed timezone, so a date-prefix string match is enough --
-    no timezone parsing needed."""
+    snowfall) summed over one local calendar date's hourly values from
+    start_hour onward. Open-Meteo's ensemble times are plain local strings
+    (no offset) since the fetch requests timezone=auto, so a date-prefix
+    string match is enough -- no timezone parsing needed."""
     day_prefix = date.isoformat()
-    idxs = [i for i, t in enumerate(hourly["time"]) if t.startswith(day_prefix)]
+    idxs = [i for i, t in enumerate(hourly["time"])
+            if t.startswith(day_prefix) and int(t[11:13]) >= start_hour]
     member_keys = sorted(k for k in hourly if k.startswith(variable + "_member"))
     return [sum(hourly[key][i] for i in idxs) for key in member_keys]
+
+
+def precip_timing(hourly, date):
+    """'AM' if the day's PRECIP_DAY_START_HOUR-23:59 precip signal (each
+    hour's precipitation averaged across ensemble members) is concentrated
+    before noon, 'PM' if concentrated at/after noon, None if it's split
+    roughly evenly (spans midday, or runs through most of the day) -- no
+    clean label in that case."""
+    member_keys = sorted(k for k in hourly if k.startswith("precipitation_member"))
+    day_prefix = date.isoformat()
+    morning = afternoon = 0.0
+    for i, t in enumerate(hourly["time"]):
+        if not t.startswith(day_prefix):
+            continue
+        hour = int(t[11:13])
+        if hour < PRECIP_DAY_START_HOUR:
+            continue
+        mean_mm = sum(hourly[k][i] for k in member_keys) / len(member_keys)
+        if hour < MIDDAY_HOUR:
+            morning += mean_mm
+        else:
+            afternoon += mean_mm
+
+    total = morning + afternoon
+    if total <= 0:
+        return None
+    morning_frac = morning / total
+    if morning_frac >= TIMING_DOMINANT_FRAC:
+        return "AM"
+    if morning_frac <= 1 - TIMING_DOMINANT_FRAC:
+        return "PM"
+    return None
 
 
 def round_rain_inches(inches):
@@ -344,15 +403,16 @@ def round_snow_inches(inches):
 
 
 def precip_summary(ecmwf_data, date):
-    """None if the day's chance of precip (fraction of ensemble members
-    whose daily total exceeds POP_THRESHOLD_MM) is below
-    POP_DISPLAY_THRESHOLD. Otherwise a dict: pop (0-1), is_snow (day
-    classified as snow if at least half the members show measurable
-    snowfall), and rounded p25_in/p75_in for whichever of rain/snow
-    applies."""
+    """None if there's nothing worth showing: chance of precip (fraction of
+    ensemble members whose PRECIP_DAY_START_HOUR-23:59 daily total exceeds
+    POP_THRESHOLD_MM) below POP_DISPLAY_THRESHOLD, or the rounded P25-P75
+    total would just display as zero anyway. Otherwise a dict: pop (0-1),
+    is_snow (day classified as snow if at least half the members show
+    measurable snowfall), rounded p25_in/p75_in for whichever of rain/snow
+    applies, and timing ('AM'/'PM'/None, see precip_timing())."""
     hourly = ecmwf_data["hourly"]
-    precip_mm = ensemble_member_daily_totals(hourly, "precipitation", date)
-    snow_cm = ensemble_member_daily_totals(hourly, "snowfall", date)
+    precip_mm = ensemble_member_daily_totals(hourly, "precipitation", date, PRECIP_DAY_START_HOUR)
+    snow_cm = ensemble_member_daily_totals(hourly, "snowfall", date, PRECIP_DAY_START_HOUR)
 
     pop = sum(1 for v in precip_mm if v > POP_THRESHOLD_MM) / len(precip_mm)
     if pop < POP_DISPLAY_THRESHOLD:
@@ -368,7 +428,19 @@ def precip_summary(ecmwf_data, date):
 
     p25_in = round_inches(float(np.percentile(totals_in, 25)))
     p75_in = round_inches(float(np.percentile(totals_in, 75)))
-    return {"pop": pop, "is_snow": is_snow, "p25_in": p25_in, "p75_in": p75_in}
+    if p75_in == 0:
+        # the interquartile range rounds to nothing worth printing (e.g. a
+        # 25% chance where even the 75th percentile is still ~dry) -- a
+        # probability with "0.00" under it reads as broken, not informative.
+        return None
+
+    return {
+        "pop": pop,
+        "is_snow": is_snow,
+        "p25_in": p25_in,
+        "p75_in": p75_in,
+        "timing": precip_timing(hourly, date),
+    }
 
 
 def attach_precip(columns, ecmwf_data):
@@ -396,6 +468,10 @@ def main():
     args = parse_args()
     data = json.load(open(args.forecast))
     props = data["properties"]
+    # Resolved per-location by fetch_forecast.py from NWS's own /points
+    # response (properties.timeZone) -- not hardcoded, so this works
+    # anywhere NWS covers, not just the Pacific time zone Tri-Cities sits in.
+    local_tz = ZoneInfo(data["timezone"])
 
     # Local-time-of-day policy for what "today" means in the graphic:
     #  - before 7am: today's high hasn't happened yet and its low (tonight's,
@@ -409,7 +485,7 @@ def main():
     #    peak lands ~3-5pm), so today stops being a forward-looking forecast
     #    at all -- drop it and start the window tomorrow, backfilling the
     #    resulting 7th day (beyond NWS's ~7-day coverage) from Open-Meteo.
-    now_local = datetime.now(LOCAL_TZ)
+    now_local = datetime.now(local_tz)
     drop_today = now_local.hour >= 15
     suppress_today_low = 7 <= now_local.hour < 15
 
@@ -418,7 +494,7 @@ def main():
     if drop_today and len(columns) < 7:
         last_date = columns[-1]["date"].date() if columns else now_local.date()
         openmeteo_data = json.load(open(args.openmeteo_forecast))
-        columns.append(synthetic_column(last_date + timedelta(days=1), openmeteo_data))
+        columns.append(synthetic_column(last_date + timedelta(days=1), openmeteo_data, local_tz))
 
     temp_series = metamesh_temp_series(json.load(open(args.metamesh_forecast)))
     attach_metamesh_temps(columns, temp_series)
@@ -473,6 +549,20 @@ def main():
         ax.text(cx, DATE_Y, col["date"].strftime("%b %-d"), ha="center", va="top",
                  fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
+        precip = col.get("precip")
+        is_partial_day = bool(precip and precip["timing"] is not None)
+        is_low_chance = bool(precip and precip["pop"] < LOW_POP_THRESHOLD)
+
+        # Sun peeking out from behind the main condition icon when that
+        # condition is fundamentally "chance of/isolated/scattered X" (e.g.
+        # NWS's tsra_hi -- isolated t-storms -- which our icon font can only
+        # render as a plain storm cloud, no sun) and the precip itself is
+        # either a low-confidence chance or confined to part of the day --
+        # i.e. "still mostly a sunny day," not "count on getting rained on."
+        if precip and col.get("sun_relevant") and (is_low_chance or is_partial_day):
+            ax.text(cx, ICON_Y, chr(GLYPHS["CLEARday"]), ha="center", va="center",
+                     fontproperties=ICON_FONT, fontsize=60, color=COLOR_SUN, zorder=2.6)
+
         icon_text = ax.text(cx, ICON_Y, col["glyph"], ha="center", va="center",
                              fontproperties=ICON_FONT, fontsize=46, color=col["glyph_color"], zorder=3)
         # the icon font is a thin-stroke outline face with no bold weight of
@@ -480,15 +570,21 @@ def main():
         # outline so it reads as bold instead of drawing it twice.
         icon_text.set_path_effects([pe.withStroke(linewidth=1.8, foreground=col["glyph_color"])])
 
-        precip = col.get("precip")
+        if precip and precip["timing"]:
+            ax.text(cx + 0.042, ICON_Y - 0.058, precip["timing"], ha="left", va="top",
+                     fontproperties=f_bold, fontsize=8, color=INK_SECONDARY, zorder=3.1)
+
         if precip:
             precip_glyph = chr(GLYPHS["SNOWFLAKEday" if precip["is_snow"] else "RAINDROPday"])
             precip_color = COLOR_SNOW if precip["is_snow"] else COLOR_RAIN
+            precip_icon_x = cx - 0.011
+
             pop_pct = round(precip["pop"] * 100 / 5) * 5
-            ax.text(cx - 0.011, PRECIP_CHANCE_Y, precip_glyph, ha="right", va="center",
+            ax.text(precip_icon_x, PRECIP_CHANCE_Y, precip_glyph, ha="right", va="center",
                      fontproperties=ICON_FONT, fontsize=15, color=precip_color, zorder=3)
             ax.text(cx - 0.005, PRECIP_CHANCE_Y, f"{pop_pct:.0f}%", ha="left", va="center",
                      fontproperties=f_med, fontsize=11.5, color=precip_color, zorder=3)
+
             p25_in, p75_in = precip["p25_in"], precip["p75_in"]
             amount_fmt = "{:.1f}" if precip["is_snow"] else "{:.2f}"
             amount_text = (f'{amount_fmt.format(p75_in)}"' if p25_in == p75_in

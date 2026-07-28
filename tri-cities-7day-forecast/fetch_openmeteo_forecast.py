@@ -22,7 +22,7 @@ def fetch(lat, lon, forecast_days):
         "latitude": lat,
         "longitude": lon,
         "daily": "weathercode",
-        "timezone": "America/Los_Angeles",
+        "timezone": "auto",  # resolves to the point's own local timezone
         "forecast_days": forecast_days,
     }
     r = requests.get(API_URL, params=params, timeout=30)
@@ -46,4 +46,5 @@ if __name__ == "__main__":
         json.dump(data, f)
 
     n_days = len(data["daily"]["time"])
-    print(f"Saved {args.output}: {n_days} days at {args.lat},{args.lon}")
+    print(f"Saved {args.output}: {n_days} days at {args.lat},{args.lon} "
+          f"(timezone {data['timezone']})")
