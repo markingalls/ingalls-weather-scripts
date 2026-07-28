@@ -583,8 +583,8 @@ def main():
         icon_text.set_path_effects([pe.withStroke(linewidth=1.8, foreground=col["glyph_color"])])
 
         if precip and precip["timing"]:
-            ax.text(cx + 0.042, ICON_Y - 0.058, precip["timing"], ha="left", va="top",
-                     fontproperties=f_bold, fontsize=8, color=INK_SECONDARY, zorder=3.1)
+            ax.text(cx + 0.030, ICON_Y - 0.042, precip["timing"], ha="left", va="top",
+                     fontproperties=f_bold, fontsize=10, color=INK_SECONDARY, zorder=3.1)
 
         if precip:
             precip_glyph = chr(GLYPHS["SNOWFLAKEday" if precip["is_snow"] else "RAINDROPday"])
