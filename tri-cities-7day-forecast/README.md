@@ -23,11 +23,15 @@ queried directly by station ID.
   forecast (16-day horizon) for a point and writes `openmeteo_forecast.json`.
   No API key needed. Only actually used by `build_graphic.py` for renders
   after 3pm local (see below) — harmless to skip otherwise, but cheap enough
-  to just always run alongside the other two.
-- `build_graphic.py` — renders `forecast.json` + `metamesh_forecast.json` (+
-  `openmeteo_forecast.json`, conditionally) into
-  `tri_cities_7day_forecast.png`. Icon/color mapping and card layout are
-  defined near the top — edit directly to adjust.
+  to just always run alongside the others.
+- `fetch_ecmwf_ensemble_forecast.py` — pulls Open-Meteo's 50-member ECMWF
+  IFS ensemble (hourly precipitation + snowfall) for a point and writes
+  `ecmwf_ensemble_forecast.json`. No API key needed. Source for the
+  chance-of-precip indicator (see below).
+- `build_graphic.py` — renders `forecast.json` + `metamesh_forecast.json` +
+  `ecmwf_ensemble_forecast.json` (+ `openmeteo_forecast.json`, conditionally)
+  into `tri_cities_7day_forecast.png`. Icon/color mapping and card layout
+  are defined near the top — edit directly to adjust.
 - `fonts/easy_weather_icons_font.ttf` — the day/night condition icon glyphs,
   from [easy-weather-icons-font](https://github.com/boxbot6/easy-weather-icons-font)
   (MIT license, see `fonts/LICENSE-easy-weather-icons-font.txt`).
@@ -43,12 +47,14 @@ export WB_API_KEY=...              # your WindBorne API key
 python3 fetch_forecast.py
 python3 fetch_metamesh_forecast.py
 python3 fetch_openmeteo_forecast.py
+python3 fetch_ecmwf_ensemble_forecast.py
 python3 build_graphic.py
 
 # Anywhere else MetaMesh has a supported METAR station
 python3 fetch_forecast.py --lat 45.5898 --lon -122.5951 --label "Portland, OR"
 python3 fetch_metamesh_forecast.py --station kpdx
 python3 fetch_openmeteo_forecast.py --lat 45.5898 --lon -122.5951
+python3 fetch_ecmwf_ensemble_forecast.py --lat 45.5898 --lon -122.5951
 python3 build_graphic.py
 ```
 
@@ -140,6 +146,36 @@ python3 build_graphic.py
   package's `holidays.US()` — hand-rolling the US federal holiday calendar
   isn't worth it. Every card shows the three-letter day abbreviation
   (`TUE`, `WED`, ...) regardless of highlighting.
+- **Chance-of-precip indicator**: a raindrop/snowflake + probability, with a
+  P25-P75 total underneath, shown on any card where the chance of precip is
+  ≥20% (`POP_DISPLAY_THRESHOLD` in `build_graphic.py`). WM-6's own precip
+  variable (`total_precipitation_3h`) was tried first, but confirmed
+  directly against the live API to expose only fixed threshold-exceedance
+  probabilities (`gt_0p25mm`, `gt_2p5mm`, `gt_6mm`, `gt_12p5mm`, `gt_25mm`,
+  `gt_50mm`) and mean/std — no percentiles, no raw members, and no exact
+  0.5mm threshold, unlike temperature's distribution on the same endpoint
+  (which does have `p01`/`p25`/`p75`/etc). So this instead uses Open-Meteo's
+  ensemble API, which exposes all 50 raw ECMWF IFS members for
+  `precipitation` (mm) and `snowfall` (cm):
+  - **Probability**: the fraction of the 50 members whose full local
+    calendar-day total precipitation exceeds `POP_THRESHOLD_MM` (0.5mm) —
+    an exact threshold, not an approximation, since raw members are
+    available (`precip_summary()` in `build_graphic.py`).
+  - **Rain vs. snow**: a day is classified as snow if at least half the
+    members (the median) show measurable snowfall; otherwise rain. Mixed
+    rain/snow days just get classified one way or the other, no in-between
+    indicator.
+  - **P25-P75 total**: the 25th/75th percentile (via `numpy.percentile`)
+    across the 50 members' daily totals, in inches, for whichever of
+    rain/snow applies. Rain rounds to the nearest quarter inch (nearest
+    tenth below 0.3") via `round_rain_inches()`; snow rounds to the nearest
+    half inch via `round_snow_inches()`. Shown as a single value instead of
+    a range when both ends round to the same number.
+  - Each ensemble member's daily total is summed over the full local
+    calendar date (00:00-24:00), not the NWS 6am-6pm/6pm-6am day/night
+    split used for temperature — precipitation totals are conventionally
+    reported per calendar day, and a single combined day+night indicator
+    per card doesn't need the day/night split temperature uses.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_graphic.py`
   directly to adjust.

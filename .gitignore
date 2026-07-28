@@ -57,4 +57,5 @@ columbia-basin-temps/output/*.png
 tri-cities-7day-forecast/forecast.json
 tri-cities-7day-forecast/metamesh_forecast.json
 tri-cities-7day-forecast/openmeteo_forecast.json
+tri-cities-7day-forecast/ecmwf_ensemble_forecast.json
 tri-cities-7day-forecast/tri_cities_7day_forecast*.png

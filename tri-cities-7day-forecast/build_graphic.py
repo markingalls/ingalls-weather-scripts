@@ -1,10 +1,12 @@
 import argparse
 import json
 import os
+import statistics
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 import holidays
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -84,7 +86,18 @@ GLYPHS = {
     "HEAVY_SNOWday": 0xe97c,
     "SNOW_SHOWERSday": 0xe988,
     "SEVERE_THUNDERSTORMSday": 0xe90d,
+    "RAINDROPday": 0xea0c,
+    "SNOWFLAKEday": 0xe9a6,
 }
+
+# ---------- precip indicator (chance-of-precip icon + probability + P25-75 total) ----------
+# See fetch_ecmwf_ensemble_forecast.py -- WM-6's own precip variable has no
+# percentiles/raw members, so this is sourced from Open-Meteo's 50-member
+# ECMWF ensemble instead.
+POP_THRESHOLD_MM = 0.5    # per-member daily total above which a member "has precip"
+POP_DISPLAY_THRESHOLD = 0.20  # only show the indicator at all above this chance
+MM_PER_INCH = 25.4
+CM_PER_INCH = 2.54
 
 # NWS forecast icon code (from the last path segment of the "icon" URL,
 # e.g. https://api.weather.gov/icons/land/day/tsra,40 -> "tsra") -> (glyph, color)
@@ -308,6 +321,61 @@ def attach_metamesh_temps(columns, temp_series):
         col["low"] = c_to_f(low_c) if low_c is not None else None
 
 
+def ensemble_member_daily_totals(hourly, variable, date):
+    """Each ensemble member's total for `variable` (precipitation or
+    snowfall) summed over one local calendar date's hourly values. Open-Meteo's
+    ensemble times are plain local strings (no offset) since the fetch
+    requests a fixed timezone, so a date-prefix string match is enough --
+    no timezone parsing needed."""
+    day_prefix = date.isoformat()
+    idxs = [i for i, t in enumerate(hourly["time"]) if t.startswith(day_prefix)]
+    member_keys = sorted(k for k in hourly if k.startswith(variable + "_member"))
+    return [sum(hourly[key][i] for i in idxs) for key in member_keys]
+
+
+def round_rain_inches(inches):
+    if inches < 0.3:
+        return round(round(inches / 0.1) * 0.1, 1)
+    return round(round(inches / 0.25) * 0.25, 2)
+
+
+def round_snow_inches(inches):
+    return round(round(inches / 0.5) * 0.5, 1)
+
+
+def precip_summary(ecmwf_data, date):
+    """None if the day's chance of precip (fraction of ensemble members
+    whose daily total exceeds POP_THRESHOLD_MM) is below
+    POP_DISPLAY_THRESHOLD. Otherwise a dict: pop (0-1), is_snow (day
+    classified as snow if at least half the members show measurable
+    snowfall), and rounded p25_in/p75_in for whichever of rain/snow
+    applies."""
+    hourly = ecmwf_data["hourly"]
+    precip_mm = ensemble_member_daily_totals(hourly, "precipitation", date)
+    snow_cm = ensemble_member_daily_totals(hourly, "snowfall", date)
+
+    pop = sum(1 for v in precip_mm if v > POP_THRESHOLD_MM) / len(precip_mm)
+    if pop < POP_DISPLAY_THRESHOLD:
+        return None
+
+    is_snow = statistics.median(snow_cm) > 0
+    if is_snow:
+        totals_in = [v / CM_PER_INCH for v in snow_cm]
+        round_inches = round_snow_inches
+    else:
+        totals_in = [v / MM_PER_INCH for v in precip_mm]
+        round_inches = round_rain_inches
+
+    p25_in = round_inches(float(np.percentile(totals_in, 25)))
+    p75_in = round_inches(float(np.percentile(totals_in, 75)))
+    return {"pop": pop, "is_snow": is_snow, "p25_in": p25_in, "p75_in": p75_in}
+
+
+def attach_precip(columns, ecmwf_data):
+    for col in columns:
+        col["precip"] = precip_summary(ecmwf_data, col["date"].date())
+
+
 def parse_args():
     ap = argparse.ArgumentParser(description="Render the Tri-Cities TV-style 7-day forecast graphic.")
     ap.add_argument("--forecast", default="forecast.json",
@@ -317,6 +385,9 @@ def parse_args():
     ap.add_argument("--openmeteo-forecast", default="openmeteo_forecast.json",
                      help="Open-Meteo daily weathercode forecast, from fetch_openmeteo_forecast.py -- only "
                           "read when the window shift (see main()) needs a 7th day beyond NWS's coverage")
+    ap.add_argument("--ecmwf-ensemble-forecast", default="ecmwf_ensemble_forecast.json",
+                     help="Open-Meteo ECMWF ensemble forecast (chance-of-precip source), "
+                          "from fetch_ecmwf_ensemble_forecast.py")
     ap.add_argument("--output", default="tri_cities_7day_forecast.png")
     return ap.parse_args()
 
@@ -351,6 +422,9 @@ def main():
 
     temp_series = metamesh_temp_series(json.load(open(args.metamesh_forecast)))
     attach_metamesh_temps(columns, temp_series)
+
+    ecmwf_data = json.load(open(args.ecmwf_ensemble_forecast))
+    attach_precip(columns, ecmwf_data)
 
     if suppress_today_low and columns:
         columns[0]["low"] = None
@@ -394,6 +468,19 @@ def main():
         # its own -- stroking each glyph in its own fill color fattens the
         # outline so it reads as bold instead of drawing it twice.
         icon_text.set_path_effects([pe.withStroke(linewidth=1.8, foreground=col["glyph_color"])])
+
+        precip = col.get("precip")
+        if precip:
+            precip_glyph = chr(GLYPHS["SNOWFLAKEday" if precip["is_snow"] else "RAINDROPday"])
+            precip_color = COLOR_SNOW if precip["is_snow"] else COLOR_RAIN
+            ax.text(cx - 0.026, 0.36, precip_glyph, ha="center", va="center",
+                     fontproperties=ICON_FONT, fontsize=15, color=precip_color, zorder=3)
+            ax.text(cx + 0.018, 0.36, f"{precip['pop'] * 100:.0f}%", ha="left", va="center",
+                     fontproperties=f_med, fontsize=11.5, color=precip_color, zorder=3)
+            p25_in, p75_in = precip["p25_in"], precip["p75_in"]
+            amount_text = (f'{p75_in:g}"' if p25_in == p75_in else f'{p25_in:g}"–{p75_in:g}"')
+            ax.text(cx, 0.305, amount_text, ha="center", va="center",
+                     fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
         high_text = f"{col['high']}°" if col["high"] is not None else "—"
         ax.text(cx, CARD_BOTTOM + 0.085, high_text, ha="center", va="bottom",
