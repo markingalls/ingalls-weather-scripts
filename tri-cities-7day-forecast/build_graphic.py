@@ -490,7 +490,9 @@ def main():
             ax.text(cx - 0.005, PRECIP_CHANCE_Y, f"{pop_pct:.0f}%", ha="left", va="center",
                      fontproperties=f_med, fontsize=11.5, color=precip_color, zorder=3)
             p25_in, p75_in = precip["p25_in"], precip["p75_in"]
-            amount_text = (f'{p75_in:g}"' if p25_in == p75_in else f'{p25_in:g}"–{p75_in:g}"')
+            amount_fmt = "{:.1f}" if precip["is_snow"] else "{:.2f}"
+            amount_text = (f'{amount_fmt.format(p75_in)}"' if p25_in == p75_in
+                           else f'{amount_fmt.format(p25_in)}"–{amount_fmt.format(p75_in)}"')
             ax.text(cx, PRECIP_RANGE_Y, amount_text, ha="center", va="center",
                      fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
