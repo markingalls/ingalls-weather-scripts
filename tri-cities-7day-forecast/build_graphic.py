@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import statistics
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
@@ -12,6 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
+import matplotlib.transforms as mtransforms
 from matplotlib.patches import FancyBboxPatch
 
 # ---------- fonts ----------
@@ -358,6 +360,104 @@ def attach_metamesh_temps(columns, temp_series):
         col["low"] = c_to_f(low_c) if low_c is not None else None
 
 
+
+# ---------- wind indicator (NWS gridpoints windSpeed/windGust/windDirection) ----------
+# The human-readable periods forecast has a windSpeed range per period but no
+# windGust field at all, so this is sourced from the raw gridpoints feed
+# instead (see fetch_forecast.py), which carries proper time-series data for
+# all three. Only shown when the day's conditions are notable enough to call
+# out on a TV-style graphic.
+WIND_SPEED_DISPLAY_THRESHOLD = 15  # mph -- show the section if sustained wind exceeds this
+WIND_GUST_DISPLAY_THRESHOLD = 20   # mph -- ...and/or gusts exceed this
+
+COMPASS_8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+_DURATION_RE = re.compile(r"^P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?)?$")
+
+
+def parse_iso8601_duration(duration_str):
+    m = _DURATION_RE.match(duration_str)
+    days = int(m.group("days") or 0)
+    hours = int(m.group("hours") or 0)
+    minutes = int(m.group("minutes") or 0)
+    return timedelta(days=days, hours=hours, minutes=minutes)
+
+
+def parse_valid_time(valid_time_str):
+    """NWS gridpoints data's 'start/duration' format (e.g.
+    '2026-07-28T12:00:00+00:00/PT4H') -> (start, end) tz-aware datetimes."""
+    start_str, duration_str = valid_time_str.split("/")
+    start = datetime.fromisoformat(start_str)
+    return start, start + parse_iso8601_duration(duration_str)
+
+
+def grid_interval_series(values):
+    """(start, end, value) tuples from a NWS gridpoints value list, sorted
+    chronologically. Skips null entries (e.g. windGust is omitted for calm
+    stretches rather than given as 0)."""
+    series = []
+    for entry in values:
+        if entry["value"] is None:
+            continue
+        start, end = parse_valid_time(entry["validTime"])
+        series.append((start, end, entry["value"]))
+    series.sort(key=lambda item: item[0])
+    return series
+
+
+def reduce_grid_window(series, start, end, fn):
+    """fn (max/min) over every interval overlapping [start, end). None if
+    the window and the fetched series don't overlap at all."""
+    if start is None or end is None:
+        return None
+    values = [v for s, e, v in series if s < end and e > start]
+    return fn(values) if values else None
+
+
+def compass_letters(degrees):
+    return COMPASS_8[round(degrees / 45) % 8]
+
+
+def dominant_wind_direction(direction_series, start, end):
+    """The compass direction that covers the most hours of [start, end),
+    rather than a single sample -- wind direction typically shifts over a
+    day, and this picks the one that best characterizes it."""
+    if start is None or end is None:
+        return None
+    weights = {}
+    for s, e, deg in direction_series:
+        overlap_start, overlap_end = max(s, start), min(e, end)
+        if overlap_start >= overlap_end:
+            continue
+        hours = (overlap_end - overlap_start).total_seconds() / 3600
+        letter = compass_letters(deg)
+        weights[letter] = weights.get(letter, 0) + hours
+    return max(weights, key=weights.get) if weights else None
+
+
+def attach_wind(columns, wind_data):
+    speed_series = grid_interval_series(wind_data["speed"])
+    gust_series = grid_interval_series(wind_data["gust"])
+    direction_series = grid_interval_series(wind_data["direction"])
+
+    for col in columns:
+        start, end = col["day_start"], col["night_end"]
+        speed_lo = reduce_grid_window(speed_series, start, end, min)
+        speed_hi = reduce_grid_window(speed_series, start, end, max)
+        gust_hi = reduce_grid_window(gust_series, start, end, max)
+
+        col["wind"] = None
+        speed_flagged = speed_hi is not None and speed_hi > WIND_SPEED_DISPLAY_THRESHOLD
+        gust_flagged = gust_hi is not None and gust_hi > WIND_GUST_DISPLAY_THRESHOLD
+        if speed_flagged or gust_flagged:
+            col["wind"] = {
+                "dir": dominant_wind_direction(direction_series, start, end),
+                "lo": round(speed_lo) if speed_lo is not None else None,
+                "hi": round(speed_hi) if speed_hi is not None else None,
+                "gust": round(gust_hi) if gust_hi is not None else None,
+            }
+
+
 def ensemble_member_daily_totals(hourly, variable, date, start_hour=0):
     """Each ensemble member's total for `variable` (precipitation or
     snowfall) summed over one local calendar date's hourly values from
@@ -454,6 +554,27 @@ def precip_summary(ecmwf_data, date):
     }
 
 
+def add_centered_icon_text(ax, renderer, cx, y, icon_char, icon_size,
+                            text_str, text_font, text_size, color, gap):
+    """An icon glyph immediately left of a text string, the pair centered as
+    a group on cx. Needed because (unlike the fixed 'xx%' precip-chance
+    line) the wind line's text length varies a lot ('N 8 mph' vs
+    'SW 10-25 mph'), so a hardcoded offset can't center it -- this measures
+    the actual rendered widths instead and shifts both into place."""
+    icon_artist = ax.text(cx, y, icon_char, ha="right", va="center",
+                           fontproperties=ICON_FONT, fontsize=icon_size, color=color, zorder=3)
+    text_artist = ax.text(cx + gap, y, text_str, ha="left", va="center",
+                           fontproperties=text_font, fontsize=text_size, color=color, zorder=3)
+
+    combined = mtransforms.Bbox.union([
+        icon_artist.get_window_extent(renderer=renderer),
+        text_artist.get_window_extent(renderer=renderer),
+    ]).transformed(ax.transData.inverted())
+    shift = cx - (combined.x0 + combined.x1) / 2
+    icon_artist.set_x(cx + shift)
+    text_artist.set_x(cx + gap + shift)
+
+
 def attach_precip(columns, ecmwf_data):
     for col in columns:
         precip = precip_summary(ecmwf_data, col["date"].date())
@@ -522,6 +643,8 @@ def main():
     ecmwf_data = json.load(open(args.ecmwf_ensemble_forecast))
     attach_precip(columns, ecmwf_data)
 
+    attach_wind(columns, data.get("wind", {"speed": [], "gust": [], "direction": []}))
+
     if suppress_today_low and columns:
         columns[0]["low"] = None
 
@@ -531,6 +654,10 @@ def main():
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
+    # a renderer is needed up front for add_centered_icon_text()'s width
+    # measurements below -- an empty draw() is enough to create one.
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
 
     LEFT, RIGHT = 0.055, 0.965
     CARD_TOP, CARD_BOTTOM = 0.775, 0.135
@@ -539,13 +666,15 @@ def main():
     card_w = (RIGHT - LEFT - (n - 1) * GUTTER) / n
 
     # Vertical zones within each card, top to bottom: day-of-week, date,
-    # condition icon, precip chance, precip range, [wind speed, wind gust --
-    # reserved gap below for once that data source exists], high, low.
+    # condition icon, precip chance, precip range, wind speed, wind gust,
+    # high, low.
     DAY_Y = CARD_TOP - 0.045
     DATE_Y = CARD_TOP - 0.086
     ICON_Y = 0.565
     PRECIP_CHANCE_Y = 0.45
     PRECIP_RANGE_Y = 0.425
+    WIND_SPEED_Y = 0.35
+    WIND_GUST_Y = 0.285
     HIGH_Y = CARD_BOTTOM + 0.085
     LOW_Y = CARD_BOTTOM + 0.03
 
@@ -624,7 +753,23 @@ def main():
             ax.text(cx, PRECIP_RANGE_Y, amount_text, ha="center", va="center",
                      fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
-        # (wind speed / wind gust rows go here once that data source exists)
+        wind = col.get("wind")
+        if wind:
+            speed_lo, speed_hi = wind["lo"], wind["hi"]
+            if speed_lo is None or speed_hi is None:
+                speed_text = "—"
+            elif speed_lo == speed_hi:
+                speed_text = f"{speed_hi} mph"
+            else:
+                speed_text = f"{speed_lo}-{speed_hi} mph"
+            wind_text = f"{wind['dir']} {speed_text}" if wind["dir"] else speed_text
+            add_centered_icon_text(ax, renderer, cx, WIND_SPEED_Y,
+                                    chr(GLYPHS["WINDYday"]), 13,
+                                    wind_text, f_med, 10.5, COLOR_WIND, gap=0.014)
+
+            if wind["gust"] is not None:
+                ax.text(cx, WIND_GUST_Y, f"Gusts: {wind['gust']} mph", ha="center", va="center",
+                         fontproperties=f_reg, fontsize=9.5, color=INK_SECONDARY, zorder=3)
 
         high_text = f"{col['high']}°" if col["high"] is not None else "—"
         ax.text(cx, HIGH_Y, high_text, ha="center", va="bottom",

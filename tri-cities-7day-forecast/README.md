@@ -2,9 +2,10 @@
 
 Generates a TV-style 7-day forecast strip for the Tri-Cities (Pasco,
 Kennewick, Richland, WA) for Ingalls Weather's Instagram: one card per day
-with day-of-week, date, a daytime-condition icon, and the high/low
-temperatures. Same canvas footprint and fonts as the other Ingalls Weather
-graphics (`columbia-basin-alerts-map/`, `850-700-temp-chart/`).
+with day-of-week, date, a daytime-condition icon, chance-of-precip indicator,
+notable wind, and the high/low temperatures. Same canvas footprint and fonts
+as the other Ingalls Weather graphics (`columbia-basin-alerts-map/`,
+`850-700-temp-chart/`).
 
 Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA), but works anywhere NWS
 covers — pass different `--lat`/`--lon` (and a MetaMesh `--station`) to the
@@ -18,7 +19,9 @@ wherever it's pointed.
 
 - `fetch_forecast.py` — pulls the current NWS 7-day forecast (day/night
   periods, condition icon codes, and the point's IANA timezone) for a point
-  from api.weather.gov and writes `forecast.json`. No API key needed.
+  from api.weather.gov and writes `forecast.json`. Also pulls
+  windSpeed/windGust/windDirection from the same point's `forecastGridData`
+  (the wind indicator's source — see below). No API key needed.
 - `fetch_metamesh_forecast.py` — pulls the MetaMesh point temperature
   forecast for a station from WindBorne and writes `metamesh_forecast.json`.
   Requires `WB_API_KEY` in the environment (get one at
@@ -228,6 +231,39 @@ python3 build_graphic.py
     produced two overlapping suns before this was scoped down). Also
     excludes persistent/guaranteed precip (`rain`, `tsra`, `bkn`/`ovc` etc.)
     where there's no real sun to show.
+- **Wind indicator**: a wind icon + compass direction + sustained speed
+  range on one line, and gusts on the line below, shown only when a day's
+  wind is notable enough to call out — sustained speed over 15mph
+  (`WIND_SPEED_DISPLAY_THRESHOLD`) and/or gusts over 20mph
+  (`WIND_GUST_DISPLAY_THRESHOLD`), per `attach_wind()` in `build_graphic.py`.
+  - Sourced from NWS's raw gridpoints feed (`forecastGridData`), not the
+    human-readable periods forecast — the periods' `windSpeed` field is only
+    a plain-text range with no gust figure at all, while the gridpoints feed
+    carries proper windSpeed/windGust/windDirection time series.
+    `fetch_forecast.py` pulls only those three properties (the full grid
+    response is ~50x bigger and covers dozens of fields this project has no
+    use for) and converts km/h to mph at fetch time.
+  - Each value is reduced over the same day+night window as a card's
+    high/low (`col["day_start"]` through `col["night_end"]`, i.e. this day's
+    6am-6pm plus the night immediately following) via `reduce_grid_window()`:
+    minimum and maximum sustained speed for the range, maximum for the gust.
+    The gridpoints feed's values come as `start/duration` intervals
+    (`parse_valid_time()`/`parse_iso8601_duration()` parse NWS's ISO8601
+    format), not point samples, so the reduction is over every interval that
+    overlaps the window rather than an exact-match lookup.
+  - **Direction** is whichever compass point (`N`/`NE`/`E`/`SE`/`S`/`SW`/`W`/`NW`
+    — 8-point, not 16-point, since a single/double-letter label was wanted)
+    covers the most hours of the window (`dominant_wind_direction()`),
+    rather than a single sample, since direction can shift over a day.
+  - The wind line's text length varies a lot more than the precip-chance
+    line's fixed `"xx%"` (`"N 8 mph"` vs `"SW 10-25 mph"`), so centering it
+    can't use a hardcoded offset the way the precip line does —
+    `add_centered_icon_text()` measures the icon+text pair's actual rendered
+    width (`Text.get_window_extent()` against a renderer obtained from one
+    upfront `fig.canvas.draw()`) and shifts both into place as a group.
+  - Blank (no wind row at all) when neither threshold is crossed, same as
+    the precip indicator being blank below 20% — the reserved vertical zone
+    just stays empty rather than the layout shifting to fill it.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_graphic.py`
   directly to adjust.
