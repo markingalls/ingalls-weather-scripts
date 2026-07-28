@@ -559,9 +559,21 @@ def main():
         # render as a plain storm cloud, no sun) and the precip itself is
         # either a low-confidence chance or confined to part of the day --
         # i.e. "still mostly a sunny day," not "count on getting rained on."
-        if precip and col.get("sun_relevant") and (is_low_chance or is_partial_day):
-            ax.text(cx, ICON_Y, chr(GLYPHS["CLEARday"]), ha="center", va="center",
-                     fontproperties=ICON_FONT, fontsize=60, color=COLOR_SUN, zorder=2.6)
+        show_sun_backing = precip and col.get("sun_relevant") and (is_low_chance or is_partial_day)
+        if show_sun_backing:
+            sun_text = ax.text(cx - 0.016, ICON_Y + 0.016, chr(GLYPHS["CLEARday"]), ha="center", va="center",
+                                fontproperties=ICON_FONT, fontsize=60, color=COLOR_SUN, zorder=2.6)
+            sun_text.set_path_effects([pe.withStroke(linewidth=2.2, foreground=COLOR_SUN)])
+
+            # White halo cut into the sun in the shape of the foreground
+            # icon, so the icon's own colored line art doesn't have to fight
+            # the sun's color/rays right up against it -- drawn between the
+            # sun (behind) and the real icon (in front), same shape and
+            # size as the real icon but white fill + white outline, wider
+            # than the icon's own bold stroke so the halo actually shows.
+            halo_text = ax.text(cx, ICON_Y, col["glyph"], ha="center", va="center",
+                                 fontproperties=ICON_FONT, fontsize=46, color="white", zorder=2.8)
+            halo_text.set_path_effects([pe.withStroke(linewidth=4, foreground="white")])
 
         icon_text = ax.text(cx, ICON_Y, col["glyph"], ha="center", va="center",
                              fontproperties=ICON_FONT, fontsize=46, color=col["glyph_color"], zorder=3)
