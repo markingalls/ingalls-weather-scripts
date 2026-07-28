@@ -572,7 +572,7 @@ def main():
             # shows through; a solid disc blocks it cleanly instead. Marker
             # size is in points (not data units), so it stays circular
             # regardless of the axes' non-square aspect ratio.
-            ax.plot([cx], [ICON_Y], marker="o", markersize=50, markerfacecolor="white",
+            ax.plot([cx], [ICON_Y], marker="o", markersize=34, markerfacecolor="white",
                      markeredgewidth=0, zorder=2.8)
 
         icon_text = ax.text(cx, ICON_Y, col["glyph"], ha="center", va="center",
