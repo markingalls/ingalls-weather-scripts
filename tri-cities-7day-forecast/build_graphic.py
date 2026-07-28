@@ -442,6 +442,17 @@ def main():
     n = len(columns)
     card_w = (RIGHT - LEFT - (n - 1) * GUTTER) / n
 
+    # Vertical zones within each card, top to bottom: day-of-week, date,
+    # condition icon, precip chance, precip range, [wind speed, wind gust --
+    # reserved gap below for once that data source exists], high, low.
+    DAY_Y = CARD_TOP - 0.045
+    DATE_Y = CARD_TOP - 0.086
+    ICON_Y = 0.565
+    PRECIP_CHANCE_Y = 0.395
+    PRECIP_RANGE_Y = 0.345
+    HIGH_Y = CARD_BOTTOM + 0.085
+    LOW_Y = CARD_BOTTOM + 0.03
+
     for idx, col in enumerate(columns):
         x0 = LEFT + idx * (card_w + GUTTER)
         x1 = x0 + card_w
@@ -456,13 +467,13 @@ def main():
         ax.add_patch(card)
 
         day_label = col["date"].strftime("%a").upper()
-        ax.text(cx, CARD_TOP - 0.05, day_label, ha="center", va="top",
+        ax.text(cx, DAY_Y, day_label, ha="center", va="top",
                  fontproperties=f_bold, fontsize=17,
                  color=HIGHLIGHT_EDGE if is_highlighted else INK, zorder=3)
-        ax.text(cx, CARD_TOP - 0.093, col["date"].strftime("%b %-d"), ha="center", va="top",
+        ax.text(cx, DATE_Y, col["date"].strftime("%b %-d"), ha="center", va="top",
                  fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
-        icon_text = ax.text(cx, (CARD_TOP + CARD_BOTTOM) / 2 + 0.045, col["glyph"], ha="center", va="center",
+        icon_text = ax.text(cx, ICON_Y, col["glyph"], ha="center", va="center",
                              fontproperties=ICON_FONT, fontsize=46, color=col["glyph_color"], zorder=3)
         # the icon font is a thin-stroke outline face with no bold weight of
         # its own -- stroking each glyph in its own fill color fattens the
@@ -473,20 +484,22 @@ def main():
         if precip:
             precip_glyph = chr(GLYPHS["SNOWFLAKEday" if precip["is_snow"] else "RAINDROPday"])
             precip_color = COLOR_SNOW if precip["is_snow"] else COLOR_RAIN
-            ax.text(cx - 0.026, 0.36, precip_glyph, ha="center", va="center",
+            ax.text(cx - 0.026, PRECIP_CHANCE_Y, precip_glyph, ha="center", va="center",
                      fontproperties=ICON_FONT, fontsize=15, color=precip_color, zorder=3)
-            ax.text(cx + 0.018, 0.36, f"{precip['pop'] * 100:.0f}%", ha="left", va="center",
+            ax.text(cx + 0.018, PRECIP_CHANCE_Y, f"{precip['pop'] * 100:.0f}%", ha="left", va="center",
                      fontproperties=f_med, fontsize=11.5, color=precip_color, zorder=3)
             p25_in, p75_in = precip["p25_in"], precip["p75_in"]
             amount_text = (f'{p75_in:g}"' if p25_in == p75_in else f'{p25_in:g}"–{p75_in:g}"')
-            ax.text(cx, 0.305, amount_text, ha="center", va="center",
+            ax.text(cx, PRECIP_RANGE_Y, amount_text, ha="center", va="center",
                      fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
+        # (wind speed / wind gust rows go here once that data source exists)
+
         high_text = f"{col['high']}°" if col["high"] is not None else "—"
-        ax.text(cx, CARD_BOTTOM + 0.085, high_text, ha="center", va="bottom",
+        ax.text(cx, HIGH_Y, high_text, ha="center", va="bottom",
                  fontproperties=f_bold, fontsize=20, color=INK, zorder=3)
         low_text = f"{col['low']}°" if col["low"] is not None else "—"
-        ax.text(cx, CARD_BOTTOM + 0.03, low_text, ha="center", va="bottom",
+        ax.text(cx, LOW_Y, low_text, ha="center", va="bottom",
                  fontproperties=f_med, fontsize=15, color=INK_SECONDARY, zorder=3)
 
     # ---------- logo (top-left, sized to the title block) + title / subtitle ----------
