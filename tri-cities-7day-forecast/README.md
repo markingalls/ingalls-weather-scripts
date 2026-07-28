@@ -231,9 +231,10 @@ python3 build_graphic.py
     produced two overlapping suns before this was scoped down). Also
     excludes persistent/guaranteed precip (`rain`, `tsra`, `bkn`/`ovc` etc.)
     where there's no real sun to show.
-- **Wind indicator**: a wind icon + compass direction + sustained speed
-  range on one line, and gusts on the line below, shown only when a day's
-  wind is notable enough to call out — sustained speed over 15mph
+- **Wind indicator**: compass direction + sustained speed range on one line,
+  gusts on the line below (same tight vertical spacing as the
+  chance-of-precip line and its rainfall/snowfall total), shown only when a
+  day's wind is notable enough to call out — sustained speed over 15mph
   (`WIND_SPEED_DISPLAY_THRESHOLD`) and/or gusts over 20mph
   (`WIND_GUST_DISPLAY_THRESHOLD`), per `attach_wind()` in `build_graphic.py`.
   - Sourced from NWS's raw gridpoints feed (`forecastGridData`), not the
@@ -255,12 +256,6 @@ python3 build_graphic.py
     — 8-point, not 16-point, since a single/double-letter label was wanted)
     covers the most hours of the window (`dominant_wind_direction()`),
     rather than a single sample, since direction can shift over a day.
-  - The wind line's text length varies a lot more than the precip-chance
-    line's fixed `"xx%"` (`"N 8 mph"` vs `"SW 10-25 mph"`), so centering it
-    can't use a hardcoded offset the way the precip line does —
-    `add_centered_icon_text()` measures the icon+text pair's actual rendered
-    width (`Text.get_window_extent()` against a renderer obtained from one
-    upfront `fig.canvas.draw()`) and shifts both into place as a group.
   - Blank (no wind row at all) when neither threshold is crossed, same as
     the precip indicator being blank below 20% — the reserved vertical zone
     just stays empty rather than the layout shifting to fill it.

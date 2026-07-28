@@ -13,7 +13,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-import matplotlib.transforms as mtransforms
 from matplotlib.patches import FancyBboxPatch
 
 # ---------- fonts ----------
@@ -554,27 +553,6 @@ def precip_summary(ecmwf_data, date):
     }
 
 
-def add_centered_icon_text(ax, renderer, cx, y, icon_char, icon_size,
-                            text_str, text_font, text_size, color, gap):
-    """An icon glyph immediately left of a text string, the pair centered as
-    a group on cx. Needed because (unlike the fixed 'xx%' precip-chance
-    line) the wind line's text length varies a lot ('N 8 mph' vs
-    'SW 10-25 mph'), so a hardcoded offset can't center it -- this measures
-    the actual rendered widths instead and shifts both into place."""
-    icon_artist = ax.text(cx, y, icon_char, ha="right", va="center",
-                           fontproperties=ICON_FONT, fontsize=icon_size, color=color, zorder=3)
-    text_artist = ax.text(cx + gap, y, text_str, ha="left", va="center",
-                           fontproperties=text_font, fontsize=text_size, color=color, zorder=3)
-
-    combined = mtransforms.Bbox.union([
-        icon_artist.get_window_extent(renderer=renderer),
-        text_artist.get_window_extent(renderer=renderer),
-    ]).transformed(ax.transData.inverted())
-    shift = cx - (combined.x0 + combined.x1) / 2
-    icon_artist.set_x(cx + shift)
-    text_artist.set_x(cx + gap + shift)
-
-
 def attach_precip(columns, ecmwf_data):
     for col in columns:
         precip = precip_summary(ecmwf_data, col["date"].date())
@@ -654,10 +632,6 @@ def main():
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
-    # a renderer is needed up front for add_centered_icon_text()'s width
-    # measurements below -- an empty draw() is enough to create one.
-    fig.canvas.draw()
-    renderer = fig.canvas.get_renderer()
 
     LEFT, RIGHT = 0.055, 0.965
     CARD_TOP, CARD_BOTTOM = 0.775, 0.135
@@ -674,7 +648,7 @@ def main():
     PRECIP_CHANCE_Y = 0.45
     PRECIP_RANGE_Y = 0.425
     WIND_SPEED_Y = 0.35
-    WIND_GUST_Y = 0.285
+    WIND_GUST_Y = 0.325
     HIGH_Y = CARD_BOTTOM + 0.085
     LOW_Y = CARD_BOTTOM + 0.03
 
@@ -763,9 +737,8 @@ def main():
             else:
                 speed_text = f"{speed_lo}-{speed_hi} mph"
             wind_text = f"{wind['dir']} {speed_text}" if wind["dir"] else speed_text
-            add_centered_icon_text(ax, renderer, cx, WIND_SPEED_Y,
-                                    chr(GLYPHS["WINDYday"]), 13,
-                                    wind_text, f_med, 10.5, COLOR_WIND, gap=0.014)
+            ax.text(cx, WIND_SPEED_Y, wind_text, ha="center", va="center",
+                     fontproperties=f_med, fontsize=10.5, color=COLOR_WIND, zorder=3)
 
             if wind["gust"] is not None:
                 ax.text(cx, WIND_GUST_Y, f"Gusts: {wind['gust']} mph", ha="center", va="center",
