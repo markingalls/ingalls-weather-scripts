@@ -434,6 +434,10 @@ def dominant_wind_direction(direction_series, start, end):
     return max(weights, key=weights.get) if weights else None
 
 
+def round_to_5_mph(mph):
+    return round(mph / 5) * 5
+
+
 def attach_wind(columns, wind_data):
     speed_series = grid_interval_series(wind_data["speed"])
     gust_series = grid_interval_series(wind_data["gust"])
@@ -451,9 +455,9 @@ def attach_wind(columns, wind_data):
         if speed_flagged or gust_flagged:
             col["wind"] = {
                 "dir": dominant_wind_direction(direction_series, start, end),
-                "lo": round(speed_lo) if speed_lo is not None else None,
-                "hi": round(speed_hi) if speed_hi is not None else None,
-                "gust": round(gust_hi) if gust_hi is not None else None,
+                "lo": round_to_5_mph(speed_lo) if speed_lo is not None else None,
+                "hi": round_to_5_mph(speed_hi) if speed_hi is not None else None,
+                "gust": round_to_5_mph(gust_hi) if gust_hi is not None else None,
             }
 
 

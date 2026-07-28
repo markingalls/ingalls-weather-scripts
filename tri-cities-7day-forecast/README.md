@@ -251,7 +251,9 @@ python3 build_graphic.py
     The gridpoints feed's values come as `start/duration` intervals
     (`parse_valid_time()`/`parse_iso8601_duration()` parse NWS's ISO8601
     format), not point samples, so the reduction is over every interval that
-    overlaps the window rather than an exact-match lookup.
+    overlaps the window rather than an exact-match lookup. All three are
+    rounded to the nearest 5mph (`round_to_5_mph()`) for display — precision
+    NWS's own gridded wind data doesn't really support anyway.
   - **Direction** is whichever compass point (`N`/`NE`/`E`/`SE`/`S`/`SW`/`W`/`NW`
     — 8-point, not 16-point, since a single/double-letter label was wanted)
     covers the most hours of the window (`dominant_wind_direction()`),
