@@ -162,13 +162,16 @@ def icon_code_from_url(url):
     return first_condition.split(",")[0]
 
 
-# NWS codes (and WMO codes below) for conditions that are fundamentally
-# "chance of/isolated/scattered X" rather than persistent, guaranteed sky
-# cover -- used to decide whether stacking a sun glyph behind the main
-# condition icon makes sense (see the sun-backing logic in main()'s render
-# loop). Excludes bkn/ovc/rain/tsra (persistent -- no real sun to show) even
-# though they're daytime icons too.
-SUN_RELEVANT_NWS_CODES = {"skc", "few", "sct", "tsra_hi", "tsra_sct", "rain_showers_hi"}
+# NWS codes (and WMO codes below) for precip icons with no native sun in
+# their own glyph art -- used to decide whether stacking a sun glyph behind
+# the main condition icon makes sense (see the sun-backing logic in main()'s
+# render loop). skc/few/sct are deliberately excluded even though they're
+# "chance of sun" conditions: CLEARday/FAIRday/PCLOUDYday already draw their
+# own sun, so stacking another one behind them just doubles up (confirmed
+# visually -- a skc day with a low/partial precip chance produced two
+# overlapping suns). Also excludes persistent/guaranteed precip (rain, tsra)
+# -- only the isolated/scattered "chance of" storm variants qualify.
+SUN_RELEVANT_NWS_CODES = {"tsra_hi", "tsra_sct", "rain_showers_hi"}
 
 
 def glyph_for(icon_url):
@@ -213,7 +216,10 @@ WMO_ICON_MAP = {
 }
 
 
-SUN_RELEVANT_WMO_CODES = {0, 1, 2}  # clear, mainly clear, partly cloudy
+# Same reasoning as SUN_RELEVANT_NWS_CODES: only thunderstorm codes (no
+# native sun in THUNDERSTORMSday/SEVERE_THUNDERSTORMSday) qualify, not
+# clear/mainly-clear/partly-cloudy (0/1/2), which already draw their own sun.
+SUN_RELEVANT_WMO_CODES = {95, 96, 99}
 
 
 def glyph_for_wmo(weathercode):

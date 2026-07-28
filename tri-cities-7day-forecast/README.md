@@ -204,16 +204,21 @@ python3 build_graphic.py
     "AM" label at the bottom-right of the main condition icon, ≥75% at/after
     noon gets "PM", and anything more evenly split (spans midday, or runs
     through most of the day) gets no label.
-  - **Sun behind the main icon**: when a day's condition is fundamentally
-    "chance of/isolated/scattered X" (`SUN_RELEVANT_NWS_CODES`:
-    `tsra_hi`/`tsra_sct`/`rain_showers_hi`, plus the already-sunny
-    `skc`/`few`/`sct`) and the precip is either a low-confidence chance
-    (`pop < LOW_POP_THRESHOLD`, 50%) or confined to part of the day (has an
-    AM/PM label), a larger `CLEARday` sun glyph is drawn behind the main
-    icon (lower `zorder`) so a day coded as, say, isolated thunderstorms
-    still reads as "mostly sunny" rather than "guaranteed storm." Excludes
-    persistent/guaranteed conditions (`bkn`/`ovc`/`rain`/`tsra` etc.) where
-    there's no real sun to show.
+  - **Sun behind the main icon**: when a day's condition is an
+    isolated/scattered storm (`SUN_RELEVANT_NWS_CODES`:
+    `tsra_hi`/`tsra_sct`/`rain_showers_hi`) and the precip is either a
+    low-confidence chance (`pop < LOW_POP_THRESHOLD`, 50%) or confined to
+    part of the day (has an AM/PM label), a `CLEARday` sun glyph is drawn
+    behind the main icon (lower `zorder`, offset up-left, white disc masking
+    it where it overlaps the icon) so a day coded as, say, isolated
+    thunderstorms still reads as "mostly sunny" rather than "guaranteed
+    storm." Deliberately excludes `skc`/`few`/`sct` even though those are
+    "chance of sun" conditions too: `CLEARday`/`FAIRday`/`PCLOUDYday` already
+    draw their own sun, so stacking another one behind them just doubles up
+    (confirmed visually — a `skc` day with a low/partial precip chance
+    produced two overlapping suns before this was scoped down). Also
+    excludes persistent/guaranteed precip (`rain`, `tsra`, `bkn`/`ovc` etc.)
+    where there's no real sun to show.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `columbia-basin-alerts-map/build_map.py` — edit `build_graphic.py`
   directly to adjust.
