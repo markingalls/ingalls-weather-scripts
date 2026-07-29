@@ -32,14 +32,20 @@ KG_PER_M2_TO_MG_PER_M2 = 1_000_000
 
 
 def select_hrrr_run():
-    """Most recent synoptic-hour HRRR init (00/06/12/18z UTC) with data
-    available -- only those cycles run out to 48h (others only reach 18h),
-    and this feature needs the full 48h horizon."""
+    """Most recent synoptic-hour HRRR init (00/06/12/18z UTC) with its full
+    48h horizon available -- only those cycles run out that far (others
+    only reach 18h), and this feature needs every hour out to
+    MAX_FORECAST_HOUR. Checks the *last* forecast hour, not just the
+    first: NOAA takes ~2.5-3h after a cycle's init time to finish posting
+    all 48 hourly files, well after the first hour or two are already up,
+    so checking only fxx=1 would pick a run this script can't fully fetch
+    yet -- falling back to the previous (fully-posted) cycle instead."""
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     now -= timedelta(hours=now.hour % 6)
     for lookback_cycles in range(12):
         candidate = now - timedelta(hours=6 * lookback_cycles)
-        if Herbie(candidate.replace(tzinfo=None), model="hrrr", product="sfc", fxx=1, verbose=False).grib is not None:
+        if Herbie(candidate.replace(tzinfo=None), model="hrrr", product="sfc",
+                  fxx=MAX_FORECAST_HOUR, verbose=False).grib is not None:
             return candidate
     sys.exit("Could not find a recent synoptic-hour HRRR run on NOAA's servers.")
 
