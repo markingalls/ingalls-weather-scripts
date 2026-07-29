@@ -2,11 +2,12 @@
 WM-6 Ensemble Mean Total Precipitable Water Map -- one-off builder
 Ingalls Weather
 
-Styled map spanning Hawaii (SW corner) to the northwest corner of
-Saskatchewan (NE corner) -- the North Pacific, US West Coast, Great Basin,
-and Western Canada in one frame:
+Styled map spanning Hawaii (SW) to central Alberta/Saskatchewan (NE) --
+the North Pacific, US West Coast, Great Basin, and Western Canada in one
+frame:
   - Shading: WindBorne WeatherMesh-6 (global, 0.25 deg) ensemble-mean total
-    column water vapour (total precipitable water), for a single valid time.
+    column water vapour (total precipitable water), for a single valid
+    time. Below the color table's 0.5" floor is left unshaded.
 
 USAGE
 -----
@@ -56,6 +57,7 @@ import numpy as np
 import requests
 import zarr
 from remotezip import RemoteZip
+from scipy.interpolate import RegularGridInterpolator
 
 import cartopy.crs as ccrs
 import shapely
@@ -104,12 +106,13 @@ AXES_RECT = [0.03, 0.17, 0.94, 0.70]  # [left, bottom, width, height], figure fr
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
-# Map domain -- Hawaii (SW) to the northwest corner of Saskatchewan (NE,
-# ~60N/110W), each padded so it's clearly visible rather than sitting right
-# at the frame edge.
+# Map domain -- Hawaii (SW) to central Alberta/Saskatchewan (NE). Zoomed in
+# and centered a little southwest of this map's first pass (which ran all
+# the way to Saskatchewan's northwest corner, ~60N/110W); trading a bit of
+# that far-NE coverage for a tighter, more zoomed-in frame overall.
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -164.0, -104.0
-LAT_MIN, LAT_MAX = 14.0, 63.0
+LON_MIN, LON_MAX = -166.0, -112.0
+LAT_MIN, LAT_MAX = 12.5, 56.5
 CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
 
 # Basemap geometries (country/state/border-line datasets) are sourced from
@@ -123,11 +126,18 @@ MAP_CLIP_BOX = box(LON_MIN - 5, LAT_MIN - 5, LON_MAX + 5, LAT_MAX + 5)
 
 # WM-6 is a plain regular 0.25 deg lat/lon grid (unlike wm6-3km/HRRR's
 # curvilinear native grids), so cropping to the map bbox is a direct index
-# slice -- no griddata resampling needed. The pad keeps the raster
-# extending past the visible frame so cartopy's NearsidePerspective warp
-# (a screen-pixel -> source-raster inverse lookup) has real data to sample
-# right up to the curved frame's edge.
+# slice -- no griddata resampling needed to handle a curvilinear source.
+# The pad keeps the raster extending past the visible frame so cartopy's
+# NearsidePerspective warp (a screen-pixel -> source-raster inverse lookup)
+# has real data to sample right up to the curved frame's edge.
 FETCH_PAD_DEG = 1.5
+
+# WM-6's native 0.25 deg spacing (~28 km) is coarser than a single screen
+# pixel once zoomed to this map's domain -- upsampled via linear
+# interpolation (see resample_to_finer_grid()) so the curved
+# NearsidePerspective warp has dense enough source data to fill the frame
+# smoothly instead of showing a blocky/native-pixel-grid look.
+RESAMPLE_FACTOR = 6
 
 # ---------------------------------------------------------------------------
 # Cities -- spread across the domain for geographic reference. (name, lon,
@@ -271,6 +281,17 @@ def fetch_tcwv_mean(valid_time_utc, api_key):
     return lat_crop, lon_crop, tcwv_crop, meta
 
 
+def resample_to_finer_grid(lat, lon, values, factor=RESAMPLE_FACTOR):
+    """Upsample a regular (lat, lon, values) grid by `factor` via linear
+    interpolation -- see RESAMPLE_FACTOR's comment for why."""
+    interp = RegularGridInterpolator((lat, lon), values, method="linear")
+    fine_lat = np.linspace(lat[0], lat[-1], len(lat) * factor)
+    fine_lon = np.linspace(lon[0], lon[-1], len(lon) * factor)
+    fine_lon_grid, fine_lat_grid = np.meshgrid(fine_lon, fine_lat)
+    fine_values = interp((fine_lat_grid, fine_lon_grid))
+    return fine_lat, fine_lon, fine_values
+
+
 # ---------------------------------------------------------------------------
 # Basemap layers
 # ---------------------------------------------------------------------------
@@ -356,6 +377,8 @@ def build_map(date, hour, output_path, override_path=None):
                   lat=lat, lon=lon, tcwv_mm=tcwv_mm, meta=meta)
 
     print(f"TPW range in fetched crop: {tcwv_mm.min():.0f} - {tcwv_mm.max():.0f} mm")
+    print(f"Resampling from {lat.size}x{lon.size} native grid...")
+    lat, lon, tcwv_mm = resample_to_finer_grid(lat, lon, tcwv_mm)
 
     print("Loading basemap layers...")
     country_geoms = load_countries()
@@ -386,16 +409,18 @@ def build_map(date, hour, output_path, override_path=None):
 
     # TPW field -- a fixed mm-to-color enhancement curve (not rescaled to
     # this map's data range), so color reads consistently across every map
-    # this script renders. WM-6 is already a plain regular lat/lon grid
-    # (unlike wm6-3km/HRRR's curvilinear native grids), so no griddata
-    # resampling step is needed before handing it to imshow -- cartopy
-    # still has to warp that regular grid into the curved NearsidePerspective
-    # view internally (a source-raster -> screen-pixel inverse lookup,
-    # which is why cartopy's img_transform needs scipy -- see
-    # requirements.txt).
+    # this script renders. Cartopy warps this regular grid into the curved
+    # NearsidePerspective view internally (a source-raster -> screen-pixel
+    # inverse lookup, which is why cartopy's img_transform needs scipy --
+    # see requirements.txt). Cells below the color table's 0.5" floor are
+    # masked out (rather than clamped to the lightest color) so they're
+    # left unshaded -- transparent, showing the plain basemap -- instead of
+    # reading as a real (if very dry) TPW value.
     tpw_cmap = build_tpw_colormap()
+    tpw_cmap.set_bad(alpha=0)
     tpw_norm = Normalize(vmin=TPW_MM_MIN, vmax=TPW_MM_MAX)
-    ax.imshow(tcwv_mm, transform=pc, cmap=tpw_cmap, norm=tpw_norm, origin="lower",
+    tcwv_masked = np.ma.masked_less(tcwv_mm, TPW_MM_MIN)
+    ax.imshow(tcwv_masked, transform=pc, cmap=tpw_cmap, norm=tpw_norm, origin="lower",
               extent=[lon.min(), lon.max(), lat.min(), lat.max()], zorder=1)
 
     ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
@@ -456,21 +481,21 @@ def build_map(date, hour, output_path, override_path=None):
     for label in cax_mm.get_xticklabels():
         label.set_fontproperties(poppins_reg)
 
-    # Title & subtitle above the map
+    # Title & subtitle above the map -- titled off the actual valid time
+    # (WM-6's 3-hourly steps mean it's not always exactly the requested
+    # hour) rather than the requested one, so there's no need to spell out
+    # the substitution.
     init_dt = datetime.fromisoformat(meta["initialization_time"].replace("Z", "+00:00"))
     valid_dt_utc = datetime.fromisoformat(meta["valid_time"].replace("Z", "+00:00"))
     valid_dt_local = valid_dt_utc.astimezone(LOCAL_TZ)
 
-    h12 = local_dt.hour % 12 or 12
-    ampm = "AM" if local_dt.hour < 12 else "PM"
-    fig.text(0.03, 0.978, f"{local_dt.strftime('%A')} {h12}:00 {ampm} PT Precipitable Water", fontsize=19,
+    h12 = valid_dt_local.hour % 12 or 12
+    ampm = "AM" if valid_dt_local.hour < 12 else "PM"
+    fig.text(0.03, 0.978, f"{valid_dt_local.strftime('%A')} {h12}:00 {ampm} PT Precipitable Water", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
     fig.text(0.03, 0.943, "WindBorne WM-6 Ensemble Mean", fontsize=12.5,
               fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
-    valid_note = ""
-    if abs((valid_dt_local - local_dt).total_seconds()) > 60:
-        valid_note = f" (nearest available step to {h12}:00 {ampm} PT: {valid_dt_local.strftime('%I:%M %p %Z').lstrip('0')})"
-    fig.text(0.03, 0.914, f"Init {init_dt.strftime('%Y-%m-%d %H')}z{valid_note}",
+    fig.text(0.03, 0.914, f"Init {init_dt.strftime('%Y-%m-%d %H')}z",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
     fig.text(0.5, 0.012, "WindBorne WM-6 — Ingalls Weather", fontsize=9,

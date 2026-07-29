@@ -2,14 +2,14 @@
 
 One-off styled map of total precipitable water (TPW, i.e. total column
 water vapour) for a single valid time, from WindBorne's WeatherMesh-6
-global ensemble. Domain runs from Hawaii (SW corner) to the northwest
-corner of Saskatchewan (NE corner) -- the North Pacific, US West Coast,
-Great Basin, and Western Canada in one frame. Rendered under
-NearsidePerspective (a satellite view showing the earth's actual
-curvature -- converging meridians, bowed parallels) rather than a flat
-PlateCarree rectangle; see build_map()'s comment on projection choice for
-why that's a real tradeoff at this domain's size, not just an aesthetic
-pick.
+global ensemble. Domain runs from Hawaii (SW) to central Alberta/
+Saskatchewan (NE) -- the North Pacific, US West Coast, Great Basin, and
+Western Canada in one frame. Rendered under NearsidePerspective (a
+satellite view showing the earth's actual curvature -- converging
+meridians, bowed parallels) rather than a flat PlateCarree rectangle; see
+build_map()'s comment on projection choice for why that's a real tradeoff
+at this domain's size, not just an aesthetic pick. Cells below the color
+table's 0.5" floor are left unshaded.
 
 ## Usage
 
@@ -23,10 +23,9 @@ python build_map.py --file output/snapshot_2026-07-30_12.npz  # re-render withou
 
 `--date` is local (Pacific) time, default tomorrow. `--hour` is the local
 target hour (0-23), default 12 (noon). WM-6's global gridded product
-publishes 3-hourly steps, so the map is actually valid at whichever step
-falls nearest the requested time -- if that's more than a minute off, the
-subtitle notes the substitution (e.g. "nearest available step to 12:00 PM
-PT: 11:00 AM PDT").
+publishes 3-hourly steps, so the map is titled off whichever step actually
+comes back (e.g. requesting `--hour 12` can render titled "11:00 AM PT" if
+that's the nearest available step) rather than the exact hour requested.
 
 ## Data source
 
@@ -54,10 +53,13 @@ zarr v3 sharding-indexed encoding; no manual codec work needed).
 WM-6 (global) is a plain regular 0.25 deg lat/lon grid, unlike the
 curvilinear native grids `wm6-3km`/HRRR fetches use elsewhere in this
 repo, so the map bbox crop is a direct index slice -- no `griddata`
-resampling step needed (cartopy still warps that regular grid into the
-curved NearsidePerspective view at render time, which is a separate step
-from the crop and is why `scipy` is a dependency -- see
-`requirements.txt`).
+resampling step needed to handle a curvilinear source. It's then
+upsampled (`resample_to_finer_grid()`, linear interpolation via
+`RegularGridInterpolator`) to a finer grid before rendering, since WM-6's
+native ~28 km spacing is coarser than a screen pixel at this map's zoom
+level and would otherwise look blocky once warped into the curved
+NearsidePerspective view (a separate step from the crop/upsample, which is
+why `scipy` is a dependency -- see `requirements.txt`).
 
 Country/state/border-line basemap geometries are clipped to the map's bbox
 (`MAP_CLIP_BOX`) and densified (`shapely.segmentize`) before being handed
