@@ -4,20 +4,24 @@ One-off styled map of total precipitable water (TPW, i.e. total column
 water vapour) for a single valid time, from WindBorne's WeatherMesh-6
 global ensemble. Domain runs from Hawaii (SW) to central Alberta/
 Saskatchewan (NE) -- the North Pacific, US West Coast, Great Basin, and
-Western Canada in one frame. Rendered under NearsidePerspective (a
-satellite view showing the earth's actual curvature -- converging
-meridians, bowed parallels) rather than a flat PlateCarree rectangle; see
-build_map()'s comment on projection choice for why that's a real tradeoff
-at this domain's size, not just an aesthetic pick -- the frame's corners
-end up unfilled (there's no real data on the other side of the visible
-horizon to put there), but data, coastline, and state/country lines all
-extend the full way to the curved frame's actual edge. The color table
-runs 0.5"-3.5" TPW, power-law spaced so the middle color lands on 1.5"
-rather than the range's literal midpoint (2.0") -- more of the ramp's
-color variation falls across the more common lower/moderate range, with
-the upper range comparatively compressed (see `TPW_IN_MID`). Cells below
-the 0.5" floor are left unshaded rather than clamped to the lightest
-color.
+Western Canada in one frame. Rendered under Lambert Conformal Conic (the
+standard NOAA/NWS projection for regional weather maps -- conformal,
+shows the earth's actual curvature via converging meridians and bowed
+parallels) rather than a flat PlateCarree rectangle; see build_map()'s
+comment on projection choice for why that's a real tradeoff at this
+domain's size, not just an aesthetic pick -- the frame's corners end up
+unfilled (there's no real data on the other side of the visible horizon
+to put there; this was compared against five other curved projections --
+NearsidePerspective, Orthographic, Stereographic, AzimuthalEquidistant,
+Gnomonic -- and all show the same size gap, since it's a function of this
+domain's angular width, not the specific projection), but data, coastline,
+and state/country lines all extend the full way to the curved frame's
+actual edge. The color table runs 0.5"-3.5" TPW, power-law spaced so the
+middle color lands on 1.5" rather than the range's literal midpoint
+(2.0") -- more of the ramp's color variation falls across the more common
+lower/moderate range, with the upper range comparatively compressed (see
+`TPW_IN_MID`). Cells below the 0.5" floor are left unshaded rather than
+clamped to the lightest color.
 
 ## Usage
 
@@ -66,7 +70,7 @@ upsampled (`resample_to_finer_grid()`, linear interpolation via
 `RegularGridInterpolator`) to a finer grid before rendering, since WM-6's
 native ~28 km spacing is coarser than a screen pixel at this map's zoom
 level and would otherwise look blocky once warped into the curved
-NearsidePerspective view (a separate step from the crop/upsample, which is
+LambertConformal view (a separate step from the crop/upsample, which is
 why `scipy` is a dependency -- see `requirements.txt`).
 
 Country/state/border-line basemap geometries are clipped to the map's bbox
@@ -75,8 +79,8 @@ to cartopy: at this domain's size, a real, mostly-straight-in-lon/lat run
 like the US/Canada border tracking the 49th parallel for ~2000 km can be
 represented with very few vertices, which is fine under PlateCarree but
 draws as a visibly wrong straight chord once reprojected into
-NearsidePerspective's curved view without enough intermediate points to
-bend along.
+LambertConformal's curved view without enough intermediate points to bend
+along.
 
 ## Files
 

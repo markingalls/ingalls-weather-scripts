@@ -93,7 +93,7 @@ WB_BASE = "https://api.windbornesystems.com/forecasts/v1/wm-6"
 VARIABLE = "total_column_water_vapour"
 
 # ---------------------------------------------------------------------------
-# Figure geometry. Under NearsidePerspective (see build_map()'s note on
+# Figure geometry. Under LambertConformal (see build_map()'s note on
 # projection choice) the visible curved area doesn't fill the rectangular
 # axes box the way it would under PlateCarree -- cartopy still fits the
 # projection's true aspect ratio within AXES_RECT, so a mismatched
@@ -118,7 +118,7 @@ CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
 
 # Basemap geometries (country/state/border-line datasets) are sourced from
 # files that extend well past this map's domain -- fine for PlateCarree,
-# but reprojecting a line with far-off vertices into NearsidePerspective
+# but reprojecting a line with far-off vertices into LambertConformal
 # can bow it into a visibly wrong shape or, worse, cut across the frame
 # entirely. Clipping every geometry to this padded box before handing it
 # to add_geometries keeps every vertex within (or just outside) the
@@ -129,14 +129,14 @@ MAP_CLIP_BOX = box(LON_MIN - 5, LAT_MIN - 5, LON_MAX + 5, LAT_MAX + 5)
 # curvilinear native grids), so cropping to the map bbox is a direct index
 # slice -- no griddata resampling needed to handle a curvilinear source.
 # The pad keeps the raster extending past the visible frame so cartopy's
-# NearsidePerspective warp (a screen-pixel -> source-raster inverse lookup)
+# LambertConformal warp (a screen-pixel -> source-raster inverse lookup)
 # has real data to sample right up to the curved frame's edge.
 FETCH_PAD_DEG = 1.5
 
 # WM-6's native 0.25 deg spacing (~28 km) is coarser than a single screen
 # pixel once zoomed to this map's domain -- upsampled via linear
 # interpolation (see resample_to_finer_grid()) so the curved
-# NearsidePerspective warp has dense enough source data to fill the frame
+# LambertConformal warp has dense enough source data to fill the frame
 # smoothly instead of showing a blocky/native-pixel-grid look.
 RESAMPLE_FACTOR = 6
 
@@ -321,7 +321,7 @@ def clip_to_map(geom):
     # US/Canada border tracks the 49th parallel dead straight for ~2000
     # km) can be represented with very few vertices, which is fine under
     # PlateCarree but draws as a visibly wrong straight chord once
-    # reprojected into NearsidePerspective's curved view -- adding
+    # reprojected into LambertConformal's curved view -- adding
     # intermediate vertices every ~0.5 deg gives the reprojection enough
     # points to bend it into its true curved shape.
     clipped = shapely.segmentize(geom, max_segment_length=0.5).intersection(MAP_CLIP_BOX)
@@ -406,24 +406,29 @@ def build_map(date, hour, output_path, override_path=None):
     state_geoms = load_states()
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
-    # NearsidePerspective (satellite view), not PlateCarree -- shows the
-    # earth's actual curvature (converging meridians, bowed parallels)
-    # rather than a flat lon/lat rectangle. At this domain's size (54 deg
-    # lon x 44 deg lat, Hawaii to central Alberta/Saskatchewan), the
-    # projected shape is a curved trapezoid that doesn't fill a rectangular
-    # frame -- unlike ../dew-point-storm-map/build_map.py's much smaller
-    # domain, there's no satellite_height that avoids that. Rather than
-    # fighting it, the axes patch is left transparent so the unfilled
+    # LambertConformal (the standard NOAA/NWS projection for regional
+    # weather maps), not PlateCarree -- shows the earth's actual curvature
+    # (converging meridians, bowed parallels) rather than a flat lon/lat
+    # rectangle, and is conformal (preserves local shapes/angles), unlike
+    # the NearsidePerspective satellite view tried earlier. At this
+    # domain's size (54 deg lon x 44 deg lat, Hawaii to central Alberta/
+    # Saskatchewan), the projected shape is a curved trapezoid that doesn't
+    # fill a rectangular frame -- unlike ../dew-point-storm-map/build_map.py's
+    # much smaller domain, no standard_parallels choice avoids that. Rather
+    # than fighting it, the axes patch is left transparent so the unfilled
     # corners show the figure's own background instead of a jarring white/
     # blank rectangle -- the curved geo spine (below) reads as the map's
-    # actual border, the same way published trapezoid-framed Lambert
-    # Conformal maps look. This is a deliberate tradeoff: the corners can't
-    # be filled with real data without abandoning the curved look (see
-    # README.md), but everything inside the curved frame -- data, coastline,
-    # state/country lines -- extends all the way to that frame's edge.
+    # actual border, the same way published trapezoid-framed regional
+    # Lambert Conformal maps look. This is a deliberate tradeoff: the
+    # corners can't be filled with real data without abandoning the curved
+    # look entirely (see README.md -- other curved projections were
+    # compared and all show the same size gap, since it's a function of
+    # this domain's angular width, not the specific projection), but
+    # everything inside the curved frame -- data, coastline, state/country
+    # lines -- extends all the way to that frame's edge.
     pc = ccrs.PlateCarree()
-    proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
-                                     satellite_height=35_786_000)
+    proj = ccrs.LambertConformal(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
+                                  standard_parallels=(LAT_MIN, LAT_MAX))
 
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
@@ -435,7 +440,7 @@ def build_map(date, hour, output_path, override_path=None):
     # TPW field -- a fixed mm-to-color enhancement curve (not rescaled to
     # this map's data range), so color reads consistently across every map
     # this script renders. Cartopy warps this regular grid into the curved
-    # NearsidePerspective view internally (a source-raster -> screen-pixel
+    # LambertConformal view internally (a source-raster -> screen-pixel
     # inverse lookup, which is why cartopy's img_transform needs scipy --
     # see requirements.txt). Cells below the color table's 0.5" floor are
     # masked out (rather than clamped to the lightest color) so they're
