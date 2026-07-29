@@ -58,7 +58,8 @@ import zarr
 from remotezip import RemoteZip
 
 import cartopy.crs as ccrs
-from shapely.geometry import shape
+import shapely
+from shapely.geometry import shape, box
 from PIL import Image
 
 # ---------------------------------------------------------------------------
@@ -89,10 +90,13 @@ WB_BASE = "https://api.windbornesystems.com/forecasts/v1/wm-6"
 VARIABLE = "total_column_water_vapour"
 
 # ---------------------------------------------------------------------------
-# Figure geometry -- FIG_WIDTH_IN chosen so the axes box's aspect ratio
-# (width_in / height_in, given AXES_RECT's fractions below) matches the
-# domain's lon/lat span ratio (~1.22); otherwise cartopy shrinks one
-# dimension to preserve the projection's aspect and leaves empty gutters.
+# Figure geometry. Under NearsidePerspective (see build_map()'s note on
+# projection choice) the visible curved area doesn't fill the rectangular
+# axes box the way it would under PlateCarree -- cartopy still fits the
+# projection's true aspect ratio within AXES_RECT, so a mismatched
+# FIG_WIDTH_IN/FIG_HEIGHT_IN just means more/less unfilled margin around
+# the curved frame rather than a hard visual bug. This ratio was tuned by
+# eye against the actual domain below.
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.66, 9.5
 FIG_DPI = 200
@@ -106,12 +110,24 @@ MAP_FRAME_INSET_PX = 22
 # ---------------------------------------------------------------------------
 LON_MIN, LON_MAX = -164.0, -104.0
 LAT_MIN, LAT_MAX = 14.0, 63.0
+CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
+
+# Basemap geometries (country/state/border-line datasets) are sourced from
+# files that extend well past this map's domain -- fine for PlateCarree,
+# but reprojecting a line with far-off vertices into NearsidePerspective
+# can bow it into a visibly wrong shape or, worse, cut across the frame
+# entirely. Clipping every geometry to this padded box before handing it
+# to add_geometries keeps every vertex within (or just outside) the
+# visible area -- see clip_to_map().
+MAP_CLIP_BOX = box(LON_MIN - 5, LAT_MIN - 5, LON_MAX + 5, LAT_MAX + 5)
 
 # WM-6 is a plain regular 0.25 deg lat/lon grid (unlike wm6-3km/HRRR's
 # curvilinear native grids), so cropping to the map bbox is a direct index
-# slice -- no griddata resampling needed. A small pad keeps the raster
-# extending a hair past the visible frame.
-FETCH_PAD_DEG = 1.0
+# slice -- no griddata resampling needed. The pad keeps the raster
+# extending past the visible frame so cartopy's NearsidePerspective warp
+# (a screen-pixel -> source-raster inverse lookup) has real data to sample
+# right up to the curved frame's edge.
+FETCH_PAD_DEG = 1.5
 
 # ---------------------------------------------------------------------------
 # Cities -- spread across the domain for geographic reference. (name, lon,
@@ -131,26 +147,34 @@ CITIES = [
     ("Vancouver", -123.1207, 49.2827, "left"),
     ("Prince George", -122.7497, 53.9171, "left"),
     ("Calgary", -114.0719, 51.0447, "right"),
-    ("Edmonton", -113.4938, 53.5461, "right"),
-    ("Saskatoon", -106.6700, 52.1332, "left"),
+    ("Edmonton", -113.4938, 53.5461, "left"),
+    ("Saskatoon", -106.6700, 52.1332, "right"),
 ]
 
 # ---------------------------------------------------------------------------
-# Total precipitable water color table -- fixed mm-to-RGB control points
+# Total precipitable water color table -- fixed inch-to-RGB control points
 # (not rescaled per map), taken from Ingalls Weather's standard TPW palette
 # (cream/dry through green-teal through blue to dark navy/very moist).
+# Bottom of the scale is 0.5" (below that reads as dry/uninteresting for
+# TPW purposes and is left off the bottom of the ramp), stepping up in the
+# 0.5" increments typical of operational PWAT color tables. WM-6's field
+# itself comes back in kg/m^2 (numerically == mm), so the control points
+# are converted to mm once here for comparison against the fetched data.
 # ---------------------------------------------------------------------------
-TPW_COLOR_TABLE_MM = [
-    (0,  [255, 255, 221]),
-    (10, [239, 248, 185]),
-    (20, [206, 232, 184]),
-    (30, [145, 203, 188]),
-    (40, [101, 180, 195]),
-    (50, [69, 143, 188]),
-    (60, [50, 92, 164]),
-    (70, [41, 52, 142]),
-    (80, [13, 30, 86]),
+TPW_COLOR_TABLE_IN = [
+    (0.5, [255, 255, 221]),
+    (1.0, [239, 248, 185]),
+    (1.5, [206, 232, 184]),
+    (2.0, [145, 203, 188]),
+    (2.5, [101, 180, 195]),
+    (3.0, [69, 143, 188]),
+    (3.5, [50, 92, 164]),
+    (4.0, [41, 52, 142]),
+    (4.5, [13, 30, 86]),
 ]
+TPW_COLOR_TABLE_MM = [(inch * 25.4, rgb) for inch, rgb in TPW_COLOR_TABLE_IN]
+TPW_IN_MIN = TPW_COLOR_TABLE_IN[0][0]
+TPW_IN_MAX = TPW_COLOR_TABLE_IN[-1][0]
 TPW_MM_MIN = TPW_COLOR_TABLE_MM[0][0]
 TPW_MM_MAX = TPW_COLOR_TABLE_MM[-1][0]
 
@@ -250,6 +274,27 @@ def fetch_tcwv_mean(valid_time_utc, api_key):
 # ---------------------------------------------------------------------------
 # Basemap layers
 # ---------------------------------------------------------------------------
+def clip_to_map(geom):
+    # segmentize first: a real, mostly-straight-in-lon/lat run (the
+    # US/Canada border tracks the 49th parallel dead straight for ~2000
+    # km) can be represented with very few vertices, which is fine under
+    # PlateCarree but draws as a visibly wrong straight chord once
+    # reprojected into NearsidePerspective's curved view -- adding
+    # intermediate vertices every ~0.5 deg gives the reprojection enough
+    # points to bend it into its true curved shape.
+    clipped = shapely.segmentize(geom, max_segment_length=0.5).intersection(MAP_CLIP_BOX)
+    return None if clipped.is_empty else clipped
+
+
+def clip_outline_to_map(geom):
+    """Like clip_to_map, but for a polygon that's only ever drawn as an
+    outline (facecolor="none"): clips its boundary LineString rather than
+    the polygon itself, so truncating a polygon that extends past
+    MAP_CLIP_BOX doesn't add the clip box's own straight edge as a fake
+    coastline/border segment across the box's cut line."""
+    return clip_to_map(geom.boundary)
+
+
 def load_countries():
     """Full country polygons (not just a coastline-only dataset) -- the
     only basemap layer in /maps that reaches Hawaii, since it's drawn per
@@ -258,8 +303,9 @@ def load_countries():
     stays visible."""
     with open(COUNTRIES_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]
-            if feat["properties"].get("NAME") in TARGET_COUNTRIES]
+    geoms = [shape(feat["geometry"]) for feat in data["features"]
+             if feat["properties"].get("NAME") in TARGET_COUNTRIES]
+    return [g for g in (clip_outline_to_map(g) for g in geoms) if g is not None]
 
 
 def load_states():
@@ -273,14 +319,17 @@ def load_states():
         if "Lake" in props.get("featurecla", ""):
             continue
         if props.get("admin") in TARGET_COUNTRIES:
-            state_geoms.append(shape(feat["geometry"]))
+            clipped = clip_outline_to_map(shape(feat["geometry"]))
+            if clipped is not None:
+                state_geoms.append(clipped)
     return state_geoms
 
 
 def load_boundary_lines(path):
     with open(path) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]]
+    geoms = [shape(feat["geometry"]) for feat in data["features"]]
+    return [g for g in (clip_to_map(g) for g in geoms) if g is not None]
 
 
 def build_map(date, hour, output_path, override_path=None):
@@ -313,26 +362,37 @@ def build_map(date, hour, output_path, override_path=None):
     state_geoms = load_states()
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
-    # PlateCarree -- this domain is far too large (60 deg lon x 49 deg lat,
-    # Hawaii to Saskatchewan) for NearsidePerspective, which leaves blank
-    # corners once a domain's projected shape strays far from a rectangle
-    # (see ../dew-point-storm-map/build_map.py's note on a much smaller
-    # domain already needing this). PlateCarree has no such gap, at the
-    # cost of the visible curvature that projection gives.
+    # NearsidePerspective (satellite view), not PlateCarree -- shows the
+    # earth's actual curvature (converging meridians, bowed parallels)
+    # rather than a flat lon/lat rectangle. At this domain's size (60 deg
+    # lon x 49 deg lat, Hawaii to Saskatchewan), the projected shape is a
+    # curved trapezoid that doesn't fill a rectangular frame -- unlike
+    # ../dew-point-storm-map/build_map.py's much smaller domain, there's no
+    # satellite_height that avoids that. Rather than fighting it, the axes
+    # patch is left transparent so the unfilled corners show the figure's
+    # own background instead of a jarring white/blank rectangle -- the
+    # curved geo spine (below) reads as the map's actual border, the same
+    # way published trapezoid-framed Lambert Conformal maps look.
     pc = ccrs.PlateCarree()
-    proj = pc
+    proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
+                                     satellite_height=35_786_000)
 
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
 
     ax = fig.add_axes(AXES_RECT, projection=proj)
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
-    ax.patch.set_facecolor("white")
+    ax.patch.set_facecolor("none")
 
     # TPW field -- a fixed mm-to-color enhancement curve (not rescaled to
     # this map's data range), so color reads consistently across every map
     # this script renders. WM-6 is already a plain regular lat/lon grid
-    # (no curvilinear reprojection), so imshow needs no resampling step.
+    # (unlike wm6-3km/HRRR's curvilinear native grids), so no griddata
+    # resampling step is needed before handing it to imshow -- cartopy
+    # still has to warp that regular grid into the curved NearsidePerspective
+    # view internally (a source-raster -> screen-pixel inverse lookup,
+    # which is why cartopy's img_transform needs scipy -- see
+    # requirements.txt).
     tpw_cmap = build_tpw_colormap()
     tpw_norm = Normalize(vmin=TPW_MM_MIN, vmax=TPW_MM_MAX)
     ax.imshow(tcwv_mm, transform=pc, cmap=tpw_cmap, norm=tpw_norm, origin="lower",
@@ -362,9 +422,9 @@ def build_map(date, hour, output_path, override_path=None):
     ax.spines['geo'].set_linewidth(1.6)
 
     # Colorbar -- below the map, centered on the rendered map frame.
-    # Primary (bottom) axis is mm; a secondary (top) axis mirrors it in
-    # inches, the unit atmospheric-river/moisture-plume coverage is often
-    # discussed in.
+    # Primary (bottom) axis is inches, ticked at each 0.5" color-table stop
+    # (the unit the color table -- and PWAT/TPW products generally -- are
+    # defined in); a secondary (top) axis mirrors it in mm.
     fig.canvas.draw()
     frame_px = ax.get_window_extent()
     frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
@@ -376,24 +436,24 @@ def build_map(date, hour, output_path, override_path=None):
     gradient_mm = np.linspace(TPW_MM_MIN, TPW_MM_MAX, 256).reshape(1, -1)
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     cax.imshow(gradient_mm, aspect="auto", cmap=tpw_cmap, norm=tpw_norm,
-               extent=[TPW_MM_MIN, TPW_MM_MAX, 0, 1])
+               extent=[TPW_IN_MIN, TPW_IN_MAX, 0, 1])
     cax.set_yticks([])
     for spine in cax.spines.values():
         spine.set_edgecolor("#8a887e")
         spine.set_linewidth(0.6)
 
-    mm_ticks = list(range(TPW_MM_MIN, TPW_MM_MAX + 1, 10))
-    cax.set_xticks(mm_ticks)
-    cax.set_xticklabels([f"{mm}" for mm in mm_ticks])
+    in_ticks = [inch for inch, _ in TPW_COLOR_TABLE_IN]
+    cax.set_xticks(in_ticks)
+    cax.set_xticklabels([f'{inch:g}"' for inch in in_ticks])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
-    cax.set_xlabel("Total Precipitable Water (mm)", fontsize=8.5, fontproperties=poppins_reg, color="#5a584f")
+    cax.set_xlabel("Total Precipitable Water (in)", fontsize=8.5, fontproperties=poppins_reg, color="#5a584f")
 
-    cax_in = cax.secondary_xaxis("top", functions=(mm_to_in, in_to_mm))
-    cax_in.xaxis.set_major_formatter(lambda inch, _: f'{inch:.1f}"')
-    cax_in.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
-    for label in cax_in.get_xticklabels():
+    cax_mm = cax.secondary_xaxis("top", functions=(in_to_mm, mm_to_in))
+    cax_mm.xaxis.set_major_formatter(lambda mm, _: f"{mm:.0f}")
+    cax_mm.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
+    for label in cax_mm.get_xticklabels():
         label.set_fontproperties(poppins_reg)
 
     # Title & subtitle above the map

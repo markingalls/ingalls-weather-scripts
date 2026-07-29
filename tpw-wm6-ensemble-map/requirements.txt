@@ -3,6 +3,7 @@ cartopy
 shapely
 Pillow
 numpy
+scipy
 requests
 zarr
 remotezip

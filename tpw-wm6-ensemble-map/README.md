@@ -4,7 +4,12 @@ One-off styled map of total precipitable water (TPW, i.e. total column
 water vapour) for a single valid time, from WindBorne's WeatherMesh-6
 global ensemble. Domain runs from Hawaii (SW corner) to the northwest
 corner of Saskatchewan (NE corner) -- the North Pacific, US West Coast,
-Great Basin, and Western Canada in one frame.
+Great Basin, and Western Canada in one frame. Rendered under
+NearsidePerspective (a satellite view showing the earth's actual
+curvature -- converging meridians, bowed parallels) rather than a flat
+PlateCarree rectangle; see build_map()'s comment on projection choice for
+why that's a real tradeoff at this domain's size, not just an aesthetic
+pick.
 
 ## Usage
 
@@ -49,7 +54,19 @@ zarr v3 sharding-indexed encoding; no manual codec work needed).
 WM-6 (global) is a plain regular 0.25 deg lat/lon grid, unlike the
 curvilinear native grids `wm6-3km`/HRRR fetches use elsewhere in this
 repo, so the map bbox crop is a direct index slice -- no `griddata`
-resampling step needed.
+resampling step needed (cartopy still warps that regular grid into the
+curved NearsidePerspective view at render time, which is a separate step
+from the crop and is why `scipy` is a dependency -- see
+`requirements.txt`).
+
+Country/state/border-line basemap geometries are clipped to the map's bbox
+(`MAP_CLIP_BOX`) and densified (`shapely.segmentize`) before being handed
+to cartopy: at this domain's size, a real, mostly-straight-in-lon/lat run
+like the US/Canada border tracking the 49th parallel for ~2000 km can be
+represented with very few vertices, which is fine under PlateCarree but
+draws as a visibly wrong straight chord once reprojected into
+NearsidePerspective's curved view without enough intermediate points to
+bend along.
 
 ## Files
 
