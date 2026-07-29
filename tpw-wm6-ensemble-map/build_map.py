@@ -61,7 +61,8 @@ from remotezip import RemoteZip
 from scipy.interpolate import RegularGridInterpolator
 
 import cartopy.crs as ccrs
-from shapely.geometry import shape
+import shapely
+from shapely.geometry import shape, box
 from PIL import Image
 
 # ---------------------------------------------------------------------------
@@ -92,12 +93,15 @@ WB_BASE = "https://api.windbornesystems.com/forecasts/v1/wm-6"
 VARIABLE = "total_column_water_vapour"
 
 # ---------------------------------------------------------------------------
-# Figure geometry -- FIG_WIDTH_IN chosen so the axes box's aspect ratio
-# (width_in / height_in, given AXES_RECT's fractions below) matches the
-# domain's lon/lat span ratio (~1.23); otherwise cartopy shrinks one
-# dimension to preserve PlateCarree's aspect and leaves empty gutters.
+# Figure geometry. Under NearsidePerspective (see build_map()'s note on
+# projection choice) the visible curved area doesn't fill the rectangular
+# axes box the way it would under PlateCarree -- cartopy still fits the
+# projection's true aspect ratio within AXES_RECT, so a mismatched
+# FIG_WIDTH_IN/FIG_HEIGHT_IN just means more/less unfilled margin around
+# the curved frame rather than a hard visual bug. This ratio was tuned by
+# eye against the actual domain below.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.68, 9.5
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.66, 9.5
 FIG_DPI = 200
 AXES_RECT = [0.03, 0.17, 0.94, 0.70]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
@@ -112,16 +116,28 @@ LON_MIN, LON_MAX = -166.0, -112.0
 LAT_MIN, LAT_MAX = 12.5, 56.5
 CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
 
+# Basemap geometries (country/state/border-line datasets) are sourced from
+# files that extend well past this map's domain -- fine for PlateCarree,
+# but reprojecting a line with far-off vertices into NearsidePerspective
+# can bow it into a visibly wrong shape or, worse, cut across the frame
+# entirely. Clipping every geometry to this padded box before handing it
+# to add_geometries keeps every vertex within (or just outside) the
+# visible area -- see clip_to_map().
+MAP_CLIP_BOX = box(LON_MIN - 5, LAT_MIN - 5, LON_MAX + 5, LAT_MAX + 5)
+
 # WM-6 is a plain regular 0.25 deg lat/lon grid (unlike wm6-3km/HRRR's
 # curvilinear native grids), so cropping to the map bbox is a direct index
 # slice -- no griddata resampling needed to handle a curvilinear source.
-# A small pad keeps the raster extending a hair past the visible frame.
+# The pad keeps the raster extending past the visible frame so cartopy's
+# NearsidePerspective warp (a screen-pixel -> source-raster inverse lookup)
+# has real data to sample right up to the curved frame's edge.
 FETCH_PAD_DEG = 1.5
 
 # WM-6's native 0.25 deg spacing (~28 km) is coarser than a single screen
 # pixel once zoomed to this map's domain -- upsampled via linear
-# interpolation (see resample_to_finer_grid()) so the map doesn't show a
-# blocky/native-pixel-grid look.
+# interpolation (see resample_to_finer_grid()) so the curved
+# NearsidePerspective warp has dense enough source data to fill the frame
+# smoothly instead of showing a blocky/native-pixel-grid look.
 RESAMPLE_FACTOR = 6
 
 # ---------------------------------------------------------------------------
@@ -300,6 +316,27 @@ def resample_to_finer_grid(lat, lon, values, factor=RESAMPLE_FACTOR):
 # ---------------------------------------------------------------------------
 # Basemap layers
 # ---------------------------------------------------------------------------
+def clip_to_map(geom):
+    # segmentize first: a real, mostly-straight-in-lon/lat run (the
+    # US/Canada border tracks the 49th parallel dead straight for ~2000
+    # km) can be represented with very few vertices, which is fine under
+    # PlateCarree but draws as a visibly wrong straight chord once
+    # reprojected into NearsidePerspective's curved view -- adding
+    # intermediate vertices every ~0.5 deg gives the reprojection enough
+    # points to bend it into its true curved shape.
+    clipped = shapely.segmentize(geom, max_segment_length=0.5).intersection(MAP_CLIP_BOX)
+    return None if clipped.is_empty else clipped
+
+
+def clip_outline_to_map(geom):
+    """Like clip_to_map, but for a polygon that's only ever drawn as an
+    outline (facecolor="none"): clips its boundary LineString rather than
+    the polygon itself, so truncating a polygon that extends past
+    MAP_CLIP_BOX doesn't add the clip box's own straight edge as a fake
+    coastline/border segment across the box's cut line."""
+    return clip_to_map(geom.boundary)
+
+
 def load_countries():
     """Full country polygons (not just a coastline-only dataset) -- the
     only basemap layer in /maps that reaches Hawaii, since it's drawn per
@@ -308,8 +345,9 @@ def load_countries():
     stays visible."""
     with open(COUNTRIES_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]
-            if feat["properties"].get("NAME") in TARGET_COUNTRIES]
+    geoms = [shape(feat["geometry"]) for feat in data["features"]
+             if feat["properties"].get("NAME") in TARGET_COUNTRIES]
+    return [g for g in (clip_outline_to_map(g) for g in geoms) if g is not None]
 
 
 def load_states():
@@ -323,14 +361,17 @@ def load_states():
         if "Lake" in props.get("featurecla", ""):
             continue
         if props.get("admin") in TARGET_COUNTRIES:
-            state_geoms.append(shape(feat["geometry"]))
+            clipped = clip_outline_to_map(shape(feat["geometry"]))
+            if clipped is not None:
+                state_geoms.append(clipped)
     return state_geoms
 
 
 def load_boundary_lines(path):
     with open(path) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]]
+    geoms = [shape(feat["geometry"]) for feat in data["features"]]
+    return [g for g in (clip_to_map(g) for g in geoms) if g is not None]
 
 
 def build_map(date, hour, output_path, override_path=None):
@@ -365,26 +406,38 @@ def build_map(date, hour, output_path, override_path=None):
     state_geoms = load_states()
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
-    # PlateCarree -- fills the rectangular frame edge-to-edge with real
-    # data and basemap lines. A curved (e.g. NearsidePerspective) satellite
-    # view was tried, but at this domain's width (Hawaii to Saskatchewan,
-    # ~54 deg of longitude) meridians converge enough toward the pole that
-    # the visible area is a trapezoid, not a rectangle -- no projection
-    # choice avoids leaving the rectangle's corners blank, which cost more
-    # than the curved look was worth.
+    # NearsidePerspective (satellite view), not PlateCarree -- shows the
+    # earth's actual curvature (converging meridians, bowed parallels)
+    # rather than a flat lon/lat rectangle. At this domain's size (54 deg
+    # lon x 44 deg lat, Hawaii to central Alberta/Saskatchewan), the
+    # projected shape is a curved trapezoid that doesn't fill a rectangular
+    # frame -- unlike ../dew-point-storm-map/build_map.py's much smaller
+    # domain, there's no satellite_height that avoids that. Rather than
+    # fighting it, the axes patch is left transparent so the unfilled
+    # corners show the figure's own background instead of a jarring white/
+    # blank rectangle -- the curved geo spine (below) reads as the map's
+    # actual border, the same way published trapezoid-framed Lambert
+    # Conformal maps look. This is a deliberate tradeoff: the corners can't
+    # be filled with real data without abandoning the curved look (see
+    # README.md), but everything inside the curved frame -- data, coastline,
+    # state/country lines -- extends all the way to that frame's edge.
     pc = ccrs.PlateCarree()
-    proj = pc
+    proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
+                                     satellite_height=35_786_000)
 
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
 
     ax = fig.add_axes(AXES_RECT, projection=proj)
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
-    ax.patch.set_facecolor("white")
+    ax.patch.set_facecolor("none")
 
     # TPW field -- a fixed mm-to-color enhancement curve (not rescaled to
     # this map's data range), so color reads consistently across every map
-    # this script renders. Cells below the color table's 0.5" floor are
+    # this script renders. Cartopy warps this regular grid into the curved
+    # NearsidePerspective view internally (a source-raster -> screen-pixel
+    # inverse lookup, which is why cartopy's img_transform needs scipy --
+    # see requirements.txt). Cells below the color table's 0.5" floor are
     # masked out (rather than clamped to the lightest color) so they're
     # left unshaded -- transparent, showing the plain basemap -- instead of
     # reading as a real (if very dry) TPW value.
