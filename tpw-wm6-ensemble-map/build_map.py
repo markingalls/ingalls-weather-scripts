@@ -79,6 +79,12 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
+# Basemap fill colors -- drawn beneath the TPW field (see build_map()),
+# which fades in from fully transparent at its 0.5" floor, so both stay
+# visible under sparse/dry data instead of the map reading as blank there.
+LAND_COLOR = "#F5E7B3"
+OCEAN_COLOR = "#D2E8F3"
+
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
@@ -165,15 +171,15 @@ RESAMPLE_FACTOR = 6
 # (not rescaled per map), taken from Ingalls Weather's standard TPW palette
 # (cream/dry through green-teal through blue to dark navy/very moist).
 # Bottom of the scale is 0.5" (below that reads as dry/uninteresting for
-# TPW purposes and is left off the bottom of the ramp -- see build_map()'s
-# masking of sub-floor cells) and the top is 3.5". The 9 palette colors
-# aren't spaced evenly across that range: TPW_IN_MID pulls the *middle*
-# color down to 1.5" (rather than the range's actual midpoint, 2.0"), so
-# more of the ramp's color variation falls across the more common
-# lower/moderate range and the upper range is comparatively compressed.
-# WM-6's field itself comes back in kg/m^2 (numerically == mm), so the
-# control points are converted to mm once here for comparison against the
-# fetched data.
+# TPW purposes -- see build_map()'s alpha fade-in, TPW_ALPHA_FADE_END_IN
+# below, for how sub-floor cells are handled) and the top is 3.5". The 9
+# palette colors aren't spaced evenly across that range: TPW_IN_MID pulls
+# the *middle* color down to 1.5" (rather than the range's actual
+# midpoint, 2.0"), so more of the ramp's color variation falls across the
+# more common lower/moderate range and the upper range is comparatively
+# compressed. WM-6's field itself comes back in kg/m^2 (numerically ==
+# mm), so the control points are converted to mm once here for comparison
+# against the fetched data.
 # ---------------------------------------------------------------------------
 TPW_RGB_COLORS = [
     [255, 255, 221],
@@ -189,6 +195,16 @@ TPW_RGB_COLORS = [
 TPW_IN_MIN = 0.5
 TPW_IN_MAX = 3.5
 TPW_IN_MID = 1.5
+
+# The TPW field fades in rather than cutting on/off hard at TPW_IN_MIN --
+# fully transparent (alpha 0) below it, ramping linearly from
+# TPW_ALPHA_FADE_START to TPW_ALPHA_FADE_END between TPW_IN_MIN and
+# TPW_ALPHA_FADE_END_IN, then held at TPW_ALPHA_FADE_END (fully opaque)
+# above that -- so the land/ocean basemap colors show through increasingly
+# faintly near the dry floor instead of the data switching on abruptly.
+TPW_ALPHA_FADE_END_IN = 0.75
+TPW_ALPHA_FADE_START = 0.30
+TPW_ALPHA_FADE_END = 1.0
 
 
 def _tpw_in_stops():
@@ -457,18 +473,12 @@ def build_map(date, hour, output_path, override_path=None):
     # domain's size (54 deg lon x 44 deg lat, Hawaii to central Alberta/
     # Saskatchewan), the projected shape is a curved trapezoid that doesn't
     # fill a rectangular frame -- unlike ../dew-point-storm-map/build_map.py's
-    # much smaller domain, no standard_parallels choice avoids that. Rather
-    # than fighting it, the axes patch is left transparent so the unfilled
-    # corners show the figure's own background instead of a jarring white/
-    # blank rectangle -- the curved geo spine (below) reads as the map's
-    # actual border, the same way published trapezoid-framed regional
-    # Lambert Conformal maps look. This is a deliberate tradeoff: the
-    # corners can't be filled with real data without abandoning the curved
-    # look entirely (see README.md -- other curved projections were
-    # compared and all show the same size gap, since it's a function of
-    # this domain's angular width, not the specific projection), but
-    # everything inside the curved frame -- data, coastline, state/country
-    # lines -- extends all the way to that frame's edge.
+    # much smaller domain, no standard_parallels choice avoids that. The
+    # axes patch is colored as the ocean (below) rather than left
+    # transparent, so any hairline of residual unfilled corner (see
+    # FETCH_PAD_LON_DEG) reads as more ocean instead of a gap -- the
+    # curved geo spine (below) reads as the map's actual border, the same
+    # way published trapezoid-framed regional Lambert Conformal maps look.
     pc = ccrs.PlateCarree()
     proj = ccrs.LambertConformal(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
                                   standard_parallels=(LAT_MIN, LAT_MAX))
@@ -478,24 +488,41 @@ def build_map(date, hour, output_path, override_path=None):
 
     ax = fig.add_axes(AXES_RECT, projection=proj)
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
-    ax.patch.set_facecolor("none")
+    ax.patch.set_facecolor(OCEAN_COLOR)
+
+    # Land -- filled beneath the TPW field (zorder 1) so the fade-in near
+    # TPW_IN_MIN shows a hint of land color through the data rather than
+    # data floating over nothing. Drawn again further down, outline-only,
+    # on top of the TPW field for a coastline that stays crisp regardless
+    # of the data's opacity there.
+    ax.add_geometries(country_geoms, crs=pc, facecolor=LAND_COLOR, edgecolor="none", zorder=0.5)
 
     # TPW field -- a fixed mm-to-color enhancement curve (not rescaled to
     # this map's data range), so color reads consistently across every map
-    # this script renders. Cartopy warps this regular grid into the curved
-    # LambertConformal view internally (a source-raster -> screen-pixel
-    # inverse lookup, which is why cartopy's img_transform needs scipy --
-    # see requirements.txt), split at the antimeridian by
+    # this script renders, faded in via per-pixel alpha (rather than
+    # clamped to the lightest color or masked hard on/off) between
+    # TPW_IN_MIN and TPW_ALPHA_FADE_END_IN -- see TPW_ALPHA_FADE_END_IN's
+    # comment -- so the land/ocean basemap colors show through
+    # increasingly faintly near the dry floor instead of the data
+    # switching on abruptly. Built as an explicit RGBA array (rather than
+    # letting imshow apply cmap/norm/a single scalar alpha) since alpha
+    # here varies per pixel. Cartopy warps this regular grid into the
+    # curved LambertConformal view internally (a source-raster ->
+    # screen-pixel inverse lookup, which is why cartopy's img_transform
+    # needs scipy -- see requirements.txt), split at the antimeridian by
     # imshow_antimeridian_safe() -- see its docstring for why a single
-    # imshow call can't be used here. Cells below the color table's 0.5"
-    # floor are masked out (rather than clamped to the lightest color) so
-    # they're left unshaded -- transparent, showing the plain basemap --
-    # instead of reading as a real (if very dry) TPW value.
+    # imshow call can't be used here.
     tpw_cmap = build_tpw_colormap()
-    tpw_cmap.set_bad(alpha=0)
     tpw_norm = Normalize(vmin=TPW_MM_MIN, vmax=TPW_MM_MAX)
-    tcwv_masked = np.ma.masked_less(tcwv_mm, TPW_MM_MIN)
-    imshow_antimeridian_safe(ax, tcwv_masked, lon, lat, pc, cmap=tpw_cmap, norm=tpw_norm, zorder=1)
+    tpw_rgba = tpw_cmap(tpw_norm(tcwv_mm))
+
+    fade_start_mm = TPW_MM_MIN
+    fade_end_mm = TPW_ALPHA_FADE_END_IN * 25.4
+    fade_ratio = np.clip((tcwv_mm - fade_start_mm) / (fade_end_mm - fade_start_mm), 0, 1)
+    alpha = TPW_ALPHA_FADE_START + (TPW_ALPHA_FADE_END - TPW_ALPHA_FADE_START) * fade_ratio
+    tpw_rgba[..., 3] = np.where(tcwv_mm < fade_start_mm, 0.0, alpha)
+
+    imshow_antimeridian_safe(ax, tpw_rgba, lon, lat, pc, zorder=1)
 
     ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)

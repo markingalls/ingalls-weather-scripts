@@ -29,9 +29,15 @@ the padding was wide enough to actually cross the antimeridian. The color
 table runs 0.5"-3.5" TPW, power-law spaced so the middle color lands on
 1.5" rather than the range's literal midpoint (2.0") -- more of the
 ramp's color variation falls across the more common lower/moderate range,
-with the upper range comparatively compressed (see `TPW_IN_MID`). Cells
-below the 0.5" floor are left unshaded rather than clamped to the
-lightest color.
+with the upper range comparatively compressed (see `TPW_IN_MID`).
+
+Land (`LAND_COLOR`, pastel yellow) and ocean (`OCEAN_COLOR`, pastel blue)
+are both drawn as a plain basemap fill beneath the TPW field, which fades
+in by alpha rather than switching on/off hard at its 0.5" floor -- fully
+transparent below it, ramping up to fully opaque by 0.75"
+(`TPW_ALPHA_FADE_END_IN`) -- so sparse/dry areas still read as a real map
+(dry land vs. dry ocean) instead of blank space, with the TPW color
+easing in on top as it picks up.
 
 ## Usage
 
