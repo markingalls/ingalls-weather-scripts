@@ -879,10 +879,14 @@ def main():
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
-    generated = datetime.fromisoformat(props["generatedAt"]).astimezone(local_tz)
+    # now_local (set above) is when this graphic was actually rendered --
+    # NWS's own generatedAt only changes when NWS reissues its forecast
+    # product, which can lag well behind our own render/fetch time, so it
+    # doesn't reflect "is the automation actually running" the way this label
+    # is meant to.
     fig.text(title_x, 0.935, f"{data.get('label', 'Tri-Cities')} 7-Day Forecast",
               fontproperties=f_bold, fontsize=24, color=INK)
-    fig.text(title_x, 0.895, f"Updated {generated.strftime('%d %B %Y %H:%M')} {short_tz_abbr(generated.strftime('%Z'))}",
+    fig.text(title_x, 0.895, f"Updated {now_local.strftime('%d %B %Y %H:%M')} {short_tz_abbr(now_local.strftime('%Z'))}",
               fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
