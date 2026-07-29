@@ -1,0 +1,92 @@
+name: Tri-Cities 7-Day Forecast
+
+# Runs after each ECMWF cycle finishes so the graphic reflects fresh data
+# off all sources: 07:15, 12:30, 19:15, 00:30 UTC. NOTE: GitHub only fires
+# `schedule` triggers off the workflow file on the repo's default branch --
+# this needs to be merged there before any of these actually run.
+on:
+  schedule:
+    - cron: "15 7 * * *"
+    - cron: "30 12 * * *"
+    - cron: "15 19 * * *"
+    - cron: "30 0 * * *"
+  workflow_dispatch: {}
+
+env:
+  OUTPUT_OWNER: markingalls
+  OUTPUT_REPO: ingalls-weather-graphics
+  OUTPUT_FILE: tri_cities_7day_forecast.png
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out ingalls-weather-scripts
+        uses: actions/checkout@v4
+        with:
+          path: scripts
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system + Python dependencies
+        working-directory: scripts/tri-cities-7day-forecast
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libeccodes0 libeccodes-dev
+          pip install -r requirements.txt
+
+      - name: Fetch NWS forecast
+        working-directory: scripts/tri-cities-7day-forecast
+        run: python3 fetch_forecast.py
+
+      - name: Fetch MetaMesh temperatures
+        working-directory: scripts/tri-cities-7day-forecast
+        env:
+          WB_API_KEY: ${{ secrets.WB_API_KEY }}
+        run: python3 fetch_metamesh_forecast.py
+
+      - name: Fetch Open-Meteo daily forecast
+        working-directory: scripts/tri-cities-7day-forecast
+        run: python3 fetch_openmeteo_forecast.py
+
+      - name: Fetch ECMWF ensemble precip
+        working-directory: scripts/tri-cities-7day-forecast
+        run: python3 fetch_ecmwf_ensemble_forecast.py
+
+      - name: Fetch HRRR smoke forecast (May-Oct only)
+        working-directory: scripts/tri-cities-7day-forecast
+        run: |
+          month=$(date -u +%-m)
+          if [ "$month" -ge 5 ] && [ "$month" -le 10 ]; then
+            python3 fetch_hrrr_smoke_forecast.py
+          else
+            echo "Outside smoke season (May-Oct), skipping."
+          fi
+
+      - name: Build graphic
+        working-directory: scripts/tri-cities-7day-forecast
+        run: python3 build_graphic.py
+
+      - name: Check out output repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.OUTPUT_OWNER }}/${{ env.OUTPUT_REPO }}
+          token: ${{ secrets.PUBLIC_REPO_TOKEN }}
+          path: output
+
+      - name: Publish PNG (overwrite if changed)
+        working-directory: output
+        run: |
+          cp "$GITHUB_WORKSPACE/scripts/tri-cities-7day-forecast/tri_cities_7day_forecast.png" "./$OUTPUT_FILE"
+          git config user.name "ingalls-weather-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add "$OUTPUT_FILE"
+          if git diff --cached --quiet; then
+            echo "No change in the generated image, nothing to commit."
+          else
+            git commit -m "Update Tri-Cities 7-day forecast ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            git push
+          fi
