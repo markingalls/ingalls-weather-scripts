@@ -5,13 +5,17 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, PathPatch
 from matplotlib.lines import Line2D
+from matplotlib.axes import Axes
 import cartopy.crs as ccrs
-from shapely.geometry import shape, box
-from shapely.ops import transform as shp_transform
+from cartopy.mpl.path import shapely_to_path
+from shapely.geometry import shape, box, Polygon
+from shapely.ops import transform as shp_transform, unary_union
 import numpy as np
 from datetime import datetime
+from zoneinfo import ZoneInfo
+from collections import defaultdict
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -43,6 +47,7 @@ NWS_COLORS = {
     "Flood Warning": "#00FF00", "Coastal Flood Warning": "#228B22",
     "Lakeshore Flood Warning": "#228B22", "Ashfall Advisory": "#696969",
     "High Surf Warning": "#228B22", "Excessive Heat Warning": "#C71585",
+    "Extreme Heat Warning": "#C71585",
     "Tornado Watch": "#FFFF00", "Severe Thunderstorm Watch": "#DB7093",
     "Flash Flood Watch": "#2E8B57", "Gale Warning": "#DDA0DD",
     "Flood Statement": "#00FF00", "Extreme Cold Warning": "#0000FF",
@@ -67,7 +72,8 @@ NWS_COLORS = {
     "Hazardous Seas Watch": "#483D8B", "Heavy Freezing Spray Watch": "#BC8F8F",
     "Flood Watch": "#2E8B57", "Coastal Flood Watch": "#66CDAA",
     "Lakeshore Flood Watch": "#66CDAA", "High Wind Watch": "#B8860B",
-    "Excessive Heat Watch": "#800000", "Extreme Cold Watch": "#5F9EA0",
+    "Excessive Heat Watch": "#800000", "Extreme Heat Watch": "#800000",
+    "Extreme Cold Watch": "#5F9EA0",
     "Freeze Watch": "#00FFFF", "Fire Weather Watch": "#FFDEAD",
     "Extreme Fire Danger": "#E9967A", "Special Weather Statement": "#FFE4B5",
     "Marine Weather Statement": "#FFDAB9", "Air Quality Alert": "#808080",
@@ -88,6 +94,49 @@ def darken(hexcolor, factor=0.6):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def hex_to_rgb(hexcolor):
+    hexcolor = hexcolor.lstrip("#")
+    return tuple(int(hexcolor[i:i+2], 16) for i in (0, 2, 4))
+
+
+# Degree^2 area floor for keeping a polygon from an overlay op. The
+# smallest real alert zone we've seen is ~0.006 deg^2; floating-point
+# slivers from touching boundaries have measured as large as ~3e-7
+# deg^2 (a ~1km-long, near-zero-width strip) and still broken cartopy's
+# projection cutting, so this floor sits comfortably between the two.
+MIN_POLY_AREA = 1e-4
+
+
+def polygons_only(geom):
+    """Drop degenerate Point/LineString/near-zero-area slivers that
+    shapely's intersection and difference ops leave behind at touching
+    polygon boundaries. Left in, cartopy's projection code can't cut a
+    degenerate ring cleanly and falls back to covering the entire
+    projection disk instead of the sliver's true (near-zero) extent --
+    which is what made overlap-stripe fills bleed across the whole map."""
+    if geom.geom_type == "GeometryCollection":
+        parts = [g for g in geom.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        geom = unary_union(parts) if parts else Polygon()
+    if geom.geom_type not in ("Polygon", "MultiPolygon"):
+        return Polygon()
+    polys = list(geom.geoms) if geom.geom_type == "MultiPolygon" else [geom]
+    kept = [p for p in polys if p.area > MIN_POLY_AREA]
+    if not kept:
+        return Polygon()
+    return unary_union(kept) if len(kept) > 1 else kept[0]
+
+
+def make_stripe_image(colors, width_px, height_px, stripe_px=20):
+    """Diagonal candy-stripe raster alternating full-opacity bands of
+    each color in `colors`, sized to cover width_px x height_px."""
+    yy, xx = np.mgrid[0:height_px, 0:width_px]
+    band = ((xx + yy) // stripe_px) % len(colors)
+    img = np.zeros((height_px, width_px, 3), dtype=np.uint8)
+    for i, c in enumerate(colors):
+        img[band == i] = hex_to_rgb(c)
+    return img
+
+
 # ---------- extent / projection ----------
 # Zoomed view: North Bend, WA down to Baker City, OR corridor
 EXTENT = [-122.5, -117.0, 44.4, 48.0]
@@ -103,6 +152,12 @@ fig.patch.set_facecolor("#f7f6f2")
 ax = fig.add_axes([0.04, 0.045, 0.92, 0.80], projection=proj)
 ax.set_facecolor("white")
 ax.set_extent(EXTENT, crs=pc)
+
+# Pixel size of the map's plotted area, used later to render candy-stripe
+# fills at a consistent on-screen stripe width regardless of map extent.
+fig.canvas.draw()
+ax_bbox = ax.get_window_extent()
+AX_W_PX, AX_H_PX = int(ax_bbox.width), int(ax_bbox.height)
 
 MAPS_DIR = "../maps"
 
@@ -177,31 +232,87 @@ ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_C
 # ---------- alerts ----------
 alerts = json.load(open("alerts_with_zones.json"))
 extent_box = box(EXTENT[0], EXTENT[2], EXTENT[1], EXTENT[3])
-active_event_types = []
-plotted_zones = set()  # (event, zone_id) -- NWS sometimes has multiple
-                        # active products covering the exact same zone,
-                        # which would otherwise double-stack the alpha
-                        # fill and read as a darker/different color there.
+
+# Union every zone geometry per event type -- this both merges adjacent
+# same-event zones into one clean outline and naturally de-duplicates
+# NWS products that cover the exact same zone twice.
+event_geoms = {}
+plotted_zones = set()  # (event, zone_id)
 for a in alerts:
     event = a["event"]
-    fill = NWS_COLORS.get(event, "#e8a33d")
-    edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
     for z in a["zones"]:
         zone_key = (event, z.get("zone_id"))
         if zone_key in plotted_zones:
             continue
         plotted_zones.add(zone_key)
-        geom = shape(z["geometry"])
-        # Only reflect this alert in the title/legend if it's actually
-        # visible somewhere in the current map domain -- NWS returns
-        # every active alert for the queried states, some of which can
-        # sit far outside whatever extent we're currently showing.
-        if geom.intersects(extent_box) and event not in active_event_types:
-            active_event_types.append(event)
+        event_geoms.setdefault(event, []).append(shape(z["geometry"]))
+event_geoms = {event: unary_union(geoms) for event, geoms in event_geoms.items()}
+
+# Only reflect an event in the title/legend if it's actually visible
+# somewhere in the current map domain -- NWS returns every active alert
+# for the queried states, some of which can sit far outside whatever
+# extent we're currently showing.
+active_event_types = [event for event, geom in event_geoms.items()
+                       if geom.intersects(extent_box)]
+
+# Split the events into a partition of disjoint regions, each tagged with
+# the set of events covering it, so overlapping alerts (e.g. a Red Flag
+# Warning inside a Heat Advisory) can be drawn as their own region instead
+# of alpha-stacking into a color that matches neither alert.
+partition = []  # list of (geom, frozenset(events))
+for event, geom in event_geoms.items():
+    next_partition = []
+    remaining = geom
+    for cell_geom, cell_events in partition:
+        overlap = polygons_only(cell_geom.intersection(remaining))
+        if not overlap.is_empty:
+            next_partition.append((overlap, cell_events | {event}))
+        rest = polygons_only(cell_geom.difference(remaining))
+        if not rest.is_empty:
+            next_partition.append((rest, cell_events))
+        remaining = polygons_only(remaining.difference(cell_geom))
+    if not remaining.is_empty:
+        next_partition.append((remaining, frozenset({event})))
+    partition = next_partition
+
+# Merge same-tagged cells back together so each distinct combination of
+# overlapping events is drawn (and clipped) once.
+combo_geoms = defaultdict(list)
+for geom, tags in partition:
+    combo_geoms[tags].append(geom)
+combo_geoms = {tags: polygons_only(unary_union(geoms))
+                for tags, geoms in combo_geoms.items()}
+
+OVERLAP_EDGE = "#4a4a4a"
+
+for tags, geom in combo_geoms.items():
+    if geom.is_empty:
+        continue
+    if len(tags) == 1:
+        event = next(iter(tags))
+        fill = NWS_COLORS.get(event, "#e8a33d")
+        edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
         ax.add_geometries([geom], crs=pc, facecolor=fill, edgecolor=edge,
                            alpha=0.55, linewidth=1.2, zorder=4.5)
         ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=edge,
                            linewidth=1.2, alpha=1.0, zorder=4.6)
+        continue
+
+    # Overlap region: fill with alternating stripes, one band per
+    # contributing event, clipped to the region's exact shape. Same
+    # alpha as the single-event fill so overlap zones don't read darker.
+    colors = [NWS_COLORS.get(e, "#e8a33d") for e in sorted(tags)]
+    stripe_img = make_stripe_image(colors, AX_W_PX, AX_H_PX)
+    proj_geom = ax.projection.project_geometry(geom, pc)
+    clip_path = shapely_to_path(proj_geom)
+    clip_patch = PathPatch(clip_path, transform=ax.transData)
+    # GeoAxes overrides imshow to require a CRS transform; we're placing
+    # this in plain axes-fraction space, so call the base Axes.imshow.
+    im = Axes.imshow(ax, stripe_img, extent=(0, 1, 0, 1), transform=ax.transAxes,
+                      origin="upper", interpolation="nearest", alpha=0.55, zorder=4.5)
+    im.set_clip_path(clip_patch)
+    ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
+                       linewidth=1.2, alpha=1.0, zorder=4.6)
 
 # ---------- city labels ----------
 cities = [
@@ -280,12 +391,10 @@ else:
 # ---------- title / subtitle ----------
 subtitle_y = top_y + 0.018
 title_y = subtitle_y + 0.035
-fig.text(left_x, title_y, "Columbia Basin: Active NWS Weather Alerts",
+fig.text(left_x, title_y, "Active NWS Weather Alerts",
           fontproperties=f_bold, fontsize=22, color="#2b2a26")
-if active_event_types:
-    subtitle = ", ".join(active_event_types) + " in effect"
-else:
-    subtitle = "No active NWS alerts"
+now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+subtitle = f"Updated: {now_pt.strftime('%d %B %Y %H:%M')} PT"
 fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 
 # ---------- legend ----------
