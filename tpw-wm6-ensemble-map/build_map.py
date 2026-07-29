@@ -143,8 +143,19 @@ CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
 # 180 (i.e. wrapping across the antimeridian) since fetch_tcwv_mean()
 # crops using longitude unwrapped around CENTER_LON rather than a naive
 # -180..180 range check.
+#
+# The bottom two corners need the opposite kind of slack: standard
+# parallels convergence means the bounding rectangle's bottom edge dips
+# *below* LAT_MIN out at its left/right corners (the same "bounding box
+# pokes out past the curved trapezoid's actual edges" effect that drives
+# FETCH_PAD_LON_DEG at the top, just along the other axis) -- verified the
+# same way, by inverse-transforming the axes' bottom-corner pixels back to
+# lon/lat: worst case needs ~3.4 deg *below* LAT_MIN, versus the top
+# corners needing only ~0.02 deg *above* LAT_MAX. FETCH_PAD_LAT_DEG is
+# sized for that south-corner worst case (with margin) since it pads both
+# edges symmetrically.
 FETCH_PAD_LON_DEG = 26.0
-FETCH_PAD_LAT_DEG = 2.0
+FETCH_PAD_LAT_DEG = 4.5
 
 # Basemap geometries (country/state/border-line datasets) are sourced from
 # files that extend well past this map's domain -- fine for PlateCarree,

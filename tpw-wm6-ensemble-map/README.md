@@ -25,7 +25,13 @@ a hard horizon cutoff), LambertConformal is conic and has no such limit
 gives a real, finite answer even there, so with enough padding the
 corners really do fill in completely (not just mostly); see
 `imshow_antimeridian_safe()` for the other half of making that work, once
-the padding was wide enough to actually cross the antimeridian. The color
+the padding was wide enough to actually cross the antimeridian. The
+bottom two corners need the same treatment along the other axis: the
+bounding rectangle's bottom edge dips *below* `LAT_MIN` out at its left/
+right corners (worst case ~3.4 deg, versus only ~0.02 deg *above*
+`LAT_MAX` at the top corners), so `FETCH_PAD_LAT_DEG` is sized off that
+south-corner case rather than the smaller, more visually-obvious-seeming
+top one. The color
 table runs 0.5"-3.5" TPW, power-law spaced so the middle color lands on
 1.5" rather than the range's literal midpoint (2.0") -- more of the
 ramp's color variation falls across the more common lower/moderate range,
