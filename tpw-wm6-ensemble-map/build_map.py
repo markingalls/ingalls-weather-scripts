@@ -667,26 +667,27 @@ def build_map(date, hour, output_path, override_path=None):
                           colors="#4a4a4a", linewidths=0.9, zorder=3)
     ax.clabel(isobars, inline=True, fontsize=7, fmt="%d", colors="#4a4a4a")
 
-    # Pressure center ("L"/"H") markers -- bold letter with the rounded
-    # hPa value beneath it, red for lows and blue for highs (the common
-    # public-facing convention). White stroke keeps them legible over any
-    # combination of TPW shading/land/ocean underneath. Projected to axes
-    # data coordinates once via proj.transform_point() rather than
-    # passing transform=pc through to text/annotate, so the value label's
-    # pixel offset from its letter (ax.annotate's `xytext`/`offset
-    # points`) doesn't need a second, more awkward CRS-aware transform
-    # composition -- see find_pressure_extrema() for how these centers
-    # were found.
-    for ex_lon, ex_lat, ex_val, kind in pressure_extrema:
+    # Pressure center ("L"/"H") markers -- red for lows, blue for highs
+    # (the common public-facing convention). Only the Poppins weights
+    # already used elsewhere in this map are available (Regular/Medium,
+    # no true bold face -- see setup.sh), so "bold" is faked with a
+    # second, narrower colored stroke layered between the white halo and
+    # the glyph fill, thickening the letter's edges beyond what the
+    # Medium weight draws on its own; the white halo underneath is thin
+    # enough to just keep the letter legible over the shading/basemap
+    # rather than reading as its own outline. Projected to axes data
+    # coordinates once via proj.transform_point() rather than passing
+    # transform=pc through to text, since px/py is reused if a second
+    # element (e.g. a value label) is ever added back here -- see
+    # find_pressure_extrema() for how these centers were found.
+    for ex_lon, ex_lat, _, kind in pressure_extrema:
         color = "#c0392b" if kind == "L" else "#1f5fa8"
         px, py = proj.transform_point(ex_lon, ex_lat, pc)
         ax.text(px, py, kind, ha="center", va="center", fontsize=22,
                  color=color, zorder=4, fontproperties=poppins_semibold,
-                 path_effects=[pe.withStroke(linewidth=2.5, foreground="white")])
-        ax.annotate(f"{ex_val:.0f}", xy=(px, py), xytext=(0, -19), textcoords="offset points",
-                     ha="center", va="top", fontsize=9, color=color, zorder=4,
-                     fontproperties=poppins_reg,
-                     path_effects=[pe.withStroke(linewidth=2, foreground="white")])
+                 path_effects=[pe.Stroke(linewidth=1.8, foreground="white"),
+                               pe.Stroke(linewidth=1.1, foreground=color),
+                               pe.Normal()])
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
