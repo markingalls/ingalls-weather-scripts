@@ -35,7 +35,7 @@ jobs:
         working-directory: scripts/tri-cities-7day-forecast
         run: |
           sudo apt-get update
-          sudo apt-get install -y libeccodes0 libeccodes-dev
+          sudo apt-get install -y libeccodes0 libeccodes-dev fonts-montserrat
           pip install -r requirements.txt
 
       - name: Fetch NWS forecast
