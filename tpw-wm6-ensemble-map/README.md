@@ -9,14 +9,21 @@ standard NOAA/NWS projection for regional weather maps -- conformal,
 shows the earth's actual curvature via converging meridians and bowed
 parallels) rather than a flat PlateCarree rectangle; see build_map()'s
 comment on projection choice for why that's a real tradeoff at this
-domain's size, not just an aesthetic pick -- the frame's corners end up
-unfilled (there's no real data on the other side of the visible horizon
-to put there; this was compared against five other curved projections --
-NearsidePerspective, Orthographic, Stereographic, AzimuthalEquidistant,
-Gnomonic -- and all show the same size gap, since it's a function of this
-domain's angular width, not the specific projection), but data, coastline,
-and state/country lines all extend the full way to the curved frame's
-actual edge. The color table runs 0.5"-3.5" TPW, power-law spaced so the
+domain's size, not just an aesthetic pick (compared against five other
+curved projections -- NearsidePerspective, Orthographic, Stereographic,
+AzimuthalEquidistant, Gnomonic -- all show the same shape gap, since it's
+a function of this domain's angular width, not the specific projection).
+The fetch/basemap-clip padding is deliberately asymmetric and generous in
+longitude (see `FETCH_PAD_LON_DEG`) to fill in as much of that gap as
+actually has real data behind it -- meridians converge toward the pole,
+so the same rectangular lon/lat crop that reaches the frame's edges at
+the domain's south end falls well short at the north end, and simply
+padding a few degrees in every direction (as earlier passes at this map
+did) doesn't fix that. Only a small sliver right at the very top corners
+is truly unfillable (no data exists there -- it's over the horizon from
+this domain's vantage point, confirmed by inverse-transforming those
+pixels back to lon/lat). The color table runs 0.5"-3.5" TPW, power-law
+spaced so the
 middle color lands on 1.5" rather than the range's literal midpoint
 (2.0") -- more of the ramp's color variation falls across the more common
 lower/moderate range, with the upper range comparatively compressed (see
@@ -65,7 +72,12 @@ zarr v3 sharding-indexed encoding; no manual codec work needed).
 WM-6 (global) is a plain regular 0.25 deg lat/lon grid, unlike the
 curvilinear native grids `wm6-3km`/HRRR fetches use elsewhere in this
 repo, so the map bbox crop is a direct index slice -- no `griddata`
-resampling step needed to handle a curvilinear source. It's then
+resampling step needed to handle a curvilinear source. The crop's
+longitude bounds are unwrapped around `CENTER_LON` before comparing
+against `LON_MIN`/`LON_MAX` (rather than compared as plain -180..180
+values), so `FETCH_PAD_LON_DEG`'s generous padding can cross the
+antimeridian -- as it does for this map's domain -- without the crop
+window splitting into two disjoint, wrongly-ordered pieces. It's then
 upsampled (`resample_to_finer_grid()`, linear interpolation via
 `RegularGridInterpolator`) to a finer grid before rendering, since WM-6's
 native ~28 km spacing is coarser than a screen pixel at this map's zoom

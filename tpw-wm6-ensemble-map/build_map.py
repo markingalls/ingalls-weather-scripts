@@ -116,22 +116,41 @@ LON_MIN, LON_MAX = -166.0, -112.0
 LAT_MIN, LAT_MAX = 12.5, 56.5
 CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
 
+# A rectangular lon/lat crop is NOT enough padding for a conic/perspective
+# projection: meridians converge toward the pole, so the same +/-N degrees
+# of longitude covers much less east-west ground at LAT_MAX than at
+# LAT_MIN. LambertConformal's projected top edge (running through
+# CENTER_LON at LAT_MAX) sits higher up than the top corners (running
+# through LON_MIN/LON_MAX at LAT_MAX), which is exactly what makes the
+# visible area a trapezoid -- and it means the screen-rows near the top of
+# the *bounding rectangle* need real data from well past LON_MIN/LON_MAX
+# to reach the frame's left/right edges, not just past LAT_MAX. Padding
+# longitude much more generously than latitude (verified by inverse-
+# transforming the axes' actual bounding-box edges back to lon/lat -- at
+# ~80% of the way up the frame, filling the corner there takes ~13-18 deg
+# of *extra* longitude on each side, not just a degree or two) fills in
+# most of both blank corners with real, correctly-located data instead of
+# leaving them empty; only a small sliver right at the very top tip (where
+# the required longitude range approaches a full hemisphere) is still
+# geometrically unfillable. FETCH_PAD_LON_DEG can safely be pushed past
+# 180 - LON_MIN or LON_MAX + 180 (i.e. wrapping across the antimeridian)
+# since fetch_tcwv_mean() crops using longitude unwrapped around
+# CENTER_LON rather than a naive -180..180 range check.
+FETCH_PAD_LON_DEG = 20.0
+FETCH_PAD_LAT_DEG = 2.0
+
 # Basemap geometries (country/state/border-line datasets) are sourced from
 # files that extend well past this map's domain -- fine for PlateCarree,
 # but reprojecting a line with far-off vertices into LambertConformal
 # can bow it into a visibly wrong shape or, worse, cut across the frame
-# entirely. Clipping every geometry to this padded box before handing it
+# entirely. Padded the same asymmetric amount as the data fetch above, for
+# the same reason -- clipping every geometry to this box before handing it
 # to add_geometries keeps every vertex within (or just outside) the
-# visible area -- see clip_to_map().
-MAP_CLIP_BOX = box(LON_MIN - 5, LAT_MIN - 5, LON_MAX + 5, LAT_MAX + 5)
-
-# WM-6 is a plain regular 0.25 deg lat/lon grid (unlike wm6-3km/HRRR's
-# curvilinear native grids), so cropping to the map bbox is a direct index
-# slice -- no griddata resampling needed to handle a curvilinear source.
-# The pad keeps the raster extending past the visible frame so cartopy's
-# LambertConformal warp (a screen-pixel -> source-raster inverse lookup)
-# has real data to sample right up to the curved frame's edge.
-FETCH_PAD_DEG = 1.5
+# visible area -- see clip_to_map(). (Unlike the data fetch, this doesn't
+# unwrap across the antimeridian -- basemap files store plain -180..180
+# coordinates -- but nothing of interest to this map sits out there.)
+MAP_CLIP_BOX = box(LON_MIN - FETCH_PAD_LON_DEG, LAT_MIN - FETCH_PAD_LAT_DEG,
+                    LON_MAX + FETCH_PAD_LON_DEG, LAT_MAX + FETCH_PAD_LAT_DEG)
 
 # WM-6's native 0.25 deg spacing (~28 km) is coarser than a single screen
 # pixel once zoomed to this map's domain -- upsampled via linear
@@ -281,10 +300,22 @@ def fetch_tcwv_mean(valid_time_utc, api_key):
             lon = fetch_zarr_array(rz, names, tmp_dir, "longitude")
             tcwv = fetch_zarr_array(rz, names, tmp_dir, f"ensemble_mean/{VARIABLE}")
 
-    lat_idx = np.where((lat >= LAT_MIN - FETCH_PAD_DEG) & (lat <= LAT_MAX + FETCH_PAD_DEG))[0]
-    lon_idx = np.where((lon >= LON_MIN - FETCH_PAD_DEG) & (lon <= LON_MAX + FETCH_PAD_DEG))[0]
+    # Longitude is unwrapped around CENTER_LON (rather than compared as
+    # plain -180..180 values) before cropping, so a generous
+    # FETCH_PAD_LON_DEG can cross the antimeridian without the crop window
+    # splitting into two disjoint, wrongly-ordered pieces -- see
+    # FETCH_PAD_LON_DEG's comment for why that padding needs to be large.
+    # Sorting lon_idx by the unwrapped value (not by raw array index, which
+    # can run in the "wrong" direction across that same antimeridian
+    # crossing) keeps lon_crop strictly ascending, which
+    # resample_to_finer_grid()'s RegularGridInterpolator requires.
+    lon_unwrapped = ((lon - CENTER_LON + 180) % 360) - 180 + CENTER_LON
+    lat_idx = np.where((lat >= LAT_MIN - FETCH_PAD_LAT_DEG) & (lat <= LAT_MAX + FETCH_PAD_LAT_DEG))[0]
+    lon_mask = (lon_unwrapped >= LON_MIN - FETCH_PAD_LON_DEG) & (lon_unwrapped <= LON_MAX + FETCH_PAD_LON_DEG)
+    lon_idx = np.where(lon_mask)[0]
+    lon_idx = lon_idx[np.argsort(lon_unwrapped[lon_idx])]
     lat_crop = lat[lat_idx]
-    lon_crop = lon[lon_idx]
+    lon_crop = lon_unwrapped[lon_idx]
     tcwv_crop = tcwv[np.ix_(lat_idx, lon_idx)]
 
     # WM-6's latitude axis runs north-to-south (90 down to -89.75); flip to
