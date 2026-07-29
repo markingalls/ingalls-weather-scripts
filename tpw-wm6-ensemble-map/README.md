@@ -76,11 +76,14 @@ field's small terrain-driven MSLP-reduction ripples over the Great
 Basin/Rockies -- real local extrema in the strict sense, but not backed by
 any actual closed isobar -- got marked just as readily as genuine synoptic
 centers, which read as a labeling bug rather than real features. The
-letters are drawn bold despite only Regular/Medium Poppins weights being
-installed (see `setup.sh`) by layering a second, narrower colored stroke
-between the white halo and the glyph fill -- thickening the letter's
-edges beyond what the Medium weight draws on its own -- rather than a
-true bold face.
+letters use Baloo 2 Bold (`BALOO_BOLD_PATH`) rather than this map's usual
+Poppins -- at the size a single big letter gets drawn here, Poppins'
+fairly square letterforms read differently than Baloo 2's genuinely
+rounded, chunky ones, and it's a true bold weight where Poppins only has
+Regular/Medium installed (see `setup.sh` for how it's fetched -- Baloo 2
+only ships as a variable font upstream, so it's pulled as a pre-built
+static instance from Google Fonts' CSS API rather than the raw-file grab
+Poppins uses).
 
 ## Usage
 

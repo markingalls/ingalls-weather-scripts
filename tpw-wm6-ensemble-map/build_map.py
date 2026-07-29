@@ -91,6 +91,12 @@ OCEAN_COLOR = "#D2E8F3"
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+# Bold + genuinely rounded (unlike Poppins, whose rounded-looking body
+# text still has fairly square letterforms) -- used only for the L/H
+# pressure-center markers, where the shape of a single big letter is much
+# more noticeable than in running text. See setup.sh for how this gets
+# installed (no static per-weight file to fetch the way Poppins' can).
+BALOO_BOLD_PATH = "/usr/share/fonts/truetype/google-fonts/Baloo2-Bold.ttf"
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -552,6 +558,7 @@ def load_boundary_lines(path):
 def build_map(date, hour, output_path, override_path=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
+    baloo_bold = fm.FontProperties(fname=BALOO_BOLD_PATH)
 
     local_dt = datetime(date.year, date.month, date.day, hour, tzinfo=LOCAL_TZ)
     valid_time_utc = local_dt.astimezone(ZoneInfo("UTC"))
@@ -668,26 +675,24 @@ def build_map(date, hour, output_path, override_path=None):
     ax.clabel(isobars, inline=True, fontsize=7, fmt="%d", colors="#4a4a4a")
 
     # Pressure center ("L"/"H") markers -- red for lows, blue for highs
-    # (the common public-facing convention). Only the Poppins weights
-    # already used elsewhere in this map are available (Regular/Medium,
-    # no true bold face -- see setup.sh), so "bold" is faked with a
-    # second, narrower colored stroke layered between the white halo and
-    # the glyph fill, thickening the letter's edges beyond what the
-    # Medium weight draws on its own; the white halo underneath is thin
-    # enough to just keep the letter legible over the shading/basemap
-    # rather than reading as its own outline. Projected to axes data
-    # coordinates once via proj.transform_point() rather than passing
-    # transform=pc through to text, since px/py is reused if a second
-    # element (e.g. a value label) is ever added back here -- see
-    # find_pressure_extrema() for how these centers were found.
+    # (the common public-facing convention), in Baloo 2 Bold rather than
+    # this map's usual Poppins: at the size a single big letter gets drawn
+    # here, Poppins' fairly square, business-document letterforms read
+    # differently than Baloo 2's genuinely rounded, chunky ones, which fit
+    # a friendly weather-map marker better -- a true bold weight too,
+    # unlike Poppins' Regular/Medium (see BALOO_BOLD_PATH). White halo
+    # just keeps the letter legible over the shading/basemap rather than
+    # reading as its own outline. Projected to axes data coordinates once
+    # via proj.transform_point() rather than passing transform=pc through
+    # to text, since px/py is reused if a second element (e.g. a value
+    # label) is ever added back here -- see find_pressure_extrema() for
+    # how these centers were found.
     for ex_lon, ex_lat, _, kind in pressure_extrema:
         color = "#c0392b" if kind == "L" else "#1f5fa8"
         px, py = proj.transform_point(ex_lon, ex_lat, pc)
         ax.text(px, py, kind, ha="center", va="center", fontsize=22,
-                 color=color, zorder=4, fontproperties=poppins_semibold,
-                 path_effects=[pe.Stroke(linewidth=1.8, foreground="white"),
-                               pe.Stroke(linewidth=1.1, foreground=color),
-                               pe.Normal()])
+                 color=color, zorder=4, fontproperties=baloo_bold,
+                 path_effects=[pe.withStroke(linewidth=1.8, foreground="white")])
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
