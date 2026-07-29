@@ -53,12 +53,14 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
+import matplotlib.patheffects as pe
 from matplotlib.colors import Normalize, LinearSegmentedColormap
 import numpy as np
 import requests
 import zarr
 from remotezip import RemoteZip
 from scipy.interpolate import RegularGridInterpolator
+from scipy.ndimage import label, maximum_filter, minimum_filter, uniform_filter
 
 import cartopy.crs as ccrs
 import shapely
@@ -105,6 +107,14 @@ MSLP_VARIABLE = "pressure_msl"
 # consistent map to map, so the levels are computed from the data itself
 # (see build_map()).
 MSLP_CONTOUR_INTERVAL_HPA = 4
+
+# Minimum separation, in degrees, required between two pressure-center
+# ("L"/"H") markers -- see find_pressure_extrema(). Sized for this map's
+# domain (54 deg lon x 44 deg lat): small enough to catch two genuinely
+# distinct synoptic-scale centers, large enough that a single broad
+# low/high doesn't get tagged twice off two adjacent grid cells that are
+# both very close to its true extremum.
+PRESSURE_EXTREMA_MIN_SEPARATION_DEG = 6.0
 
 # ---------------------------------------------------------------------------
 # Figure geometry. Under LambertConformal (see build_map()'s note on
@@ -366,6 +376,65 @@ def resample_to_finer_grid(lat, lon, values, factor=RESAMPLE_FACTOR):
     return fine_lat, fine_lon, fine_values
 
 
+def find_pressure_extrema(lat, lon, mslp_hpa):
+    """Find local minima ("L") and maxima ("H") pressure centers in the
+    native-resolution MSLP grid -- run before resample_to_finer_grid(),
+    since upsampling doesn't add any real new extrema, just many more
+    near-duplicate grid cells right next to the true one. Searches the
+    full fetched-and-padded grid (real data, not just this map's declared
+    LON_MIN/LON_MAX/LAT_MIN/LAT_MAX box) so a genuine extremum near the
+    domain's edge isn't missed or distorted by the search window running
+    off the edge of the array, but only returns extrema that land inside
+    the visible box -- a center just outside it wouldn't have anywhere
+    sensible to draw its label anyway.
+
+    A sliding min/max filter sized to PRESSURE_EXTREMA_MIN_SEPARATION_DEG
+    finds grid cells that are already the most extreme value in their own
+    neighborhood; this smooth an ensemble-mean field often has several
+    adjacent cells tied at that same extreme value (a small flat plateau
+    at a center's true peak/trough) rather than a single sharp cell, so
+    connected-component labeling collapses each such plateau to one
+    point (its centroid) instead of one marker per tied cell.
+
+    Not every such local extremum is a real pressure center worth
+    marking -- this field has plenty of small, sub-isobar-interval
+    ripples (terrain-driven MSLP-reduction noise over the Great
+    Basin/Rockies, mainly) that are local extrema in the strict sense but
+    would draw an "L"/"H" floating over a patch with no actual closed
+    isobar anywhere near it, which would look like a labeling bug rather
+    than a real feature. Filtered by prominence: each candidate is
+    compared against the mean field over a much wider window (3x the
+    separation window) centered on it, and only kept if it clears
+    MSLP_CONTOUR_INTERVAL_HPA -- i.e. if it's extreme enough that at
+    least one drawn isobar could plausibly close a loop around it, which
+    is the same bar a human analyst marking centers by eye would use.
+
+    Returns a list of (lon, lat, value_hpa, "L" or "H") tuples."""
+    lat_res = abs(lat[1] - lat[0])
+    lon_res = abs(lon[1] - lon[0])
+    size_lat = max(3, int(round(PRESSURE_EXTREMA_MIN_SEPARATION_DEG / lat_res)))
+    size_lon = max(3, int(round(PRESSURE_EXTREMA_MIN_SEPARATION_DEG / lon_res)))
+
+    local_min = mslp_hpa == minimum_filter(mslp_hpa, size=(size_lat, size_lon), mode="nearest")
+    local_max = mslp_hpa == maximum_filter(mslp_hpa, size=(size_lat, size_lon), mode="nearest")
+    background = uniform_filter(mslp_hpa, size=(size_lat * 3, size_lon * 3), mode="nearest")
+
+    extrema = []
+    for mask, kind, sign in [(local_min, "L", -1), (local_max, "H", 1)]:
+        labeled, n_features = label(mask)
+        for i in range(1, n_features + 1):
+            ys, xs = np.where(labeled == i)
+            cy, cx = int(round(ys.mean())), int(round(xs.mean()))
+            ex_lon, ex_lat = lon[cx], lat[cy]
+            if not (LON_MIN <= ex_lon <= LON_MAX and LAT_MIN <= ex_lat <= LAT_MAX):
+                continue
+            value = mslp_hpa[cy, cx]
+            prominence = sign * (value - background[cy, cx])
+            if prominence >= MSLP_CONTOUR_INTERVAL_HPA:
+                extrema.append((ex_lon, ex_lat, value, kind))
+    return extrema
+
+
 def imshow_antimeridian_safe(ax, data, lon, lat, transform, **imshow_kwargs):
     """Like ax.imshow(data, transform=transform, origin="lower",
     extent=[lon[0], lon[-1], lat[0], lat[-1]], ...), but safe for a lon
@@ -505,6 +574,8 @@ def build_map(date, hour, output_path, override_path=None):
 
     print(f"TPW range in fetched crop: {tcwv_mm.min():.0f} - {tcwv_mm.max():.0f} mm")
     print(f"MSLP range in fetched crop: {mslp_hpa.min():.0f} - {mslp_hpa.max():.0f} hPa")
+    pressure_extrema = find_pressure_extrema(lat, lon, mslp_hpa)
+    print(f"Pressure centers found: {', '.join(f'{k}{v:.0f}' for _, _, v, k in pressure_extrema) or 'none'}")
     print(f"Resampling from {lat.size}x{lon.size} native grid...")
     lat_r, lon_r, tcwv_mm = resample_to_finer_grid(lat, lon, tcwv_mm)
     _, _, mslp_hpa = resample_to_finer_grid(lat, lon, mslp_hpa)
@@ -595,6 +666,27 @@ def build_map(date, hour, output_path, override_path=None):
     isobars = ax.contour(lon, lat, mslp_hpa, levels=mslp_levels, transform=pc,
                           colors="#4a4a4a", linewidths=0.9, zorder=3)
     ax.clabel(isobars, inline=True, fontsize=7, fmt="%d", colors="#4a4a4a")
+
+    # Pressure center ("L"/"H") markers -- bold letter with the rounded
+    # hPa value beneath it, red for lows and blue for highs (the common
+    # public-facing convention). White stroke keeps them legible over any
+    # combination of TPW shading/land/ocean underneath. Projected to axes
+    # data coordinates once via proj.transform_point() rather than
+    # passing transform=pc through to text/annotate, so the value label's
+    # pixel offset from its letter (ax.annotate's `xytext`/`offset
+    # points`) doesn't need a second, more awkward CRS-aware transform
+    # composition -- see find_pressure_extrema() for how these centers
+    # were found.
+    for ex_lon, ex_lat, ex_val, kind in pressure_extrema:
+        color = "#c0392b" if kind == "L" else "#1f5fa8"
+        px, py = proj.transform_point(ex_lon, ex_lat, pc)
+        ax.text(px, py, kind, ha="center", va="center", fontsize=22,
+                 color=color, zorder=4, fontproperties=poppins_semibold,
+                 path_effects=[pe.withStroke(linewidth=2.5, foreground="white")])
+        ax.annotate(f"{ex_val:.0f}", xy=(px, py), xytext=(0, -19), textcoords="offset points",
+                     ha="center", va="top", fontsize=9, color=color, zorder=4,
+                     fontproperties=poppins_reg,
+                     path_effects=[pe.withStroke(linewidth=2, foreground="white")])
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)

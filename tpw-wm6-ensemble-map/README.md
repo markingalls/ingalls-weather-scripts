@@ -66,6 +66,18 @@ longitude array without the per-segment splitting `imshow_antimeridian_safe()`
 needs, since it transforms each contour vertex through the CRS directly
 rather than warping a raster extent.
 
+Surface pressure centers get "L"/"H" markers (red/blue, with the rounded
+hPa value beneath) via `find_pressure_extrema()`: a sliding min/max filter
+finds local extrema in the native-resolution MSLP grid, then a prominence
+check against a much wider local-mean window keeps only extrema that
+clear a full `MSLP_CONTOUR_INTERVAL_HPA` -- i.e. extreme enough that a
+drawn isobar could plausibly close a loop around them. Without that
+filter, this field's small terrain-driven MSLP-reduction ripples over the
+Great Basin/Rockies -- real local extrema in the strict sense, but not
+backed by any actual closed isobar -- got marked just as readily as
+genuine synoptic centers, which read as a labeling bug rather than real
+features.
+
 ## Usage
 
 ```bash
