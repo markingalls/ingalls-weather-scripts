@@ -14,6 +14,7 @@ from shapely.geometry import shape, box, Polygon
 from shapely.ops import transform as shp_transform, unary_union
 import numpy as np
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from collections import defaultdict
 
 # ---------- fonts ----------
@@ -390,12 +391,10 @@ else:
 # ---------- title / subtitle ----------
 subtitle_y = top_y + 0.018
 title_y = subtitle_y + 0.035
-fig.text(left_x, title_y, "Columbia Basin: Active NWS Weather Alerts",
+fig.text(left_x, title_y, "Active NWS Weather Alerts",
           fontproperties=f_bold, fontsize=22, color="#2b2a26")
-if active_event_types:
-    subtitle = ", ".join(active_event_types) + " in effect"
-else:
-    subtitle = "No active NWS alerts"
+now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+subtitle = f"Updated: {now_pt.strftime('%d %B %Y %H:%M')} PT"
 fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 
 # ---------- legend ----------
