@@ -396,17 +396,37 @@ def clip_outline_to_map(geom):
     return clip_to_map(geom.boundary)
 
 
+def _load_country_geoms():
+    with open(COUNTRIES_FILE) as f:
+        data = json.load(f)
+    return [shape(feat["geometry"]) for feat in data["features"]
+            if feat["properties"].get("NAME") in TARGET_COUNTRIES]
+
+
 def load_countries():
     """Full country polygons (not just a coastline-only dataset) -- the
     only basemap layer in /maps that reaches Hawaii, since it's drawn per
     country rather than clipped to a Pacific Northwest bounding box.
     Doubles as the coastline: drawn outline-only so TPW shading over water
-    stays visible."""
-    with open(COUNTRIES_FILE) as f:
-        data = json.load(f)
-    geoms = [shape(feat["geometry"]) for feat in data["features"]
-             if feat["properties"].get("NAME") in TARGET_COUNTRIES]
-    return [g for g in (clip_outline_to_map(g) for g in geoms) if g is not None]
+    stays visible. Clips each country's *boundary* rather than the polygon
+    itself -- see clip_outline_to_map() -- so a straight MAP_CLIP_BOX edge
+    cutting through a country doesn't get drawn as a fake coastline/border
+    segment. Use load_countries_filled() instead for the land fill layer."""
+    return [g for g in (clip_outline_to_map(g) for g in _load_country_geoms()) if g is not None]
+
+
+def load_countries_filled():
+    """Country polygons clipped to MAP_CLIP_BOX, keeping polygon area (not
+    just the boundary line) -- for the land fill layer. Reusing
+    load_countries()'s boundary-only geometries for a facecolor fill looked
+    fine everywhere the boundary clip stayed a closed ring, but wherever
+    MAP_CLIP_BOX actually cuts a country open (this domain's northern edge,
+    for instance), matplotlib auto-closes that open line with a straight
+    chord for fill purposes -- visible as a diagonal bite out of the land
+    fill near the box edge, even though the polygon itself has real area
+    all the way out to the box. Clipping the polygon (not its boundary)
+    keeps that area intact."""
+    return [g for g in (clip_to_map(g) for g in _load_country_geoms()) if g is not None]
 
 
 def load_states():
@@ -462,6 +482,7 @@ def build_map(date, hour, output_path, override_path=None):
 
     print("Loading basemap layers...")
     country_geoms = load_countries()
+    country_fill_geoms = load_countries_filled()
     state_geoms = load_states()
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
@@ -495,7 +516,7 @@ def build_map(date, hour, output_path, override_path=None):
     # data floating over nothing. Drawn again further down, outline-only,
     # on top of the TPW field for a coastline that stays crisp regardless
     # of the data's opacity there.
-    ax.add_geometries(country_geoms, crs=pc, facecolor=LAND_COLOR, edgecolor="none", zorder=0.5)
+    ax.add_geometries(country_fill_geoms, crs=pc, facecolor=LAND_COLOR, edgecolor="none", zorder=0.5)
 
     # TPW field -- a fixed mm-to-color enhancement curve (not rescaled to
     # this map's data range), so color reads consistently across every map

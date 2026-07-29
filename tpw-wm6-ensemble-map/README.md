@@ -37,7 +37,16 @@ in by alpha rather than switching on/off hard at its 0.5" floor -- fully
 transparent below it, ramping up to fully opaque by 0.75"
 (`TPW_ALPHA_FADE_END_IN`) -- so sparse/dry areas still read as a real map
 (dry land vs. dry ocean) instead of blank space, with the TPW color
-easing in on top as it picks up.
+easing in on top as it picks up. The land fill uses its own loader,
+`load_countries_filled()`, rather than reusing `load_countries()`'s
+boundary-only geometries: filling those with `facecolor` looked right
+almost everywhere, but wherever `MAP_CLIP_BOX` actually cuts a country
+open (this domain's northern edge, running through Canada), matplotlib
+auto-closes that clipped-open boundary line with a straight chord for
+fill purposes -- a diagonal bite out of the land fill near the box edge,
+even though the country's actual polygon has real area all the way out to
+the box. `load_countries_filled()` clips the polygon itself (keeping
+area) instead of its boundary, so the fill reaches the box edge cleanly.
 
 ## Usage
 
