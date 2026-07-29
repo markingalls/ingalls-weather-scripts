@@ -51,9 +51,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-import matplotlib.patheffects as pe
 from matplotlib.colors import Normalize, LinearSegmentedColormap
-from matplotlib.transforms import offset_copy
 import numpy as np
 import requests
 import zarr
@@ -116,7 +114,7 @@ LON_MIN, LON_MAX = -166.0, -112.0
 LAT_MIN, LAT_MAX = 12.5, 56.5
 CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
 
-# A rectangular lon/lat crop is NOT enough padding for a conic/perspective
+# A rectangular lon/lat crop is NOT enough padding for a conic
 # projection: meridians converge toward the pole, so the same +/-N degrees
 # of longitude covers much less east-west ground at LAT_MAX than at
 # LAT_MIN. LambertConformal's projected top edge (running through
@@ -125,18 +123,21 @@ CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
 # visible area a trapezoid -- and it means the screen-rows near the top of
 # the *bounding rectangle* need real data from well past LON_MIN/LON_MAX
 # to reach the frame's left/right edges, not just past LAT_MAX. Padding
-# longitude much more generously than latitude (verified by inverse-
-# transforming the axes' actual bounding-box edges back to lon/lat -- at
-# ~80% of the way up the frame, filling the corner there takes ~13-18 deg
-# of *extra* longitude on each side, not just a degree or two) fills in
-# most of both blank corners with real, correctly-located data instead of
-# leaving them empty; only a small sliver right at the very top tip (where
-# the required longitude range approaches a full hemisphere) is still
-# geometrically unfillable. FETCH_PAD_LON_DEG can safely be pushed past
-# 180 - LON_MIN or LON_MAX + 180 (i.e. wrapping across the antimeridian)
-# since fetch_tcwv_mean() crops using longitude unwrapped around
-# CENTER_LON rather than a naive -180..180 range check.
-FETCH_PAD_LON_DEG = 20.0
+# longitude much more generously than latitude fills in the blank
+# corners with real, correctly-located data instead of leaving them
+# empty. Unlike a true perspective/satellite-view projection (which has a
+# hard horizon cutoff -- see this map's earlier NearsidePerspective pass),
+# LambertConformal is conic and has no such cutoff: inverse-transforming
+# the axes' actual bounding-box corners back to lon/lat gives a real,
+# finite answer even at the very top corners (verified directly -- the
+# worst case, exactly at the top-left/top-right corner pixels, needs
+# ~18.4 deg of *extra* longitude beyond LON_MIN/LON_MAX), so with enough
+# padding the corners really can be filled completely, not just mostly.
+# FETCH_PAD_LON_DEG can safely be pushed past 180 - LON_MIN or LON_MAX +
+# 180 (i.e. wrapping across the antimeridian) since fetch_tcwv_mean()
+# crops using longitude unwrapped around CENTER_LON rather than a naive
+# -180..180 range check.
+FETCH_PAD_LON_DEG = 26.0
 FETCH_PAD_LAT_DEG = 2.0
 
 # Basemap geometries (country/state/border-line datasets) are sourced from
@@ -158,28 +159,6 @@ MAP_CLIP_BOX = box(LON_MIN - FETCH_PAD_LON_DEG, LAT_MIN - FETCH_PAD_LAT_DEG,
 # LambertConformal warp has dense enough source data to fill the frame
 # smoothly instead of showing a blocky/native-pixel-grid look.
 RESAMPLE_FACTOR = 6
-
-# ---------------------------------------------------------------------------
-# Cities -- spread across the domain for geographic reference. (name, lon,
-# lat, label position: "left" | "right")
-# ---------------------------------------------------------------------------
-CITIES = [
-    ("Honolulu", -157.8583, 21.3069, "right"),
-    ("Hilo", -155.0868, 19.7241, "right"),
-    ("Seattle", -122.3321, 47.6062, "right"),
-    ("Portland", -122.6784, 45.5152, "left"),
-    ("San Francisco", -122.4194, 37.7749, "left"),
-    ("Los Angeles", -118.2437, 34.0522, "right"),
-    ("Las Vegas", -115.1398, 36.1699, "left"),
-    ("Salt Lake City", -111.8910, 40.7608, "right"),
-    ("Boise", -116.2023, 43.6150, "left"),
-    ("Spokane", -117.4260, 47.6588, "right"),
-    ("Vancouver", -123.1207, 49.2827, "left"),
-    ("Prince George", -122.7497, 53.9171, "left"),
-    ("Calgary", -114.0719, 51.0447, "left"),
-    ("Edmonton", -113.4938, 53.5461, "left"),
-    ("Saskatoon", -106.6700, 52.1332, "right"),
-]
 
 # ---------------------------------------------------------------------------
 # Total precipitable water color table -- fixed inch-to-RGB control points
@@ -344,6 +323,39 @@ def resample_to_finer_grid(lat, lon, values, factor=RESAMPLE_FACTOR):
     return fine_lat, fine_lon, fine_values
 
 
+def imshow_antimeridian_safe(ax, data, lon, lat, transform, **imshow_kwargs):
+    """Like ax.imshow(data, transform=transform, origin="lower",
+    extent=[lon[0], lon[-1], lat[0], lat[-1]], ...), but safe for a lon
+    array that extends past the standard -180..180 range -- which
+    FETCH_PAD_LON_DEG's antimeridian-crossing padding produces for this
+    map's domain. A single imshow call with an out-of-range extent
+    silently fails to warp the out-of-range portion (cartopy's
+    img_transform assumes a plain -180..180 source extent), leaving that
+    part of the curved frame blank even though the source data is right
+    there -- confirmed by comparing a single call against this split
+    version, which fills the frame's corners completely. Converting to
+    standard signed longitude and splitting into contiguous pieces
+    wherever that wraps (there's at most one wrap for this map's domain,
+    but this handles the general case) avoids the bug. Each internal
+    piece boundary is pinned to just past +/-180 (boundary_overlap_deg)
+    rather than the nearest grid column's actual value (a hair short of
+    +/-180) -- pinning to the exact boundary still left a faint, hairline
+    gap at the seam (matplotlib/cartopy edge antialiasing, not a real data
+    gap) that read as a thin dotted line; the small deliberate overlap
+    between pieces (harmless -- it's the same data on both sides) papers
+    over that antialiasing gap instead."""
+    boundary_overlap_deg = 0.1
+    lon_std = ((lon + 180) % 360) - 180
+    wrap_idx = np.where(np.diff(lon_std) < 0)[0]
+    bounds = [0, *(i + 1 for i in wrap_idx), len(lon_std)]
+    n_pieces = len(bounds) - 1
+    for i, (start, end) in enumerate(zip(bounds[:-1], bounds[1:])):
+        left = lon_std[start] if i == 0 else -180.0 - boundary_overlap_deg
+        right = lon_std[end - 1] if i == n_pieces - 1 else 180.0 + boundary_overlap_deg
+        ax.imshow(data[:, start:end], transform=transform, origin="lower",
+                  extent=[left, right, lat[0], lat[-1]], **imshow_kwargs)
+
+
 # ---------------------------------------------------------------------------
 # Basemap layers
 # ---------------------------------------------------------------------------
@@ -473,36 +485,21 @@ def build_map(date, hour, output_path, override_path=None):
     # this script renders. Cartopy warps this regular grid into the curved
     # LambertConformal view internally (a source-raster -> screen-pixel
     # inverse lookup, which is why cartopy's img_transform needs scipy --
-    # see requirements.txt). Cells below the color table's 0.5" floor are
-    # masked out (rather than clamped to the lightest color) so they're
-    # left unshaded -- transparent, showing the plain basemap -- instead of
-    # reading as a real (if very dry) TPW value.
+    # see requirements.txt), split at the antimeridian by
+    # imshow_antimeridian_safe() -- see its docstring for why a single
+    # imshow call can't be used here. Cells below the color table's 0.5"
+    # floor are masked out (rather than clamped to the lightest color) so
+    # they're left unshaded -- transparent, showing the plain basemap --
+    # instead of reading as a real (if very dry) TPW value.
     tpw_cmap = build_tpw_colormap()
     tpw_cmap.set_bad(alpha=0)
     tpw_norm = Normalize(vmin=TPW_MM_MIN, vmax=TPW_MM_MAX)
     tcwv_masked = np.ma.masked_less(tcwv_mm, TPW_MM_MIN)
-    ax.imshow(tcwv_masked, transform=pc, cmap=tpw_cmap, norm=tpw_norm, origin="lower",
-              extent=[lon.min(), lon.max(), lat.min(), lat.max()], zorder=1)
+    imshow_antimeridian_safe(ax, tcwv_masked, lon, lat, pc, cmap=tpw_cmap, norm=tpw_norm, zorder=1)
 
     ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
-
-    # City labels -- dot plus name, no value overlay (this is a continental-
-    # scale overview map, not a point-forecast one).
-    geodetic_transform = pc._as_mpl_transform(ax)
-    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.75))]
-    for name, lon_c, lat_c, pos in CITIES:
-        if not (LON_MIN <= lon_c <= LON_MAX and LAT_MIN <= lat_c <= LAT_MAX):
-            continue
-        ax.plot(lon_c, lat_c, marker="o", markersize=4.6, color="white", zorder=100,
-                mec="black", mew=0.7, transform=pc)
-        dx_pt = 6 if pos == "right" else -6
-        ha = "left" if pos == "right" else "right"
-        name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
-        txt = ax.text(lon_c, lat_c, name, fontsize=9.25, fontproperties=poppins_semibold,
-                       color="white", ha=ha, va="center", zorder=101, transform=name_transform)
-        txt.set_path_effects(stroke)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)

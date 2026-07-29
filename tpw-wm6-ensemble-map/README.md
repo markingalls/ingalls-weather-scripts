@@ -14,21 +14,24 @@ curved projections -- NearsidePerspective, Orthographic, Stereographic,
 AzimuthalEquidistant, Gnomonic -- all show the same shape gap, since it's
 a function of this domain's angular width, not the specific projection).
 The fetch/basemap-clip padding is deliberately asymmetric and generous in
-longitude (see `FETCH_PAD_LON_DEG`) to fill in as much of that gap as
-actually has real data behind it -- meridians converge toward the pole,
-so the same rectangular lon/lat crop that reaches the frame's edges at
-the domain's south end falls well short at the north end, and simply
-padding a few degrees in every direction (as earlier passes at this map
-did) doesn't fix that. Only a small sliver right at the very top corners
-is truly unfillable (no data exists there -- it's over the horizon from
-this domain's vantage point, confirmed by inverse-transforming those
-pixels back to lon/lat). The color table runs 0.5"-3.5" TPW, power-law
-spaced so the
-middle color lands on 1.5" rather than the range's literal midpoint
-(2.0") -- more of the ramp's color variation falls across the more common
-lower/moderate range, with the upper range comparatively compressed (see
-`TPW_IN_MID`). Cells below the 0.5" floor are left unshaded rather than
-clamped to the lightest color.
+longitude (see `FETCH_PAD_LON_DEG`) to fill in that gap with real,
+correctly-located data -- meridians converge toward the pole, so the same
+rectangular lon/lat crop that reaches the frame's edges at the domain's
+south end falls well short at the north end, and simply padding a few
+degrees in every direction (as earlier passes at this map did) doesn't
+fix that. Unlike a true perspective/satellite-view projection (which has
+a hard horizon cutoff), LambertConformal is conic and has no such limit
+-- inverse-transforming the frame's actual corner pixels back to lon/lat
+gives a real, finite answer even there, so with enough padding the
+corners really do fill in completely (not just mostly); see
+`imshow_antimeridian_safe()` for the other half of making that work, once
+the padding was wide enough to actually cross the antimeridian. The color
+table runs 0.5"-3.5" TPW, power-law spaced so the middle color lands on
+1.5" rather than the range's literal midpoint (2.0") -- more of the
+ramp's color variation falls across the more common lower/moderate range,
+with the upper range comparatively compressed (see `TPW_IN_MID`). Cells
+below the 0.5" floor are left unshaded rather than clamped to the
+lightest color.
 
 ## Usage
 
@@ -85,6 +88,16 @@ level and would otherwise look blocky once warped into the curved
 LambertConformal view (a separate step from the crop/upsample, which is
 why `scipy` is a dependency -- see `requirements.txt`).
 
+Rendering that antimeridian-crossing data needs its own workaround:
+`ax.imshow(..., extent=[...])` silently fails to warp the portion of an
+extent that falls outside standard -180..180 (cartopy's `img_transform`
+assumes a plain-range source), which left a blank gap even though the
+fetched data was right there. `imshow_antimeridian_safe()` converts back
+to standard signed longitude and splits into one `imshow` call per
+contiguous piece wherever that wraps, with a small deliberate overlap
+between pieces (harmless -- it's the same data on both sides) to paper
+over a hairline antialiasing seam at the join.
+
 Country/state/border-line basemap geometries are clipped to the map's bbox
 (`MAP_CLIP_BOX`) and densified (`shapely.segmentize`) before being handed
 to cartopy: at this domain's size, a real, mostly-straight-in-lon/lat run
@@ -97,8 +110,8 @@ along.
 ## Files
 
 - `build_map.py` -- fetches the ensemble-mean TPW grid for the requested
-  local date/hour and renders the map. Map domain, city labels, and the
-  color table are all defined near the top -- edit directly to adjust.
+  local date/hour and renders the map. Map domain and the color table are
+  both defined near the top -- edit directly to adjust.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
   needs GDAL, which only installs via apt, not pip).
 
