@@ -1,0 +1,70 @@
+# WM-6 Ensemble Mean TPW Map
+
+One-off styled map of total precipitable water (TPW, i.e. total column
+water vapour) for a single valid time, from WindBorne's WeatherMesh-6
+global ensemble. Domain runs from Hawaii (SW corner) to the northwest
+corner of Saskatchewan (NE corner) -- the North Pacific, US West Coast,
+Great Basin, and Western Canada in one frame.
+
+## Usage
+
+```bash
+bash setup.sh                       # first time / fresh environment only
+export WB_API_KEY=...
+python build_map.py                 # tomorrow, 12:00 PM Pacific
+python build_map.py --date 2026-07-30 --hour 12
+python build_map.py --file output/snapshot_2026-07-30_12.npz  # re-render without re-fetching
+```
+
+`--date` is local (Pacific) time, default tomorrow. `--hour` is the local
+target hour (0-23), default 12 (noon). WM-6's global gridded product
+publishes 3-hourly steps, so the map is actually valid at whichever step
+falls nearest the requested time -- if that's more than a minute off, the
+subtitle notes the substitution (e.g. "nearest available step to 12:00 PM
+PT: 11:00 AM PDT").
+
+## Data source
+
+WindBorne WeatherMesh-6 (global, 0.25 deg), ensemble mean of
+`total_column_water_vapour`, via the WindBorne gridded forecast API
+(`WB_API_KEY` required -- get one at
+https://app.windbornesystems.com/api_tokens).
+
+Every run this was built against had already moved to archived storage by
+the time it was fetched (WM-6 archives a run shortly after it finishes),
+at which point the API's `variable=`/`include_distribution=` filtering is
+rejected outright and only the complete per-forecast-hour file (every
+variable, level, and product -- deterministic, ensemble mean/std, members,
+percentiles -- roughly 2 GB compressed) is servable, via a presigned URL
+(`as_url=true` with `variable=all`). `fetch_tcwv_mean()` in `build_map.py`
+avoids pulling that whole archive: it uses
+[`remotezip`](https://github.com/gtsystem/python-remotezip) to make HTTP
+range requests against the presigned URL for just the handful of zarr
+entries this map needs (the latitude/longitude coordinate arrays and the
+TCWV ensemble-mean field), a few MB total instead of ~2 GB, then decodes
+them with `zarr` from a small local directory built to mirror those
+entries' paths (zarr's own codec pipeline handles WM-6's zstd/blosc +
+zarr v3 sharding-indexed encoding; no manual codec work needed).
+
+WM-6 (global) is a plain regular 0.25 deg lat/lon grid, unlike the
+curvilinear native grids `wm6-3km`/HRRR fetches use elsewhere in this
+repo, so the map bbox crop is a direct index slice -- no `griddata`
+resampling step needed.
+
+## Files
+
+- `build_map.py` -- fetches the ensemble-mean TPW grid for the requested
+  local date/hour and renders the map. Map domain, city labels, and the
+  color table are all defined near the top -- edit directly to adjust.
+- `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
+  needs GDAL, which only installs via apt, not pip).
+
+Shared basemap data lives one level up in [`../maps/`](../maps/):
+`countries_slim.json` (full US/Canada/Mexico country polygons -- used
+here instead of `land_slim.json`, which is clipped to the Pacific
+Northwest and doesn't reach Hawaii), `states_lakes_slim.json` (state/
+province polygons, lakes excluded), and `admin0_boundary_lines.json`
+(international border line dataset).
+
+Output PNG (and, unless rendering from `--file`, a `.npz` snapshot of the
+fetched grid) lands in `output/`.
