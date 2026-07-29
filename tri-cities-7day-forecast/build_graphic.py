@@ -16,10 +16,28 @@ import matplotlib.patheffects as pe
 from matplotlib.patches import FancyBboxPatch
 
 # ---------- fonts ----------
+# Poppins isn't packaged for apt (see fetch_hrrr_smoke_forecast.py's sibling
+# projects, which curl it from Google's font repo at setup time instead) and
+# this project's own setup.sh never picked up that step, so it's only ever
+# been present by coincidence of whatever environment happened to already
+# have it. Falling back to Montserrat -- a very close geometric-sans match,
+# and a plain `apt install fonts-montserrat` -- means this renders correctly
+# even where Poppins was never installed (a bare CI runner, a fresh droplet)
+# instead of crashing outright.
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
-f_bold = fm.FontProperties(fname=FONT_DIR + "Poppins-Bold.ttf")
-f_reg = fm.FontProperties(fname=FONT_DIR + "Poppins-Regular.ttf")
-f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
+FALLBACK_FONT_DIR = "/usr/share/fonts/truetype/montserrat/"
+
+
+def _load_font(poppins_name, fallback_name):
+    poppins_path = FONT_DIR + poppins_name
+    if os.path.exists(poppins_path):
+        return fm.FontProperties(fname=poppins_path)
+    return fm.FontProperties(fname=FALLBACK_FONT_DIR + fallback_name)
+
+
+f_bold = _load_font("Poppins-Bold.ttf", "Montserrat-Bold.ttf")
+f_reg = _load_font("Poppins-Regular.ttf", "Montserrat-Regular.ttf")
+f_med = _load_font("Poppins-Medium.ttf", "Montserrat-Medium.ttf")
 
 ICON_FONT = fm.FontProperties(fname="fonts/easy_weather_icons_font.ttf")
 
