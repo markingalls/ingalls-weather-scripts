@@ -94,9 +94,14 @@ POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 # Bold + genuinely rounded (unlike Poppins, whose rounded-looking body
 # text still has fairly square letterforms) -- used only for the L/H
 # pressure-center markers, where the shape of a single big letter is much
-# more noticeable than in running text. See setup.sh for how this gets
-# installed (no static per-weight file to fetch the way Poppins' can).
-BALOO_BOLD_PATH = "/usr/share/fonts/truetype/google-fonts/Baloo2-Bold.ttf"
+# more noticeable than in running text. Checked into /assets (unlike the
+# Poppins weights above, which setup.sh installs system-wide) since
+# fm.FontProperties(fname=...) loads a TTF directly from any path, no
+# system font install needed -- committing it means rendering this map
+# doesn't depend on Google Fonts being reachable at setup time for a font
+# that, being variable-only upstream, couldn't be fetched as a raw static
+# file the way Poppins' setup.sh step does anyway.
+BALOO_BOLD_PATH = ASSETS_DIR / "fonts" / "Baloo2-Bold.ttf"
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 

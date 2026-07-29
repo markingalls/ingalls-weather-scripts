@@ -1,8 +1,13 @@
 #!/bin/bash
 # Run once when a Claude Code cloud session starts.
 # cartopy needs GDAL at the system level -- only installs via apt, not pip.
-# The Poppins/Baloo 2 fonts used for map labels also need installing
-# manually here since neither is packaged for apt.
+# The Poppins font used for most map labels also needs installing manually
+# here since it isn't packaged for apt. (Baloo 2, used for the L/H
+# pressure-center markers, is checked into ../assets/fonts instead --
+# fm.FontProperties(fname=...) loads a TTF straight from that path, no
+# system font install needed -- since it only ships as a variable font
+# upstream, with no static per-weight file this setup script could fetch
+# the way Poppins' can.)
 set -e
 
 apt-get update
@@ -17,14 +22,3 @@ for f in Poppins-Regular Poppins-Medium; do
       "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/${f}.ttf"
   fi
 done
-
-# Baloo 2 (bold, rounded -- used for the L/H pressure-center markers) only
-# ships as a variable font in the google/fonts repo, with no static
-# per-weight file to curl the way Poppins' static files above work, so
-# this instead asks Google Fonts' CSS API for weight 700 and follows
-# whatever gstatic URL it hands back for a pre-built static instance.
-if [ ! -f "/usr/share/fonts/truetype/google-fonts/Baloo2-Bold.ttf" ]; then
-  baloo_url=$(curl -sSL "https://fonts.googleapis.com/css2?family=Baloo+2:wght@700&display=swap" \
-    | grep -o 'https://fonts.gstatic.com/[^)]*\.ttf' | head -1)
-  curl -sSL -o "/usr/share/fonts/truetype/google-fonts/Baloo2-Bold.ttf" "$baloo_url"
-fi

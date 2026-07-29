@@ -80,10 +80,13 @@ letters use Baloo 2 Bold (`BALOO_BOLD_PATH`) rather than this map's usual
 Poppins -- at the size a single big letter gets drawn here, Poppins'
 fairly square letterforms read differently than Baloo 2's genuinely
 rounded, chunky ones, and it's a true bold weight where Poppins only has
-Regular/Medium installed (see `setup.sh` for how it's fetched -- Baloo 2
-only ships as a variable font upstream, so it's pulled as a pre-built
-static instance from Google Fonts' CSS API rather than the raw-file grab
-Poppins uses).
+Regular/Medium installed. Unlike Poppins (which `setup.sh` installs
+system-wide from Google Fonts on every fresh environment), Baloo 2 is
+checked into `../assets/fonts/` and loaded directly by path -- it only
+ships as a variable font upstream, with no static per-weight file
+`setup.sh`'s Poppins step could've grabbed the same way, so committing
+the one pre-built static instance this map needs means rendering doesn't
+depend on Google Fonts being reachable at setup time.
 
 ## Usage
 
@@ -176,7 +179,9 @@ Shared basemap data lives one level up in [`../maps/`](../maps/):
 here instead of `land_slim.json`, which is clipped to the Pacific
 Northwest and doesn't reach Hawaii), `states_lakes_slim.json` (state/
 province polygons, lakes excluded), and `admin0_boundary_lines.json`
-(international border line dataset).
+(international border line dataset). The Baloo 2 Bold font used for the
+L/H markers lives in [`../assets/fonts/`](../assets/fonts/), alongside the
+shared logo.
 
 Output PNG (and, unless rendering from `--file`, a `.npz` snapshot of the
 fetched grid) lands in `output/`.
