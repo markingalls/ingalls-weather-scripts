@@ -1,8 +1,9 @@
 # WM-6 Ensemble Mean TPW Map
 
 One-off styled map of total precipitable water (TPW, i.e. total column
-water vapour) for a single valid time, from WindBorne's WeatherMesh-6
-global ensemble. Domain runs from Hawaii (SW) to central Alberta/
+water vapour), overlaid with MSLP isobars, for a single valid time, from
+WindBorne's WeatherMesh-6 global ensemble. Domain runs from Hawaii (SW) to
+central Alberta/
 Saskatchewan (NE) -- the North Pacific, US West Coast, Great Basin, and
 Western Canada in one frame. Rendered under Lambert Conformal Conic (the
 standard NOAA/NWS projection for regional weather maps -- conformal,
@@ -54,6 +55,17 @@ even though the country's actual polygon has real area all the way out to
 the box. `load_countries_filled()` clips the polygon itself (keeping
 area) instead of its boundary, so the fill reaches the box edge cleanly.
 
+MSLP isobars are drawn on top of everything else (TPW shading and
+basemap alike) so they stay legible everywhere, contoured every 4 hPa
+(`MSLP_CONTOUR_INTERVAL_HPA`, the standard surface-analysis interval) at
+whatever levels the map's actual MSLP range crosses -- unlike the TPW
+color table, there's no fixed scale to keep consistent map to map, so the
+levels are computed from the data itself each render. `ax.contour()`
+handles this domain's antimeridian-crossing, `CENTER_LON`-unwrapped
+longitude array without the per-segment splitting `imshow_antimeridian_safe()`
+needs, since it transforms each contour vertex through the CRS directly
+rather than warping a raster extent.
+
 ## Usage
 
 ```bash
@@ -73,8 +85,8 @@ that's the nearest available step) rather than the exact hour requested.
 ## Data source
 
 WindBorne WeatherMesh-6 (global, 0.25 deg), ensemble mean of
-`total_column_water_vapour`, via the WindBorne gridded forecast API
-(`WB_API_KEY` required -- get one at
+`total_column_water_vapour` and `pressure_msl`, via the WindBorne gridded
+forecast API (`WB_API_KEY` required -- get one at
 https://app.windbornesystems.com/api_tokens).
 
 Every run this was built against had already moved to archived storage by
@@ -83,15 +95,18 @@ at which point the API's `variable=`/`include_distribution=` filtering is
 rejected outright and only the complete per-forecast-hour file (every
 variable, level, and product -- deterministic, ensemble mean/std, members,
 percentiles -- roughly 2 GB compressed) is servable, via a presigned URL
-(`as_url=true` with `variable=all`). `fetch_tcwv_mean()` in `build_map.py`
+(`as_url=true` with `variable=all`). `fetch_wm6_fields()` in `build_map.py`
 avoids pulling that whole archive: it uses
 [`remotezip`](https://github.com/gtsystem/python-remotezip) to make HTTP
 range requests against the presigned URL for just the handful of zarr
 entries this map needs (the latitude/longitude coordinate arrays and the
-TCWV ensemble-mean field), a few MB total instead of ~2 GB, then decodes
-them with `zarr` from a small local directory built to mirror those
-entries' paths (zarr's own codec pipeline handles WM-6's zstd/blosc +
-zarr v3 sharding-indexed encoding; no manual codec work needed).
+TCWV/MSLP ensemble-mean fields, both pulled from the same remote-zip
+session since they come out of the same archived run), a few MB total
+instead of ~2 GB, then decodes them with `zarr` from a small local
+directory built to mirror those entries' paths (zarr's own codec pipeline
+handles WM-6's zstd/blosc + zarr v3 sharding-indexed encoding; no manual
+codec work needed). MSLP comes back from the archive in Pa and is
+converted to hPa right after cropping.
 
 WM-6 (global) is a plain regular 0.25 deg lat/lon grid, unlike the
 curvilinear native grids `wm6-3km`/HRRR fetches use elsewhere in this
@@ -101,13 +116,14 @@ longitude bounds are unwrapped around `CENTER_LON` before comparing
 against `LON_MIN`/`LON_MAX` (rather than compared as plain -180..180
 values), so `FETCH_PAD_LON_DEG`'s generous padding can cross the
 antimeridian -- as it does for this map's domain -- without the crop
-window splitting into two disjoint, wrongly-ordered pieces. It's then
-upsampled (`resample_to_finer_grid()`, linear interpolation via
+window splitting into two disjoint, wrongly-ordered pieces. Both fields
+are then upsampled (`resample_to_finer_grid()`, linear interpolation via
 `RegularGridInterpolator`) to a finer grid before rendering, since WM-6's
 native ~28 km spacing is coarser than a screen pixel at this map's zoom
-level and would otherwise look blocky once warped into the curved
-LambertConformal view (a separate step from the crop/upsample, which is
-why `scipy` is a dependency -- see `requirements.txt`).
+level and would otherwise look blocky (TPW) or faceted (MSLP contours)
+once warped into the curved LambertConformal view (a separate step from
+the crop/upsample, which is why `scipy` is a dependency -- see
+`requirements.txt`).
 
 Rendering that antimeridian-crossing data needs its own workaround:
 `ax.imshow(..., extent=[...])` silently fails to warp the portion of an
@@ -130,9 +146,9 @@ along.
 
 ## Files
 
-- `build_map.py` -- fetches the ensemble-mean TPW grid for the requested
-  local date/hour and renders the map. Map domain and the color table are
-  both defined near the top -- edit directly to adjust.
+- `build_map.py` -- fetches the ensemble-mean TPW/MSLP grids for the
+  requested local date/hour and renders the map. Map domain and the color
+  table are both defined near the top -- edit directly to adjust.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
   needs GDAL, which only installs via apt, not pip).
 

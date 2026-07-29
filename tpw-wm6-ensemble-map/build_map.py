@@ -8,6 +8,8 @@ frame:
   - Shading: WindBorne WeatherMesh-6 (global, 0.25 deg) ensemble-mean total
     column water vapour (total precipitable water), for a single valid
     time. Below the color table's 0.5" floor is left unshaded.
+  - Contours: ensemble-mean MSLP isobars, every 4 hPa, for the same valid
+    time.
 
 USAGE
 -----
@@ -95,6 +97,14 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # ---------------------------------------------------------------------------
 WB_BASE = "https://api.windbornesystems.com/forecasts/v1/wm-6"
 VARIABLE = "total_column_water_vapour"
+MSLP_VARIABLE = "pressure_msl"
+
+# Isobars are contoured every 4 hPa (the standard surface-analysis
+# interval), at whatever levels the map's actual MSLP range crosses --
+# unlike the TPW color table, there's no fixed enhancement curve to keep
+# consistent map to map, so the levels are computed from the data itself
+# (see build_map()).
+MSLP_CONTOUR_INTERVAL_HPA = 4
 
 # ---------------------------------------------------------------------------
 # Figure geometry. Under LambertConformal (see build_map()'s note on
@@ -272,9 +282,12 @@ def fetch_zarr_array(remote_zip, names, tmp_dir, array_path):
     return zarr.open_array(store=str(tmp_dir), path=array_path, mode="r")[:]
 
 
-def fetch_tcwv_mean(valid_time_utc, api_key):
-    """Fetch the WM-6 ensemble-mean total column water vapour grid valid
-    nearest to valid_time_utc, cropped to the map bbox.
+def fetch_wm6_fields(valid_time_utc, api_key):
+    """Fetch the WM-6 ensemble-mean total column water vapour and MSLP
+    grids valid nearest to valid_time_utc, cropped to the map bbox, in a
+    single remote-zip session (both fields come out of the same archived
+    run, so there's no reason to open the presigned URL's remote zip index
+    twice for two separate fetches).
 
     WM-6's gridded endpoint archives each run shortly after it finishes,
     and once archived, `variable=`/`include_distribution=` filtering is no
@@ -289,9 +302,9 @@ def fetch_tcwv_mean(valid_time_utc, api_key):
     than downloading the whole thing, this uses `remotezip` to make HTTP
     range requests against the presigned URL for just the handful of
     entries this map needs -- the latitude/longitude coordinate arrays and
-    the TCWV ensemble-mean field -- a few MB total.
+    the TCWV/MSLP ensemble-mean fields -- a few MB total.
 
-    Returns (lat_1d, lon_1d, tcwv_mm_2d, meta dict with
+    Returns (lat_1d, lon_1d, tcwv_mm_2d, mslp_hpa_2d, meta dict with
     initialization_time/valid_time/forecast_hour)."""
     url_info = wb_get("gridded", api_key, variable="all",
                        time=valid_time_utc.strftime("%Y-%m-%dT%H:%M:%SZ"), as_url="true")
@@ -305,6 +318,7 @@ def fetch_tcwv_mean(valid_time_utc, api_key):
             lat = fetch_zarr_array(rz, names, tmp_dir, "latitude")
             lon = fetch_zarr_array(rz, names, tmp_dir, "longitude")
             tcwv = fetch_zarr_array(rz, names, tmp_dir, f"ensemble_mean/{VARIABLE}")
+            mslp_pa = fetch_zarr_array(rz, names, tmp_dir, f"ensemble_mean/{MSLP_VARIABLE}")
 
     # Longitude is unwrapped around CENTER_LON (rather than compared as
     # plain -180..180 values) before cropping, so a generous
@@ -323,6 +337,7 @@ def fetch_tcwv_mean(valid_time_utc, api_key):
     lat_crop = lat[lat_idx]
     lon_crop = lon_unwrapped[lon_idx]
     tcwv_crop = tcwv[np.ix_(lat_idx, lon_idx)]
+    mslp_crop = mslp_pa[np.ix_(lat_idx, lon_idx)] / 100.0  # Pa -> hPa
 
     # WM-6's latitude axis runs north-to-south (90 down to -89.75); flip to
     # ascending so downstream imshow(..., origin="lower") behaves like
@@ -330,13 +345,14 @@ def fetch_tcwv_mean(valid_time_utc, api_key):
     if lat_crop[0] > lat_crop[-1]:
         lat_crop = lat_crop[::-1]
         tcwv_crop = tcwv_crop[::-1, :]
+        mslp_crop = mslp_crop[::-1, :]
 
     meta = {
         "initialization_time": root_meta["initialization_time"],
         "valid_time": root_meta["valid_time"],
         "forecast_hour": root_meta["forecast_hour"],
     }
-    return lat_crop, lon_crop, tcwv_crop, meta
+    return lat_crop, lon_crop, tcwv_crop, mslp_crop, meta
 
 
 def resample_to_finer_grid(lat, lon, values, factor=RESAMPLE_FACTOR):
@@ -474,7 +490,7 @@ def build_map(date, hour, output_path, override_path=None):
     if override_path:
         print(f"Using local snapshot: {override_path}")
         npz = np.load(override_path, allow_pickle=True)
-        lat, lon, tcwv_mm = npz["lat"], npz["lon"], npz["tcwv_mm"]
+        lat, lon, tcwv_mm, mslp_hpa = npz["lat"], npz["lon"], npz["tcwv_mm"], npz["mslp_hpa"]
         meta = npz["meta"].item()
     else:
         api_key = os.environ.get("WB_API_KEY")
@@ -482,14 +498,17 @@ def build_map(date, hour, output_path, override_path=None):
             sys.exit("WB_API_KEY not set -- get a token at "
                       "https://app.windbornesystems.com/api_tokens, or pass --file "
                       "to render from a saved snapshot instead.")
-        lat, lon, tcwv_mm, meta = fetch_tcwv_mean(valid_time_utc, api_key)
+        lat, lon, tcwv_mm, mslp_hpa, meta = fetch_wm6_fields(valid_time_utc, api_key)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         np.savez(OUTPUT_DIR / f"snapshot_{date.isoformat()}_{hour:02d}.npz",
-                  lat=lat, lon=lon, tcwv_mm=tcwv_mm, meta=meta)
+                  lat=lat, lon=lon, tcwv_mm=tcwv_mm, mslp_hpa=mslp_hpa, meta=meta)
 
     print(f"TPW range in fetched crop: {tcwv_mm.min():.0f} - {tcwv_mm.max():.0f} mm")
+    print(f"MSLP range in fetched crop: {mslp_hpa.min():.0f} - {mslp_hpa.max():.0f} hPa")
     print(f"Resampling from {lat.size}x{lon.size} native grid...")
-    lat, lon, tcwv_mm = resample_to_finer_grid(lat, lon, tcwv_mm)
+    lat_r, lon_r, tcwv_mm = resample_to_finer_grid(lat, lon, tcwv_mm)
+    _, _, mslp_hpa = resample_to_finer_grid(lat, lon, mslp_hpa)
+    lat, lon = lat_r, lon_r
 
     print("Loading basemap layers...")
     country_geoms = load_countries()
@@ -559,6 +578,23 @@ def build_map(date, hour, output_path, override_path=None):
     ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+
+    # MSLP isobars -- drawn above every other layer so they stay legible
+    # over both the TPW shading and the basemap. Levels are computed from
+    # this map's actual MSLP range (not a fixed enhancement curve like the
+    # TPW color table) at the standard 4 hPa surface-analysis interval, so
+    # a flatter or stormier day gets fewer or more lines rather than a
+    # fixed set that might not cross the data at all. contour() transforms
+    # each vertex through the CRS directly (unlike imshow's raster warp --
+    # see imshow_antimeridian_safe()'s docstring), so it handles this
+    # domain's antimeridian-crossing, CENTER_LON-unwrapped lon array
+    # without needing the same per-segment split.
+    level_start = np.floor(mslp_hpa.min() / MSLP_CONTOUR_INTERVAL_HPA) * MSLP_CONTOUR_INTERVAL_HPA
+    level_end = np.ceil(mslp_hpa.max() / MSLP_CONTOUR_INTERVAL_HPA) * MSLP_CONTOUR_INTERVAL_HPA
+    mslp_levels = np.arange(level_start, level_end + MSLP_CONTOUR_INTERVAL_HPA, MSLP_CONTOUR_INTERVAL_HPA)
+    isobars = ax.contour(lon, lat, mslp_hpa, levels=mslp_levels, transform=pc,
+                          colors="#4a4a4a", linewidths=0.9, zorder=3)
+    ax.clabel(isobars, inline=True, fontsize=7, fmt="%d", colors="#4a4a4a")
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
