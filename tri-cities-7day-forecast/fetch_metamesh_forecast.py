@@ -47,9 +47,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--station", default=DEFAULT_STATION,
                      help="ICAO identifier, one of MetaMesh's 349 supported METAR stations")
-    ap.add_argument("--max-days", type=int, default=8,
+    ap.add_argument("--max-days", type=int, default=10,
                      help="How many days out to request (needs to clear 7 days of "
-                          "day+night periods with room to spare)")
+                          "day+night periods with room to spare). Worst case is a "
+                          "post-3pm-local render, where the synthetic 7th column's "
+                          "night window can fall up to ~7.625 days past fetch time --"
+                          "8 wasn't safely above that, so this leaves real margin.")
     ap.add_argument("--output", default="metamesh_forecast.json")
     args = ap.parse_args()
 
