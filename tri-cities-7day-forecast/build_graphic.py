@@ -288,13 +288,25 @@ def daily_columns(periods, drop_today=False):
         day = periods[i]
         night = periods[i + 1] if i + 1 < len(periods) and not periods[i + 1]["isDaytime"] else None
         glyph, color, sun_relevant = glyph_for(day["icon"])
+        day_end = datetime.fromisoformat(day["endTime"])
+        # NWS's period count can be odd by the time this fetches (its own
+        # feed rolls periods[0] from "Today" to "Tonight" once today is
+        # over, which -- combined with the leading-night-drop above -- can
+        # leave the very last day period with no paired night in the raw
+        # list, even though this is a "real" NWS-covered day, not one that
+        # needs the synthetic-column backfill below). Falling back to the
+        # same 6pm-6am local convention every other night window uses
+        # (day_end -> +12h) instead of leaving it None keeps the low
+        # computable from MetaMesh instead of going blank.
+        night_start = datetime.fromisoformat(night["startTime"]) if night else day_end
+        night_end = datetime.fromisoformat(night["endTime"]) if night else day_end + timedelta(hours=12)
         columns.append({
             "label": day["name"],
             "date": datetime.fromisoformat(day["startTime"]),
             "day_start": datetime.fromisoformat(day["startTime"]),
-            "day_end": datetime.fromisoformat(day["endTime"]),
-            "night_start": datetime.fromisoformat(night["startTime"]) if night else None,
-            "night_end": datetime.fromisoformat(night["endTime"]) if night else None,
+            "day_end": day_end,
+            "night_start": night_start,
+            "night_end": night_end,
             "glyph": glyph,
             "glyph_color": color,
             "sun_relevant": sun_relevant,
@@ -703,16 +715,6 @@ def main():
 
     temp_series = metamesh_temp_series(json.load(open(args.metamesh_forecast)))
     attach_metamesh_temps(columns, temp_series)
-    # TEMP DEBUG: diagnosing a blank low on the synthetic 7th column. Remove
-    # once root-caused.
-    if temp_series:
-        print(f"DEBUG temp_series: {len(temp_series)} points, "
-              f"{temp_series[0][0]} .. {temp_series[-1][0]}")
-    else:
-        print("DEBUG temp_series is EMPTY")
-    for col in columns:
-        print(f"DEBUG column {col['date'].date()}: night_start={col.get('night_start')} "
-              f"night_end={col.get('night_end')} low={col.get('low')} high={col.get('high')}")
 
     ecmwf_data = json.load(open(args.ecmwf_ensemble_forecast))
     attach_precip(columns, ecmwf_data)
