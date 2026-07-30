@@ -703,6 +703,16 @@ def main():
 
     temp_series = metamesh_temp_series(json.load(open(args.metamesh_forecast)))
     attach_metamesh_temps(columns, temp_series)
+    # TEMP DEBUG: diagnosing a blank low on the synthetic 7th column. Remove
+    # once root-caused.
+    if temp_series:
+        print(f"DEBUG temp_series: {len(temp_series)} points, "
+              f"{temp_series[0][0]} .. {temp_series[-1][0]}")
+    else:
+        print("DEBUG temp_series is EMPTY")
+    for col in columns:
+        print(f"DEBUG column {col['date'].date()}: night_start={col.get('night_start')} "
+              f"night_end={col.get('night_end')} low={col.get('low')} high={col.get('high')}")
 
     ecmwf_data = json.load(open(args.ecmwf_ensemble_forecast))
     attach_precip(columns, ecmwf_data)

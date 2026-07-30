@@ -65,3 +65,13 @@ if __name__ == "__main__":
     n_points = len(records[0]) if records and isinstance(records[0], list) else len(records)
     print(f"Saved {args.output}: {n_points} timesteps for {args.station} "
           f"(init {data.get('initialization_time')})")
+    # TEMP DEBUG: diagnosing a blank low on the synthetic 7th column despite
+    # the fetch window covering it -- inspecting the raw envelope shape and
+    # bounds directly against production data. Remove once root-caused.
+    print(f"DEBUG forecasts envelope: top-level len={len(records)}, "
+          f"nested={bool(records and isinstance(records[0], list))}, "
+          f"outer lens={[len(r) if isinstance(r, list) else 'flat' for r in records]}")
+    flat = records[0] if records and isinstance(records[0], list) else records
+    if flat:
+        times = sorted(p["time"] for p in flat)
+        print(f"DEBUG time range: {times[0]} .. {times[-1]}, count={len(times)}")
