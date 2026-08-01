@@ -6,7 +6,7 @@ North Bend, WA down to the Baker City, OR corridor). Supersedes the old
 `columbia-basin-wm6-temps/` (WM-6 3km-only, high-only) — everything that
 could do is one mode of this script.
 
-Supports four forecast sources, all at full native resolution, and four
+Supports four forecast sources, all at full native resolution, and five
 metrics:
 
 | `--source`     | Model                          | Native resolution | Via |
@@ -22,6 +22,7 @@ metrics:
 | `low`             | Min hourly 2m temp, 2am-9am local time — the pre-dawn window that reliably contains the daily trough. Not a true overnight low spanning midnight into the next morning; see Notes. |
 | `time`            | Temp at one specific local hour, via `--hour H` (0-23). |
 | `fire`            | Peak SPC-style fire weather risk (None/Elevated/Critical/Extreme) over all 24 local hours. `wm6-3km` only -- see Notes and Fire weather below. |
+| `min_rh`          | Lowest 2m relative humidity over all 24 local hours. `wm6-3km` only -- same continuous colormap/colorbar style as `high`/`low`/`time`, just %RH instead of °F/°C. See Notes. |
 
 ## Usage
 
@@ -33,6 +34,7 @@ python build_map.py --source hrrr --metric low --date 2026-07-12
 python build_map.py --source ecmwf-ifs --metric time --hour 17 --date 2026-07-12
 python build_map.py --source ecmwf-aifs --date 2026-07-12
 python build_map.py --metric fire --date 2026-07-12
+python build_map.py --metric min_rh --date 2026-07-12
 ```
 
 `wm6-3km` fetches hourly gridded forecasts directly from the WindBorne API
@@ -99,16 +101,34 @@ alerts map), since its single legend row needs less room below the frame
 than the temperature metrics' colorbar-plus-tick-labels do -- without it
 the fixed canvas leaves a dead strip at the bottom.
 
+### Lowest relative humidity (`--metric min_rh`)
+
+Plots the day's lowest 2m relative humidity instead of temperature, using
+the same continuous-colormap rendering as `high`/`low`/`time` (fixed color
+scale, colorbar with tick labels below the map, bare-outline coastline,
+dark-brown borders) rather than `fire`'s discrete swatch style — just %RH
+in place of °F/°C. Relative humidity is derived from
+`temperature_2m`/`dewpoint_2m` via the Magnus formula
+(`compute_min_rh_grid()`), reduced to each cell's minimum across all 24
+local hours of the target date. `RH_COLOR_TABLE` is a fixed 0-100% scale
+(not rescaled per map): dry reads red/orange, wet reads blue, so the same
+shade always means the same %RH across every map this script renders.
+
+Needs all 24 hourly wm6-3km grids (like `fire`), and only wm6-3km, since
+Herbie's hrrr/ecmwf-ifs/ecmwf-aifs paths fetch just `temperature_2m` — no
+dewpoint.
+
 Output PNG lands in `output/`. To render from a previously-saved grid
 instead of fetching live (useful for testing, or to avoid re-fetching),
 pass `--file path/to/snapshot.npz` — see `fetch_wm6_3km()` /
-`fetch_hrrr()` / `fetch_ecmwf()` / `fetch_wm6_3km_fire()` in
-`build_map.py` for the npz layout: `lat`, `lon`, `temp_k` (high/low/time)
-or `category` (fire, already reduced via `compute_fire_category_grid()`),
-plus `meta_kind`/`meta_value` for the subtitle's "Init ..." line — omit
-both and it reads "unknown". `--source` / `--metric` / `--hour` still
-need to be passed alongside `--file` since the snapshot only holds the
-grid, not the labels.
+`fetch_hrrr()` / `fetch_ecmwf()` / `fetch_wm6_3km_24h()` in
+`build_map.py` for the npz layout: `lat`, `lon`, plus `temp_k`
+(high/low/time), `category` (fire, already reduced via
+`compute_fire_category_grid()`), or `rh_pct` (min_rh, already reduced via
+`compute_min_rh_grid()`), plus `meta_kind`/`meta_value` for the subtitle's
+"Init ..." line — omit both and it reads "unknown". `--source` /
+`--metric` / `--hour` still need to be passed alongside `--file` since the
+snapshot only holds the grid, not the labels.
 
 ## Files
 
@@ -194,6 +214,11 @@ Notes. The Ingalls Weather logo lives in
   measuring the frame's actual left/right pixel margins (a black-pixel row
   scan) and the title's left inset, then solving for the scale factor that
   makes the frame width equal `image_width - 2 * title_inset_px`.
+- `fire` and `min_rh` need all 24 local hours of the target date
+  (`fetch_wm6_3km_24h()`), but a same-day request's earliest hours can
+  already be in the past relative to the current run's `forecast_zero` --
+  those hours are skipped (with a console note) rather than erroring, and
+  the day's peak/lowest value is reduced over whichever hours remain.
 - wm-6-3km's forecast horizon is short (currently 72 hours); HRRR's is ~48
   hours (18 for non-synoptic-hour init cycles, `select_hrrr_run()` picks
   whichever recent cycle actually covers the requested window); IFS/AIFS

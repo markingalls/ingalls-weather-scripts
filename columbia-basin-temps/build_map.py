@@ -24,6 +24,10 @@ forecast sources and four metrics:
   --metric fire   peak SPC-style fire weather risk (Elevated/Critical/
                   Extreme) over all 24 local hours -- wm6-3km only, see
                   FIRE_CATEGORIES and compute_fire_category_grid()
+  --metric min_rh lowest 2m relative humidity over all 24 local hours --
+                  wm6-3km only, same continuous colormap/colorbar style as
+                  high/low/time (just %RH instead of temperature), see
+                  RH_COLOR_TABLE and compute_min_rh_grid()
 
 USAGE
 -----
@@ -32,6 +36,7 @@ USAGE
     python build_map.py --source ecmwf-ifs --metric time --hour 17 --date 2026-07-12
     python build_map.py --source ecmwf-aifs --date 2026-07-12
     python build_map.py --metric fire --date 2026-07-12
+    python build_map.py --metric min_rh --date 2026-07-12
 
 wm6-3km requires WB_API_KEY (see https://app.windbornesystems.com/api_tokens)
 in the environment. hrrr/ecmwf-ifs/ecmwf-aifs need no API key -- Herbie
@@ -42,13 +47,13 @@ multi-GB archive. IFS publishes 3-hourly steps and AIFS 6-hourly, coarser
 than wm6-3km/hrrr's hourly steps, so --metric time snaps to the nearest
 step Herbie can actually fetch -- see snap_fxx_list().
 
---metric fire only supports --source wm6-3km for now: it needs
-dewpoint_2m/wind_u_10m/wind_v_10m, which Herbie's hrrr/ecmwf-ifs/ecmwf-aifs
-paths don't fetch (only temperature_2m).
+--metric fire / --metric min_rh only support --source wm6-3km for now: they
+need dewpoint_2m (and fire also wind_u_10m/wind_v_10m), which Herbie's
+hrrr/ecmwf-ifs/ecmwf-aifs paths don't fetch (only temperature_2m).
 
 To render from a previously-saved grid instead of fetching live (useful for
 testing, or to avoid re-fetching), pass --file path/to/snapshot.npz -- see
-fetch_wm6_3km() / fetch_hrrr() / fetch_ecmwf() / fetch_wm6_3km_fire() for
+fetch_wm6_3km() / fetch_hrrr() / fetch_ecmwf() / fetch_wm6_3km_24h() for
 the npz layout.
 
 REQUIRES (already checked into /maps at repo root, shared across all
@@ -142,7 +147,7 @@ SOURCE_LABELS = {
     "ecmwf-aifs": "ECMWF AIFS 0.25°",
 }
 SOURCES = ["wm6-3km", "hrrr", "ecmwf-ifs", "ecmwf-aifs"]
-METRICS = ["high", "low", "time", "fire"]
+METRICS = ["high", "low", "time", "fire", "min_rh"]
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # Local-hour windows used to reduce a day's hourly temps to a single high or
@@ -173,6 +178,31 @@ FIRE_CATEGORIES = [
 FIRE_CATEGORY_NAMES = {0: "None", 1: "Elevated", 2: "Critical", 3: "Extreme"}
 FIRE_CATEGORY_COLORS = {1: "#E8C468", 2: "#FF3B30", 3: "#E066FF"}
 MPS_TO_MPH = 2.236936
+
+# --metric min_rh -- fixed 0-100% RH color scale (not rescaled per map, same
+# principle as TEMP_COLOR_TABLE): dry reads red/orange, wet reads blue,
+# through yellow/green in between. (pct, [R, G, B]) control points.
+RH_COLOR_TABLE = [
+    (0, [120, 20, 20]),
+    (10, [178, 34, 34]),
+    (20, [217, 91, 36]),
+    (30, [242, 152, 54]),
+    (40, [244, 196, 83]),
+    (50, [230, 219, 116]),
+    (60, [175, 209, 117]),
+    (70, [104, 189, 138]),
+    (80, [58, 158, 173]),
+    (90, [44, 113, 181]),
+    (100, [43, 72, 156]),
+]
+RH_PCT_MIN = RH_COLOR_TABLE[0][0]
+RH_PCT_MAX = RH_COLOR_TABLE[-1][0]
+
+
+def build_rh_colormap():
+    span = RH_PCT_MAX - RH_PCT_MIN
+    stops = [((p - RH_PCT_MIN) / span, [c / 255 for c in rgb]) for p, rgb in RH_COLOR_TABLE]
+    return LinearSegmentedColormap.from_list("ingalls_rh", stops, N=256)
 
 # hrrr/ecmwf-ifs/ecmwf-aifs are fetched at full native resolution, straight
 # from each model's own free distribution, via Herbie (byte-range GRIB2
@@ -463,13 +493,14 @@ def fetch_wm6_3km(date, metric, hour, api_key):
     return lat, lon, reduced_temp_k, {"kind": "init", "value": init_time}
 
 
-def fetch_wm6_3km_fire(date, api_key):
+def fetch_wm6_3km_24h(date, api_key):
     """Fetch all 24 local-hour grids for `date`, cropped to the map bbox,
-    pulling the four surface variables --metric fire needs: temperature_2m,
-    dewpoint_2m, wind_u_10m, wind_v_10m. Returns (lat_2d, lon_2d, temp_k_3d,
-    dewpoint_k_3d, wind_u_3d, wind_v_3d, {"kind": "init", "value": init_time}),
-    with the hourly arrays stacked [hour, lat, lon] in local-hour (0-23)
-    order."""
+    pulling the four surface variables the day-long metrics need:
+    temperature_2m, dewpoint_2m, wind_u_10m, wind_v_10m (--metric fire uses
+    all four; --metric min_rh only temperature_2m/dewpoint_2m). Returns
+    (lat_2d, lon_2d, temp_k_3d, dewpoint_k_3d, wind_u_3d, wind_v_3d,
+    {"kind": "init", "value": init_time}), with the hourly arrays stacked
+    [hour, lat, lon] in local-hour (0-23) order."""
     run_info = wb_get("run_information", api_key)
     forecast_zero = datetime.fromisoformat(run_info["forecast_zero"].replace("Z", "+00:00"))
     init_time = run_info["initialization_time"]
@@ -480,9 +511,17 @@ def fetch_wm6_3km_fire(date, api_key):
     r0 = r1 = c0 = c1 = None
     temp_stack, dewpoint_stack, u_stack, v_stack = [], [], [], []
 
+    skipped = 0
     for valid_time in valid_times:
         forecast_hour = round((valid_time - forecast_zero).total_seconds() / 3600)
         if forecast_hour not in available_hours:
+            if forecast_hour < 0:
+                # Local hour already elapsed relative to this run's
+                # forecast_zero (e.g. a same-day request made after the
+                # run started) -- nothing to forecast for a time that's
+                # already past, so just skip it rather than erroring.
+                skipped += 1
+                continue
             sys.exit(f"Forecast hour {forecast_hour} (valid {valid_time.isoformat()}) "
                       f"is not yet available from run {init_time}. wm-6-3km's horizon "
                       f"may not reach the requested date yet -- try again closer to it.")
@@ -513,8 +552,21 @@ def fetch_wm6_3km_fire(date, api_key):
             v_stack.append(np.array(g["wind_v_10m"][r0:r1, c0:c1]))
             store.close()
 
+    if skipped:
+        print(f"Note: {skipped} local hour(s) of {date} already elapsed relative to this "
+              f"run's forecast_zero -- reducing over the remaining {24 - skipped} hour(s) only.")
+
     return (lat, lon, np.stack(temp_stack), np.stack(dewpoint_stack),
             np.stack(u_stack), np.stack(v_stack), {"kind": "init", "value": init_time})
+
+
+def compute_rh_pct(temp_k, dewpoint_k):
+    """Relative humidity (%) via the Magnus/August-Roche-Magnus formula from
+    temperature_2m/dewpoint_2m (both already Kelvin in wm6-3km's output)."""
+    temp_c = temp_k - 273.15
+    dewpoint_c = dewpoint_k - 273.15
+    return (100 * np.exp((17.625 * dewpoint_c) / (243.04 + dewpoint_c))
+            / np.exp((17.625 * temp_c) / (243.04 + temp_c)))
 
 
 def compute_fire_category_grid(temp_k_3d, dewpoint_k_3d, wind_u_3d, wind_v_3d):
@@ -523,13 +575,9 @@ def compute_fire_category_grid(temp_k_3d, dewpoint_k_3d, wind_u_3d, wind_v_3d):
     cell (0=None, 1=Elevated, 2=Critical, 3=Extreme), per FIRE_CATEGORIES:
     a cell reaches a level once that level's wind/RH/temperature thresholds
     are all met simultaneously in any single hour of the stack (no minimum
-    duration). Relative humidity is derived from temperature/dewpoint via
-    the Magnus formula (both are already Kelvin in wm6-3km's output)."""
+    duration)."""
     temp_f = k_to_f(temp_k_3d)
-    temp_c = temp_k_3d - 273.15
-    dewpoint_c = dewpoint_k_3d - 273.15
-    rh_pct = (100 * np.exp((17.625 * dewpoint_c) / (243.04 + dewpoint_c))
-              / np.exp((17.625 * temp_c) / (243.04 + temp_c)))
+    rh_pct = compute_rh_pct(temp_k_3d, dewpoint_k_3d)
     wind_mph = np.sqrt(wind_u_3d ** 2 + wind_v_3d ** 2) * MPS_TO_MPH
 
     category_grid = np.zeros(temp_f.shape[1:], dtype=int)
@@ -538,6 +586,12 @@ def compute_fire_category_grid(temp_k_3d, dewpoint_k_3d, wind_u_3d, wind_v_3d):
         category_grid = np.maximum(category_grid, np.where(meets_hour.any(axis=0), level, 0))
 
     return category_grid
+
+
+def compute_min_rh_grid(temp_k_3d, dewpoint_k_3d):
+    """Reduce a day's hourly (temperature, dewpoint) stacks -- each
+    [hour, lat, lon] -- to the day's lowest relative humidity (%) per cell."""
+    return compute_rh_pct(temp_k_3d, dewpoint_k_3d).min(axis=0)
 
 
 # ---------------------------------------------------------------------------
@@ -814,6 +868,8 @@ def metric_title(metric, hour):
         return "Low Temperatures"
     if metric == "fire":
         return "Peak Fire Weather"
+    if metric == "min_rh":
+        return "Lowest Relative Humidity"
     h12 = hour % 12 or 12
     ampm = "am" if hour < 12 else "pm"
     return f"{h12}{ampm} Temperatures"
@@ -831,6 +887,9 @@ def build_map(source, metric, hour, date, output_path, override_path=None):
 
     if metric == "fire":
         build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, override_path)
+        return
+    if metric == "min_rh":
+        build_rh_map(source, date, output_path, poppins_reg, poppins_semibold, override_path)
         return
 
     if override_path:
@@ -976,7 +1035,7 @@ def build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, ove
             sys.exit("WB_API_KEY not set -- get a token at "
                       "https://app.windbornesystems.com/api_tokens, or pass --file "
                       "to render from a saved snapshot instead.")
-        lat, lon, temp_k, dewpoint_k, wind_u, wind_v, meta = fetch_wm6_3km_fire(date, api_key)
+        lat, lon, temp_k, dewpoint_k, wind_u, wind_v, meta = fetch_wm6_3km_24h(date, api_key)
         category_raw = compute_fire_category_grid(temp_k, dewpoint_k, wind_u, wind_v)
 
     print("Resampling onto a regular grid...")
@@ -1069,13 +1128,131 @@ def build_fire_map(source, date, output_path, poppins_reg, poppins_semibold, ove
     composite_logo(output_path)
 
 
+def build_rh_map(source, date, output_path, poppins_reg, poppins_semibold, override_path=None):
+    """Lowest 2m relative humidity over all 24 local hours of `date` --
+    same continuous-colormap rendering as the temperature metrics (fixed
+    color scale, colorbar with tick labels below the map), just %RH instead
+    of degrees. wm6-3km only -- needs dewpoint_2m, which Herbie's
+    hrrr/ecmwf-ifs/ecmwf-aifs paths don't fetch."""
+    if source != "wm6-3km":
+        sys.exit("--metric min_rh currently only supports --source wm6-3km "
+                  "(needs dewpoint_2m, which the Herbie-backed sources don't fetch).")
+
+    if override_path:
+        print(f"Using local snapshot: {override_path}")
+        npz = np.load(override_path)
+        lat, lon, rh_pct_raw = npz["lat"], npz["lon"], npz["rh_pct"]
+        meta = {"kind": str(npz["meta_kind"]), "value": str(npz["meta_value"])} if "meta_kind" in npz else None
+    else:
+        api_key = os.environ.get("WB_API_KEY")
+        if not api_key:
+            sys.exit("WB_API_KEY not set -- get a token at "
+                      "https://app.windbornesystems.com/api_tokens, or pass --file "
+                      "to render from a saved snapshot instead.")
+        lat, lon, temp_k, dewpoint_k, _wind_u, _wind_v, meta = fetch_wm6_3km_24h(date, api_key)
+        rh_pct_raw = compute_min_rh_grid(temp_k, dewpoint_k)
+
+    print("Resampling onto a regular grid...")
+    rh_pct = resample_to_regular_grid(lat, lon, rh_pct_raw)
+
+    # Slice off the resample padding (real data, but outside the visible
+    # frame) before reporting the range actually shown on the map.
+    lon_frac0 = (LON_MIN - RESAMPLE_LON_MIN) / (RESAMPLE_LON_MAX - RESAMPLE_LON_MIN)
+    lon_frac1 = (LON_MAX - RESAMPLE_LON_MIN) / (RESAMPLE_LON_MAX - RESAMPLE_LON_MIN)
+    lat_frac0 = (LAT_MIN - RESAMPLE_LAT_MIN) / (RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN)
+    lat_frac1 = (LAT_MAX - RESAMPLE_LAT_MIN) / (RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN)
+    visible = rh_pct[round(lat_frac0 * RESAMPLE_NY):round(lat_frac1 * RESAMPLE_NY),
+                      round(lon_frac0 * RESAMPLE_NX):round(lon_frac1 * RESAMPLE_NX)]
+    print(f"Lowest RH range: {visible.min():.0f}% - {visible.max():.0f}%")
+
+    print("Loading basemap layers...")
+    fig, ax, pc = setup_figure_and_axes()
+
+    # RH field -- a fixed 0-100% color scale (not rescaled to this map's
+    # data range), same principle as the temperature metrics' Kelvin curve.
+    rh_cmap = build_rh_colormap()
+    rh_norm = Normalize(vmin=RH_PCT_MIN, vmax=RH_PCT_MAX)
+    ax.imshow(rh_pct, transform=pc, cmap=rh_cmap, norm=rh_norm, origin="lower",
+              extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
+
+    draw_land(ax, pc)
+    draw_borders_and_roads(ax, pc)
+
+    # City labels -- name plus that spot's lowest RH, sampled from the
+    # resampled regular grid.
+    geodetic_transform = pc._as_mpl_transform(ax)
+    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
+    for name, lon_c, lat_c, pos in CITIES:
+        city_pct = sample_grid_value(rh_pct, lon_c, lat_c)
+        draw_city_dot_and_label(ax, fig, pc, geodetic_transform, poppins_semibold, stroke,
+                                 name, lon_c, lat_c, pos, f"{city_pct:.0f}%")
+
+    ax.spines['geo'].set_edgecolor('black')
+    ax.spines['geo'].set_linewidth(1.6)
+
+    # Colorbar -- below the map, horizontally centered on the rendered map
+    # frame, same technique as the temperature metrics.
+    fig.canvas.draw()
+    frame_px = ax.get_window_extent()
+    frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
+    frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
+    cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.022
+    cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
+    cbar_bottom = 0.085
+
+    # Only draw the slice of the color table actually visible on the map
+    # today, sampled with the exact same cmap + norm used to color the map.
+    # Rounded outward to the nearest 5% so the bar's ends land on clean
+    # numbers.
+    vmin_disp = max(0, 5 * np.floor(visible.min() / 5))
+    vmax_disp = min(100, 5 * np.ceil(visible.max() / 5))
+    gradient_pct = np.linspace(vmin_disp, vmax_disp, 256).reshape(1, -1)
+
+    cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
+    cax.imshow(gradient_pct, aspect="auto", cmap=rh_cmap, norm=rh_norm,
+               extent=[vmin_disp, vmax_disp, 0, 1])
+    cax.set_yticks([])
+    for spine in cax.spines.values():
+        spine.set_edgecolor("#8a887e")
+        spine.set_linewidth(0.6)
+
+    pct_ticks = [p for p in range(0, 101, 10) if vmin_disp <= p <= vmax_disp]
+    cax.set_xticks(pct_ticks)
+    cax.set_xticklabels([f"{p}%" for p in pct_ticks])
+    cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
+    for label in cax.get_xticklabels():
+        label.set_fontproperties(poppins_reg)
+
+    # Title & subtitle above the map
+    if meta and meta["kind"] == "init":
+        init_dt = datetime.fromisoformat(meta["value"].replace("Z", "+00:00"))
+        run_str = f"Init {init_dt.strftime('%Y-%m-%d %H')}z"
+    else:
+        run_str = "unknown"
+    fig.text(0.03, 0.975, f"{date.strftime('%A')} Lowest Relative Humidity", fontsize=22,
+              fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
+    fig.text(0.03, 0.935, f"{SOURCE_LABELS[source]} • {run_str}",
+              fontsize=12, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
+
+    # Attribution
+    fig.text(0.5, 0.012, f"{SOURCE_LABELS[source]} — Ingalls Weather", fontsize=9,
+              fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=200)
+    plt.close(fig)
+    print(f"Saved base map to {output_path}")
+    composite_logo(output_path)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Build an Ingalls Weather Columbia Basin temperature map.")
     parser.add_argument("--source", choices=SOURCES, default="wm6-3km",
                          help="Forecast source (default: wm6-3km).")
     parser.add_argument("--metric", choices=METRICS, default="high",
-                         help="high, low, time, or fire (SPC-style peak fire weather risk, "
+                         help="high, low, time, fire (SPC-style peak fire weather risk, "
+                              "wm6-3km only), or min_rh (lowest relative humidity, "
                               "wm6-3km only) -- default: high.")
     parser.add_argument("--hour", type=int, default=None,
                          help="Local hour (0-23), required when --metric time.")
@@ -1083,7 +1260,8 @@ if __name__ == "__main__":
                          help="Target date, YYYY-MM-DD (default: the coming Sunday).")
     parser.add_argument("--file", type=Path, default=None,
                          help="Render from a local saved grid (.npz) instead of fetching live -- "
-                              "lat/lon/temp_k for high/low/time, lat/lon/category for fire.")
+                              "lat/lon/temp_k for high/low/time, lat/lon/category for fire, "
+                              "lat/lon/rh_pct for min_rh.")
     parser.add_argument("--out", type=Path, default=None,
                          help="Output PNG path (default: output/columbia_basin_<source>_<metric>_<date>.png).")
     args = parser.parse_args()
@@ -1092,8 +1270,8 @@ if __name__ == "__main__":
         parser.error("--metric time requires --hour H (0-23).")
     if args.hour is not None and not (0 <= args.hour <= 23):
         parser.error("--hour must be between 0 and 23.")
-    if args.metric == "fire" and args.source != "wm6-3km":
-        parser.error("--metric fire currently only supports --source wm6-3km.")
+    if args.metric in ("fire", "min_rh") and args.source != "wm6-3km":
+        parser.error(f"--metric {args.metric} currently only supports --source wm6-3km.")
 
     if args.file and not args.file.exists():
         sys.exit(f"--file {args.file} not found.")
