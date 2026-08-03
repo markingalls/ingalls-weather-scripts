@@ -260,7 +260,7 @@ def glyph_for_wmo(weathercode):
     return chr(GLYPHS[name]), color, weathercode in SUN_RELEVANT_WMO_CODES
 
 
-def daily_columns(periods, drop_today=False):
+def daily_columns(periods, drop_today=False, today_date=None):
     """Pairs sequential (daytime, following-night) periods into up to 7 day
     columns: label/date/glyph from the daytime period, plus each period's
     own start/end so the caller can reduce a separate temperature series
@@ -270,16 +270,21 @@ def daily_columns(periods, drop_today=False):
     no daytime pair to lead a column.
 
     drop_today additionally drops the Today/Tonight pair, so the window
-    starts tomorrow (renders after 3pm local -- see README). This only
-    actually drops something if NWS's own feed still has a "Today" period;
-    if the feed was fetched late enough that NWS has already moved past
-    today on its own (periods[0] is already tomorrow, because today's day
-    period no longer exists in the feed once it's over), there's nothing
-    further to drop."""
+    starts tomorrow (renders after 3pm local -- see README). Matched by
+    date rather than by period name -- NWS relabels periods[0] itself as
+    the day goes on ("Today" in the morning, "This Afternoon" from around
+    midday, etc.), so a literal "Today" string match silently stops
+    matching well before the 3pm cutoff this is meant to enforce. This
+    only actually drops something if periods[0] is still today's date; if
+    the feed was fetched late enough that NWS has already moved past today
+    on its own (periods[0] is already tomorrow, because today's day period
+    no longer exists in the feed once it's over), there's nothing further
+    to drop."""
     if periods and not periods[0]["isDaytime"]:
         periods = periods[1:]
 
-    if drop_today and periods and periods[0]["name"] == "Today":
+    if (drop_today and periods
+            and datetime.fromisoformat(periods[0]["startTime"]).date() == today_date):
         periods = periods[2:]
 
     columns = []
@@ -706,7 +711,7 @@ def main():
     # drove it is stale, not a forward-looking part of today's forecast.
     suppress_today_am = now_local.hour >= 10
 
-    columns = daily_columns(props["periods"], drop_today=drop_today)
+    columns = daily_columns(props["periods"], drop_today=drop_today, today_date=now_local.date())
 
     if drop_today and len(columns) < 7:
         last_date = columns[-1]["date"].date() if columns else now_local.date()
