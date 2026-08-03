@@ -1,10 +1,14 @@
 # Install with: crontab -e  (paste these lines in)
 #
-# WB_API_KEY has to be set here (or sourced from a file guard_and_build.py
+# WB_API_KEY has to be set here (or sourced from a file build_and_publish.py
 # reads itself) because cron does not load your shell profile.
 WB_API_KEY=your_windborne_api_key_here
 
-# Every hour, on the hour: check for a new ECMWF run and rebuild only if
-# one is available. guard_and_build.py no-ops quietly when there's nothing
-# new, so this is safe to run this often.
-0 * * * * /opt/ingalls-weather-scripts/tri-cities-7day-forecast/venv/bin/python3 /opt/ingalls-weather-scripts/tri-cities-7day-forecast/deploy/guard_and_build.py >> /opt/ingalls-weather-scripts/tri-cities-7day-forecast/state/cron.log 2>&1
+# Same four fixed UTC offsets as the proven GitHub Actions schedule --
+# tuned to land safely after all four upstream sources (NWS, WindBorne
+# MetaMesh, Open-Meteo, Open-Meteo ensemble) have absorbed each ECMWF
+# cycle (00Z/06Z/12Z/18Z).
+15 7 * * * /opt/ingalls-weather-scripts/tri-cities-7day-forecast/venv/bin/python3 /opt/ingalls-weather-scripts/tri-cities-7day-forecast/deploy/build_and_publish.py >> /opt/ingalls-weather-scripts/tri-cities-7day-forecast/state/cron.log 2>&1
+30 12 * * * /opt/ingalls-weather-scripts/tri-cities-7day-forecast/venv/bin/python3 /opt/ingalls-weather-scripts/tri-cities-7day-forecast/deploy/build_and_publish.py >> /opt/ingalls-weather-scripts/tri-cities-7day-forecast/state/cron.log 2>&1
+15 19 * * * /opt/ingalls-weather-scripts/tri-cities-7day-forecast/venv/bin/python3 /opt/ingalls-weather-scripts/tri-cities-7day-forecast/deploy/build_and_publish.py >> /opt/ingalls-weather-scripts/tri-cities-7day-forecast/state/cron.log 2>&1
+30 0 * * * /opt/ingalls-weather-scripts/tri-cities-7day-forecast/venv/bin/python3 /opt/ingalls-weather-scripts/tri-cities-7day-forecast/deploy/build_and_publish.py >> /opt/ingalls-weather-scripts/tri-cities-7day-forecast/state/cron.log 2>&1

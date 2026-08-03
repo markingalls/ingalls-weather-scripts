@@ -120,12 +120,23 @@ chmod 600 .env
 # edit .env and set the real WB_API_KEY
 ```
 
-## Phase 7/8 -- Guard cron job + lock file
+## Phase 7/8 -- Scheduled cron job + lock file
 
-`deploy/guard_and_build.py` is already lock-file-protected (Phase 8's
+Fixed cron times, not hourly polling: `build_graphic.py`'s pipeline pulls
+from four sources (NWS, WindBorne MetaMesh, Open-Meteo, Open-Meteo
+ensemble), and Open-Meteo's own ECMWF ingestion lags ECMWF's completion by
+a variable amount. The GitHub Actions schedule's four offsets -- 07:15,
+12:30, 19:15, 00:30 UTC -- were already tuned to land safely after all
+four sources have absorbed a given ECMWF cycle. Polling a single source
+(e.g. WindBorne's `ecmwf-det/initialization_times`) risks firing before
+the other three catch up, mixing a fresh source with a stale one. So the
+droplet reuses those same four proven offsets instead.
+
+`deploy/build_and_publish.py` is lock-file-protected (Phase 8's
 requirement) via `fcntl.flock` on `state/run.lock` -- if a build is still
-running when the next hourly cron tick fires, the new tick logs a line
-and exits immediately instead of starting a second build.
+running when the next scheduled tick fires (a run takes unusually long),
+the new tick logs a line and exits immediately instead of starting a
+second build that would collide with it.
 
 Install the cron job:
 
@@ -134,15 +145,13 @@ crontab -e
 ```
 
 Paste in the contents of `deploy/crontab.example`, with your real
-`WB_API_KEY`. This runs the guard every hour; it checks WindBorne's
-`ecmwf-det/initialization_times` endpoint (the raw ECMWF 00/06/12/18Z
-cycle) and only rebuilds when the latest run differs from
-`state/last_ecmwf_run.txt`.
+`WB_API_KEY`. This fires the build at the same four UTC times as the
+GitHub Actions version.
 
 ## Phase 9 -- Overwrite in place + caching
 
 Already handled:
-- `guard_and_build.py` always writes to the same filename
+- `build_and_publish.py` always writes to the same filename
   (`/var/www/images/tricities_forecast.png`), via a temp file + atomic
   rename so nginx never serves a half-written PNG mid-save.
 - `nginx-images.conf` sets `Cache-Control: public, max-age=300` (5
@@ -153,13 +162,12 @@ Already handled:
 
 ```
 cd /opt/ingalls-weather-scripts/tri-cities-7day-forecast
-rm -f state/last_ecmwf_run.txt   # force a build regardless of last-seen run
-venv/bin/python3 deploy/guard_and_build.py
-tail -f state/guard.log
+venv/bin/python3 deploy/build_and_publish.py
+tail -f state/build.log
 ```
 
 Confirm `/var/www/images/tricities_forecast.png` exists and is fresh,
 then load `https://images.ingallswx.com/tricities_forecast.png` in a
-browser (should load padlock-secure, no warnings). Wait for a later cron
-tick (or re-run manually) after a new ECMWF cycle lands and confirm the
-file's timestamp updates while the URL stays the same.
+browser (should load padlock-secure, no warnings). Wait for the next
+scheduled cron time (07:15, 12:30, 19:15, or 00:30 UTC) and confirm the
+file's timestamp updates on its own while the URL stays the same.

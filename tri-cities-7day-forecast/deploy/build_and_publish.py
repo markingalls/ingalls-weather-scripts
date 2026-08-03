@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 """
-Hourly cron guard for the droplet deployment. Checks WindBorne's
-ecmwf-det/initialization_times endpoint (the raw ECMWF deterministic cycle,
-00/06/12/18Z) for the latest completed run. If it's the same run this
-script already built for, exits immediately. If it's new, runs the full
-fetch + build pipeline and overwrites the published PNG in place.
+Cron entry point for the droplet deployment. Runs the full fetch + build
+pipeline and overwrites the published PNG in place.
 
-An flock-based lock means an overlapping cron tick (e.g. a slow build still
-running when the next hourly tick fires) skips instead of running a second
-build concurrently.
+Scheduled at fixed times matching the proven GitHub Actions offsets --
+07:15, 12:30, 19:15, 00:30 UTC (see deploy/crontab.example) -- rather than
+polling for a new ECMWF run, because the pipeline pulls from four sources
+(NWS, WindBorne MetaMesh, Open-Meteo, Open-Meteo ensemble) and those fixed
+offsets were tuned to land safely after all four have absorbed a given
+ECMWF cycle. A trigger based on any single source's own availability (e.g.
+WindBorne's ecmwf-det initialization_times) risks firing before the other
+three have caught up, rendering a graphic that mixes a fresh source with a
+stale one.
 
-Requires WB_API_KEY in the environment (see ../.env.example).
+An flock-based lock means an overlapping cron tick (e.g. a slow build
+still running when the next scheduled tick fires) skips instead of
+running a second build concurrently.
 """
 import fcntl
 import os
@@ -18,20 +23,15 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-import requests
-
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # tri-cities-7day-forecast/
 STATE_DIR = os.path.join(BASE_DIR, "state")
-STATE_FILE = os.path.join(STATE_DIR, "last_ecmwf_run.txt")
 LOCK_FILE = os.path.join(STATE_DIR, "run.lock")
-LOG_FILE = os.path.join(STATE_DIR, "guard.log")
+LOG_FILE = os.path.join(STATE_DIR, "build.log")
 PYTHON = os.path.join(BASE_DIR, "venv", "bin", "python3")
 
 # Where nginx serves static files from -- see deploy/nginx-images.conf.
 WEB_ROOT = "/var/www/images"
 OUTPUT_NAME = "tricities_forecast.png"
-
-INIT_TIMES_URL = "https://api.windbornesystems.com/forecasts/v1/ecmwf-det/initialization_times"
 
 FETCH_SCRIPTS = [
     "fetch_forecast.py",
@@ -46,19 +46,6 @@ def log(msg):
     print(line)
     with open(LOG_FILE, "a") as f:
         f.write(line + "\n")
-
-
-def latest_ecmwf_run():
-    api_key = os.environ["WB_API_KEY"]
-    r = requests.get(INIT_TIMES_URL, headers={"Authorization": f"Bearer {api_key}"}, timeout=30)
-    r.raise_for_status()
-    return r.json()["latest"]
-
-
-def last_seen_run():
-    if os.path.exists(STATE_FILE):
-        return open(STATE_FILE).read().strip()
-    return None
 
 
 def build():
@@ -90,25 +77,14 @@ def main():
         return 0
 
     try:
-        try:
-            latest = latest_ecmwf_run()
-        except Exception as e:
-            log(f"Could not reach WindBorne initialization_times endpoint: {e}")
-            return 1
-
-        if latest == last_seen_run():
-            return 0  # no-op, stay quiet
-
-        log(f"New ECMWF run detected: {latest} (previous: {last_seen_run()})")
+        log("Starting scheduled build.")
         try:
             build()
         except subprocess.CalledProcessError as e:
-            log(f"Build FAILED ({e}) -- state not updated, will retry next hour.")
+            log(f"Build FAILED: {e}")
             return 1
 
-        with open(STATE_FILE, "w") as f:
-            f.write(latest)
-        log(f"Build succeeded -- {WEB_ROOT}/{OUTPUT_NAME} updated for run {latest}.")
+        log(f"Build succeeded -- {WEB_ROOT}/{OUTPUT_NAME} updated.")
         return 0
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
