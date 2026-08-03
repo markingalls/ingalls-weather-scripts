@@ -35,16 +35,16 @@ PYTHON = os.path.join(BASE_DIR, "venv", "bin", "python3")
 # Where nginx serves static files from -- see deploy/nginx-images.conf.
 WEB_ROOT = "/var/www/images"
 
-# Each location's own coordinates, drive every fetch script (fetch_forecast.py
+# Each location's own coordinates drive every fetch script (fetch_forecast.py
 # resolves NWS's own gridpoint/icons from lat/lon; Open-Meteo and the ECMWF
-# ensemble are lat/lon-native; HRRR smoke likewise). MetaMesh is different:
-# it's a station-bias-corrected product covering ~350 named METAR stations,
-# so Tri-Cities (KPSC) and Portland (KPDX, WindBorne's station id "pdx") use
-# station queries for that bias correction. Hermiston (KHRI) isn't one of
-# MetaMesh's supported stations, so it queries by coordinates instead --
-# confirmed against the API that this still returns a full forecast (with
-# station_id "KHRI" echoed back), just without the named-station bias
-# correction the other two get.
+# ensemble are lat/lon-native; HRRR smoke likewise). MetaMesh's station
+# queries need the full 4-letter, K-prefixed ICAO id (matching Tri-Cities'
+# working "kpsc") -- WindBorne's public /point_forecast/stations catalog
+# lists CONUS entries under a misleading 3-letter form ("pdx", not "kpdx")
+# that silently returns an empty forecast if queried directly; confirmed
+# against the live API that both "kpdx" and "khri" work as station queries
+# even though neither 3-letter/short form does, and KHRI isn't listed in
+# that catalog under any form at all despite resolving correctly.
 LOCATIONS = [
     {
         "label": "Tri-Cities, WA",
@@ -57,14 +57,14 @@ LOCATIONS = [
         "label": "Hermiston, OR",
         "lat": 45.82583,
         "lon": -119.26111,
-        "metamesh_station": None,
+        "metamesh_station": "khri",
         "output_name": "hermiston_forecast.png",
     },
     {
         "label": "Portland, OR",
         "lat": 45.59578,
         "lon": -122.60917,
-        "metamesh_station": "pdx",
+        "metamesh_station": "kpdx",
         "output_name": "portland_forecast.png",
     },
 ]
