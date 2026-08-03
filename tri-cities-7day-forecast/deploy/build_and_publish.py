@@ -60,9 +60,13 @@ def build():
         log("Outside smoke season (May-Oct), skipping HRRR smoke fetch.")
 
     # Render to a temp file in the same directory, then atomically replace
-    # the published file so nginx never serves a half-written PNG.
+    # the published file so nginx never serves a half-written PNG. The temp
+    # name has to keep a .png suffix -- matplotlib's savefig picks its
+    # output format from the file extension, not from an actual PNG being
+    # requested, so e.g. a ".tmp" suffix fails with "Format 'tmp' is not
+    # supported" instead of writing a PNG under a temp name.
     final_path = os.path.join(WEB_ROOT, OUTPUT_NAME)
-    tmp_path = final_path + ".tmp"
+    tmp_path = os.path.join(WEB_ROOT, f".tmp_{OUTPUT_NAME}")
     subprocess.run([PYTHON, "build_graphic.py", "--output", tmp_path], cwd=BASE_DIR, check=True, env=env)
     os.replace(tmp_path, final_path)
 
