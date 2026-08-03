@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Cron entry point for the droplet deployment. Runs the full fetch + build
-pipeline and overwrites the published PNG in place.
+pipeline for each location in LOCATIONS and overwrites each published PNG
+in place. One location failing (e.g. a fetch source hiccup) doesn't stop
+the others from publishing -- each is fetched, built, and published
+independently within the same run.
 
 Scheduled at fixed times matching the proven GitHub Actions offsets --
 07:15, 12:30, 19:15, 00:30 UTC (see deploy/crontab.example) -- rather than
@@ -13,9 +16,9 @@ WindBorne's ecmwf-det initialization_times) risks firing before the other
 three have caught up, rendering a graphic that mixes a fresh source with a
 stale one.
 
-An flock-based lock means an overlapping cron tick (e.g. a slow build
-still running when the next scheduled tick fires) skips instead of
-running a second build concurrently.
+An flock-based lock means an overlapping cron tick (e.g. a slow run still
+in progress when the next scheduled tick fires) skips instead of running
+a second pass concurrently.
 """
 import fcntl
 import os
@@ -31,13 +34,39 @@ PYTHON = os.path.join(BASE_DIR, "venv", "bin", "python3")
 
 # Where nginx serves static files from -- see deploy/nginx-images.conf.
 WEB_ROOT = "/var/www/images"
-OUTPUT_NAME = "tricities_forecast.png"
 
-FETCH_SCRIPTS = [
-    "fetch_forecast.py",
-    "fetch_metamesh_forecast.py",
-    "fetch_openmeteo_forecast.py",
-    "fetch_ecmwf_ensemble_forecast.py",
+# Each location's own coordinates, drive every fetch script (fetch_forecast.py
+# resolves NWS's own gridpoint/icons from lat/lon; Open-Meteo and the ECMWF
+# ensemble are lat/lon-native; HRRR smoke likewise). MetaMesh is different:
+# it's a station-bias-corrected product covering ~350 named METAR stations,
+# so Tri-Cities (KPSC) and Portland (KPDX, WindBorne's station id "pdx") use
+# station queries for that bias correction. Hermiston (KHRI) isn't one of
+# MetaMesh's supported stations, so it queries by coordinates instead --
+# confirmed against the API that this still returns a full forecast (with
+# station_id "KHRI" echoed back), just without the named-station bias
+# correction the other two get.
+LOCATIONS = [
+    {
+        "label": "Tri-Cities, WA",
+        "lat": 46.2647,
+        "lon": -119.1189,
+        "metamesh_station": "kpsc",
+        "output_name": "tricities_forecast.png",
+    },
+    {
+        "label": "Hermiston, OR",
+        "lat": 45.82583,
+        "lon": -119.26111,
+        "metamesh_station": None,
+        "output_name": "hermiston_forecast.png",
+    },
+    {
+        "label": "Portland, OR",
+        "lat": 45.59578,
+        "lon": -122.60917,
+        "metamesh_station": "pdx",
+        "output_name": "portland_forecast.png",
+    },
 ]
 
 
@@ -48,16 +77,30 @@ def log(msg):
         f.write(line + "\n")
 
 
-def build():
-    env = os.environ.copy()
-    for script in FETCH_SCRIPTS:
-        subprocess.run([PYTHON, script], cwd=BASE_DIR, check=True, env=env)
+def build_location(loc, env):
+    lat, lon = loc["lat"], loc["lon"]
+
+    subprocess.run([PYTHON, "fetch_forecast.py", "--lat", str(lat), "--lon", str(lon),
+                     "--label", loc["label"]], cwd=BASE_DIR, check=True, env=env)
+
+    metamesh_args = [PYTHON, "fetch_metamesh_forecast.py"]
+    if loc["metamesh_station"]:
+        metamesh_args += ["--station", loc["metamesh_station"]]
+    else:
+        metamesh_args += ["--lat", str(lat), "--lon", str(lon)]
+    subprocess.run(metamesh_args, cwd=BASE_DIR, check=True, env=env)
+
+    subprocess.run([PYTHON, "fetch_openmeteo_forecast.py", "--lat", str(lat), "--lon", str(lon)],
+                    cwd=BASE_DIR, check=True, env=env)
+    subprocess.run([PYTHON, "fetch_ecmwf_ensemble_forecast.py", "--lat", str(lat), "--lon", str(lon)],
+                    cwd=BASE_DIR, check=True, env=env)
 
     month = datetime.now(timezone.utc).month
     if 5 <= month <= 10:
-        subprocess.run([PYTHON, "fetch_hrrr_smoke_forecast.py"], cwd=BASE_DIR, check=True, env=env)
+        subprocess.run([PYTHON, "fetch_hrrr_smoke_forecast.py", "--lat", str(lat), "--lon", str(lon)],
+                        cwd=BASE_DIR, check=True, env=env)
     else:
-        log("Outside smoke season (May-Oct), skipping HRRR smoke fetch.")
+        log(f"{loc['label']}: outside smoke season (May-Oct), skipping HRRR smoke fetch.")
 
     # Render to a temp file in the same directory, then atomically replace
     # the published file so nginx never serves a half-written PNG. The temp
@@ -65,8 +108,8 @@ def build():
     # output format from the file extension, not from an actual PNG being
     # requested, so e.g. a ".tmp" suffix fails with "Format 'tmp' is not
     # supported" instead of writing a PNG under a temp name.
-    final_path = os.path.join(WEB_ROOT, OUTPUT_NAME)
-    tmp_path = os.path.join(WEB_ROOT, f".tmp_{OUTPUT_NAME}")
+    final_path = os.path.join(WEB_ROOT, loc["output_name"])
+    tmp_path = os.path.join(WEB_ROOT, f".tmp_{loc['output_name']}")
     subprocess.run([PYTHON, "build_graphic.py", "--output", tmp_path], cwd=BASE_DIR, check=True, env=env)
     os.replace(tmp_path, final_path)
 
@@ -82,14 +125,16 @@ def main():
 
     try:
         log("Starting scheduled build.")
-        try:
-            build()
-        except subprocess.CalledProcessError as e:
-            log(f"Build FAILED: {e}")
-            return 1
-
-        log(f"Build succeeded -- {WEB_ROOT}/{OUTPUT_NAME} updated.")
-        return 0
+        env = os.environ.copy()
+        failures = 0
+        for loc in LOCATIONS:
+            try:
+                build_location(loc, env)
+                log(f"{loc['label']}: succeeded -- {WEB_ROOT}/{loc['output_name']} updated.")
+            except subprocess.CalledProcessError as e:
+                failures += 1
+                log(f"{loc['label']}: FAILED ({e}) -- leaving its previous published image in place.")
+        return 1 if failures else 0
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         lock_fd.close()
