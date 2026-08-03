@@ -1,0 +1,10 @@
+# Install with: crontab -e  (paste these lines in)
+#
+# WB_API_KEY has to be set here (or sourced from a file guard_and_build.py
+# reads itself) because cron does not load your shell profile.
+WB_API_KEY=your_windborne_api_key_here
+
+# Every hour, on the hour: check for a new ECMWF run and rebuild only if
+# one is available. guard_and_build.py no-ops quietly when there's nothing
+# new, so this is safe to run this often.
+0 * * * * /opt/ingalls-weather-scripts/tri-cities-7day-forecast/venv/bin/python3 /opt/ingalls-weather-scripts/tri-cities-7day-forecast/deploy/guard_and_build.py >> /opt/ingalls-weather-scripts/tri-cities-7day-forecast/state/cron.log 2>&1

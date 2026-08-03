@@ -91,6 +91,9 @@ tri-cities-7day-forecast/openmeteo_forecast.json
 tri-cities-7day-forecast/ecmwf_ensemble_forecast.json
 tri-cities-7day-forecast/hrrr_smoke_forecast.json
 tri-cities-7day-forecast/tri_cities_7day_forecast*.png
+# state/ is the droplet-deploy guard's runtime state (last-seen ECMWF run,
+# lock file, logs) -- created on the server, not source.
+tri-cities-7day-forecast/state/
 # --- tri-cities-temp-chart ---
 # observed.json/forecast.json/climatology.json are live data the fetch_*.py
 # scripts regenerate every run, and the rendered chart is an output too --
