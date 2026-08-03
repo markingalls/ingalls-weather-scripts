@@ -154,9 +154,15 @@ Already handled:
 - `build_and_publish.py` always writes to the same filename
   (`/var/www/images/tricities_forecast.png`), via a temp file + atomic
   rename so nginx never serves a half-written PNG mid-save.
-- `nginx-images.conf` sets `Cache-Control: public, max-age=300` (5
-  minutes) on that file, so browsers and Jetpack's image CDN re-check
-  often without needing a cache-busting query string.
+- `nginx-images.conf` sets `Cache-Control: no-cache` on that file, so
+  every normal browser reload revalidates with the server (a cheap 304
+  if unchanged, courtesy of nginx's automatic Last-Modified/ETag support
+  on static files) instead of trusting a stale cached copy -- no hard
+  refresh or cache-busting query string needed. Whether WordPress.com's
+  Jetpack Photon image CDN honors this when the image is embedded in a
+  post is a separate, unverified question -- worth checking once it's
+  live there, since Photon may apply its own cache policy regardless of
+  the origin's headers.
 
 ## Phase 10 -- End-to-end test
 
