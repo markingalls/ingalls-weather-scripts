@@ -7,16 +7,16 @@
 # plus roughly 10-15 min buffer for the file to actually post -- see
 # NOAA_SCHEDULE.md in this folder for the sourcing on each one.
 
-# --- SPC Day 1 (categorical + wind + hail): 5x/day, 0600Z/1300Z/1630Z/2000Z/0100Z ---
-15 6 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
-15 13 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
-45 16 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
-15 20 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
-15 1 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+# --- SPC Day 1 (categorical + tornado + wind + hail): 5x/day, 0600Z/1300Z/1630Z/2000Z/0100Z ---
+15 6 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_tornado_day1,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+15 13 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_tornado_day1,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+45 16 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_tornado_day1,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+15 20 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_tornado_day1,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+15 1 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe,spc_tornado_day1,spc_wind_day1,spc_hail_day1 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 
-# --- SPC Day 2 (categorical + wind + hail): 2x/day, ~0600-0700Z and 1730Z ---
-15 7 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_convective_day2,spc_wind_day2,spc_hail_day2 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
-45 17 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_convective_day2,spc_wind_day2,spc_hail_day2 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+# --- SPC Day 2 (categorical + tornado + wind + hail): 2x/day, ~0600-0700Z and 1730Z ---
+15 7 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_convective_day2,spc_tornado_day2,spc_wind_day2,spc_hail_day2 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+45 17 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_convective_day2,spc_tornado_day2,spc_wind_day2,spc_hail_day2 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 
 # --- SPC Day 3 (categorical only -- no separate wind/hail product): 2x/day, ~0730-0830Z and 1930Z ---
 45 8 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_convective_day3 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1

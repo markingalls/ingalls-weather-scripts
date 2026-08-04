@@ -4,17 +4,20 @@ Each product group's refresh cadence matches NOAA's own real issuance
 schedule for that product, not a blind fixed interval. Sourced directly
 from NOAA/SPC/CPC's own pages (checked live, not from memory):
 
-- **SPC Day 1** (categorical, wind probability, hail probability): issued
+- **SPC Day 1** (categorical, tornado/wind/hail probability): issued
   5x/day at 0600Z, 1300Z, 1630Z, 2000Z, 0100Z, per
-  `origin-west-www-spc.woc.noaa.gov/misc/about.php`. Confirmed the wind/hail
-  probability layers update on this same schedule (not less often) by
-  checking a live `day1otlk_wind.kmz`'s `ISSUE_ISO` timestamp against the
-  outlook page's stated issuance time for the same cycle.
-- **SPC Day 2** (categorical, wind, hail): issued 2x/day, ~0600-0700Z and
-  1730Z, same source.
+  `origin-west-www-spc.woc.noaa.gov/misc/about.php`. Confirmed the
+  tornado/wind/hail probability layers update on this same schedule (not
+  less often) by checking a live `day1otlk_wind.kmz`'s `ISSUE_ISO`
+  timestamp against the outlook page's stated issuance time for the same
+  cycle. All three hazards (plus categorical) come from IEM as one bundled
+  fetch per cycle now (see the IEM fetch/parse comment in build_map.py),
+  so they share this same schedule structurally, not just by coincidence.
+- **SPC Day 2** (categorical, tornado, wind, hail): issued 2x/day,
+  ~0600-0700Z and 1730Z, same source.
 - **SPC Day 3** (categorical only -- SPC doesn't publish separate Day 3
-  wind/hail products, only a combined all-hazard "Probabilistic" outlook):
-  issued 2x/day, ~0730-0830Z and 1930Z, same source.
+  tornado/wind/hail products, only a combined all-hazard "Probabilistic"
+  outlook): issued 2x/day, ~0730-0830Z and 1930Z, same source.
 - **SPC Fire Weather** (Day 1 and Day 2): both issued once together at
   ~2:00am CST/CDT (~0700-0800Z depending on daylight saving), per
   `origin-west-www-spc.woc.noaa.gov/misc/about.php`; Day 1 gets a separate

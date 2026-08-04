@@ -18,6 +18,8 @@ frame/style. Pick one with --product:
     spc_severe    SPC Day 1 Categorical (Severe Weather) Outlook
     spc_convective_day2  SPC Day 2 Categorical (Severe Weather) Outlook
     spc_convective_day3  SPC Day 3 Categorical (Severe Weather) Outlook
+    spc_tornado_day1  SPC Day 1 Tornado Probability Outlook
+    spc_tornado_day2  SPC Day 2 Tornado Probability Outlook
     spc_wind_day1 SPC Day 1 Wind Probability Outlook
     spc_wind_day2 SPC Day 2 Wind Probability Outlook
     spc_hail_day1 SPC Day 1 Hail Probability Outlook
@@ -330,21 +332,24 @@ def parse_usdm_geojson(text):
 # before the request ever reaches SPC's origin, so no User-Agent or header
 # trick gets around it; CPC and the drought monitor's ArcGIS source aren't
 # affected). Iowa Environmental Mesonet mirrors the same SPC outlook data
-# as bulk shapefiles and isn't behind that block, so all nine SPC-domain
+# as bulk shapefiles and isn't behind that block, so all eleven SPC-domain
 # products fetch from IEM instead. Confirmed live against IEM:
-#   - type=C (convective) for a given day bundles CATEGORICAL, WIND, HAIL,
-#     and TORNADO together in one shapefile -- SPC issues them as a single
-#     product -- filtered here by the CATEGORY field. Day 3 only carries
-#     CATEGORICAL and ANY SEVERE (no separate wind/hail), matching SPC's
-#     own Day 3 product.
+#   - type=C (convective) for a given day bundles CATEGORICAL, TORNADO,
+#     WIND, and HAIL together in one shapefile -- SPC issues them as a
+#     single product -- filtered here by the CATEGORY field. Day 3 only
+#     carries CATEGORICAL and ANY SEVERE (no separate tornado/wind/hail),
+#     matching SPC's own Day 3 product.
 #   - type=F (fire weather) THRESHOLD comes through directly as
 #     ELEV/CRIT/EXTM/IDRT under one category, "FIRE WEATHER CATEGORICAL" --
 #     dry thunderstorm risk (IDRT) is NOT a separate category as originally
 #     assumed, it's just another THRESHOLD value alongside the fire-index
 #     tiers, so it maps onto SPC_FIRE_STYLE with no special-casing needed.
-#   - WIND/HAIL THRESHOLD is a fraction ("0.05", "0.15", ...) rather than a
-#     bare percentage, and "CIG1" for the significant tier (matching
-#     spc_prob_style's existing "CIG" check exactly).
+#   - TORNADO/WIND/HAIL THRESHOLD is a fraction ("0.05", "0.15", ...) rather
+#     than a bare percentage, and "CIG1"/"CIG2" for the significant tier(s)
+#     (matching spc_prob_style's existing "CIG" check exactly -- CIG2 is
+#     rare, seen on only a handful of the most active outbreak days across
+#     a season and a half of history checked, but the same "startswith"
+#     check picks it up with no extra handling needed).
 # ---------------------------------------------------------------------------
 
 IEM_OUTLOOKS_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/gis/outlooks.py"
@@ -398,11 +403,29 @@ def fetch_iem_outlook(day, iem_type, category, hazard_label=None):
         dbf_bytes = io.BytesIO(zf.read(base + ".dbf"))
     reader = shapefile.Reader(shp=shp_bytes, shx=shx_bytes, dbf=dbf_bytes)
 
-    rows = [sr for sr in reader.iterShapeRecords() if sr.record["CATEGORY"] == category]
-    if not rows:
-        return []
-    latest_issue = max(sr.record["ISSUE"] for sr in rows)
-    rows = [sr for sr in rows if sr.record["ISSUE"] == latest_issue]
+    # "Latest cycle" has to be anchored across ALL categories in the
+    # shapefile, not just `category`'s own rows -- CATEGORICAL is always
+    # issued every cycle, but TORNADO/WIND/HAIL are sometimes omitted
+    # entirely from a cycle's product when SPC has zero probability
+    # anywhere in the country for that hazard. Confirmed live: a quiet day
+    # can have TORNADO rows only for a stale, already-expired cycle from
+    # over 24h earlier while WIND/HAIL/CATEGORICAL have a same-day one.
+    # Anchoring to `category`'s own max ISSUE would silently show that
+    # stale cycle as if current; anchoring to the whole shapefile's max
+    # ISSUE instead means an empty `category` at the true latest cycle
+    # correctly renders as "no risk this cycle" (see the not-styled ->
+    # no-risk-map path in build_map), not old data.
+    all_records = list(reader.iterShapeRecords())
+    if not all_records:
+        # No rows for ANY category across the whole fetch window -- unlike
+        # `category` itself being empty at the latest cycle (a legitimate
+        # zero-probability result, handled below), this means IEM had
+        # nothing at all to mirror for this day/type, which over a 48h
+        # window is a real problem (feed outage, bad params), not weather.
+        sys.exit(f"IEM returned no outlook data at all for day={day}, type={iem_type} "
+                 f"within the last {IEM_FETCH_WINDOW_HOURS}h -- feed issue, not a quiet day.")
+    latest_issue = max(sr.record["ISSUE"] for sr in all_records)
+    rows = [sr for sr in all_records if sr.record["CATEGORY"] == category and sr.record["ISSUE"] == latest_issue]
 
     placemarks = []
     for sr in rows:
@@ -710,38 +733,41 @@ def spc_style(style_map, warning_label):
     return style
 
 
-# SPC's own KML embeds each wind/hail probability tier's fill/stroke hex
-# directly in ExtendedData; IEM's shapefile mirror (fetch_iem_outlook) has
-# no color fields at all. Only the 5% and 15% tiers are confirmed against a
-# real spc.noaa.gov KML capture (fill #C5A392/#FFEB7F, stroke
-# #8B4726/#FF9600) -- SPC doesn't publish the 30/45/60% hex values anywhere
-# findable (its own info page and two mapservices.weather.gov MapServer
-# legend endpoints both 404'd), so this interpolates a smooth ramp through
-# those two confirmed anchors and on toward warmer, more saturated hues at
-# the higher tiers -- the same tan-to-magenta progression SPC_SEVERE_STYLE
-# uses across its own MRGL->HIGH tiers. Used as a fallback only when a
-# placemark has no real fill/stroke (i.e. every IEM-sourced product).
-WIND_HAIL_FILL_RAMP = mcolors.LinearSegmentedColormap.from_list(
-    "wind_hail_fill", ["#C5A392", "#FFEB7F", "#FFA733", "#FF6B35", "#C81E3A"])
-WIND_HAIL_STROKE_RAMP = mcolors.LinearSegmentedColormap.from_list(
-    "wind_hail_stroke", ["#8B4726", "#FF9600", "#E85D04", "#C1272D", "#7A0C1E"])
-WIND_HAIL_PROB_MIN, WIND_HAIL_PROB_MAX = 5.0, 60.0
+# SPC's own KML embeds each tornado/wind/hail probability tier's fill/stroke
+# hex directly in ExtendedData; IEM's shapefile mirror (fetch_iem_outlook)
+# has no color fields at all. Only the 5% and 15% tiers are confirmed
+# against a real spc.noaa.gov KML capture (fill #C5A392/#FFEB7F, stroke
+# #8B4726/#FF9600) -- SPC doesn't publish hex values for the rest of the
+# scale anywhere findable (its own info page and two mapservices.weather.gov
+# MapServer legend endpoints both 404'd), so this interpolates a smooth ramp
+# through those two confirmed anchors and on toward warmer, more saturated
+# hues at the higher tiers -- the same tan-to-magenta progression
+# SPC_SEVERE_STYLE uses across its own MRGL->HIGH tiers, extended down to
+# 2% for tornado's lowest tier (wind/hail bottom out at 5%). Used as a
+# fallback only when a placemark has no real fill/stroke (i.e. every
+# IEM-sourced product).
+SPC_PROB_FILL_RAMP = mcolors.LinearSegmentedColormap.from_list(
+    "spc_prob_fill", ["#C5A392", "#FFEB7F", "#FFA733", "#FF6B35", "#C81E3A"])
+SPC_PROB_STROKE_RAMP = mcolors.LinearSegmentedColormap.from_list(
+    "spc_prob_stroke", ["#8B4726", "#FF9600", "#E85D04", "#C1272D", "#7A0C1E"])
+SPC_PROB_MIN, SPC_PROB_MAX = 2.0, 60.0
 
 
-def _wind_hail_ramp_color(cmap, probability):
-    t = max(0.0, min(1.0, (probability - WIND_HAIL_PROB_MIN) / (WIND_HAIL_PROB_MAX - WIND_HAIL_PROB_MIN)))
+def _spc_prob_ramp_color(cmap, probability):
+    t = max(0.0, min(1.0, (probability - SPC_PROB_MIN) / (SPC_PROB_MAX - SPC_PROB_MIN)))
     return mcolors.to_hex(cmap(t))
 
 
 def spc_prob_style(hazard_label):
-    """Style for SPC's Day 1/2 Wind and Hail probabilistic outlooks. Unlike
-    the fixed categorical tiers above (SPC_FIRE_STYLE, SPC_SEVERE_STYLE),
-    these are a probability scale (5/15/30/45/60%) plus a "CIG1" tier --
-    SPC's current name for what's commonly called "significant" risk,
-    confirmed against a live fetch. Prefers the fill/stroke colors NOAA
-    embeds directly in its own KML when present, falling back to
-    WIND_HAIL_FILL_RAMP/_STROKE_RAMP for IEM-sourced placemarks, which
-    carry no color fields. CIG1 gets its own "axis" (same stripe-on-overlap
+    """Style for SPC's Day 1/2 Tornado, Wind, and Hail probabilistic
+    outlooks. Unlike the fixed categorical tiers above (SPC_FIRE_STYLE,
+    SPC_SEVERE_STYLE), these are a probability scale (2/5/15/30/45/60%,
+    tornado only goes down to 2%) plus a "CIG1"/"CIG2" tier -- SPC's
+    current names for what's commonly called "significant" risk, confirmed
+    against a live fetch. Prefers the fill/stroke colors NOAA embeds
+    directly in its own KML when present, falling back to
+    SPC_PROB_FILL_RAMP/_STROKE_RAMP for IEM-sourced placemarks, which carry
+    no color fields. CIG* gets its own "axis" (same stripe-on-overlap
     mechanism spc_fire uses for dry-thunderstorm risk) since it can overlap
     a probability polygon rather than nesting inside it like the fixed
     categorical tiers do."""
@@ -751,7 +777,7 @@ def spc_prob_style(hazard_label):
         label = fields.get("LABEL2") or code
         if code.startswith("CIG"):
             color = fields.get("stroke") or fields.get("fill") \
-                or mcolors.to_hex(WIND_HAIL_STROKE_RAMP(1.0))
+                or mcolors.to_hex(SPC_PROB_STROKE_RAMP(1.0))
             return {"color": color, "alpha": 0.35, "order_key": 99,
                     "label": f"Significant {hazard_label.title()} Risk", "axis": "significant"}
         try:
@@ -759,7 +785,7 @@ def spc_prob_style(hazard_label):
         except ValueError:
             print(f"WARNING: unrecognized {hazard_label} category '{code}', skipping.")
             return None
-        fill = fields.get("fill") or _wind_hail_ramp_color(WIND_HAIL_FILL_RAMP, probability)
+        fill = fields.get("fill") or _spc_prob_ramp_color(SPC_PROB_FILL_RAMP, probability)
         return {"color": fill, "alpha": 0.7, "order_key": probability, "label": label, "axis": "index"}
     return style
 
@@ -925,6 +951,24 @@ PRODUCTS = {
         style=spc_style(SPC_SEVERE_STYLE, "severe outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_convective_day3.png",
+    ),
+    "spc_tornado_day1": dict(
+        title="Western U.S. Tornado Outlook",
+        subtitle_prefix="NWS Storm Prediction Center — Day 1 Tornado Probability Outlook",
+        agency="SPC",
+        iem=dict(day=1, iem_type="C", category="TORNADO", hazard_label="tornado"),
+        style=spc_prob_style("tornado"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_tornado_day1.png",
+    ),
+    "spc_tornado_day2": dict(
+        title="Western U.S. Tornado Outlook — Day 2",
+        subtitle_prefix="NWS Storm Prediction Center — Day 2 Tornado Probability Outlook",
+        agency="SPC",
+        iem=dict(day=2, iem_type="C", category="TORNADO", hazard_label="tornado"),
+        style=spc_prob_style("tornado"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_tornado_day2.png",
     ),
     "spc_wind_day1": dict(
         title="Western U.S. Wind Outlook",
@@ -1100,8 +1144,16 @@ def build_map(product_key, output_path, override_path=None):
     else:
         text, fetched_at = fetch_source(cfg, override_path)
         placemarks = cfg["parser"](text)
-    if not placemarks:
-        sys.exit(f"No placemarks found for '{product_key}' — is the source format as expected?")
+        # Only the KML path treats an empty result as a hard failure --
+        # those sources essentially always emit some placemark structurally
+        # (e.g. an all-clear "Equal Chances" category), so empty usually
+        # means something didn't parse right. fetch_iem_outlook already
+        # distinguishes "IEM has nothing at all" (raises there) from
+        # "this hazard is genuinely at zero right now" (returns [] here,
+        # on purpose) -- the latter should fall through to the ordinary
+        # not-styled -> no-risk-map path below, same as any other quiet day.
+        if not placemarks:
+            sys.exit(f"No placemarks found for '{product_key}' — is the source format as expected?")
 
     styled = []
     for pm in placemarks:
