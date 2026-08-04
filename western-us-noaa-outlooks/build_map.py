@@ -95,6 +95,15 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
+# The droplet got a flat 403 fetching spc.noaa.gov with requests' default
+# User-Agent ("python-requests/x.x.x"); same URLs worked fine without one
+# from this environment, so it's plausibly (not confirmed) a WAF rule aimed
+# at that default UA string specifically, not a wholesale IP block. A
+# descriptive one, same spirit as fetch_forecast.py's for api.weather.gov,
+# is a normal, honest thing to send regardless -- worth trying first since
+# it's a one-line change, before assuming something harder like an IP block.
+FETCH_HEADERS = {"User-Agent": "(ingallswx.com, contact@ingallswx.com)"}
+
 # State/province and country borders are drawn from admin1_boundary_lines.json
 # / admin0_boundary_lines.json -- dedicated line datasets -- rather than
 # derived by outlining Natural Earth's admin-1 *polygons*
@@ -884,7 +893,7 @@ def fetch_source(cfg, override_path):
         for url in cfg["urls"]:
             try:
                 print(f"Fetching {url} ...")
-                resp = requests.get(url, timeout=30)
+                resp = requests.get(url, headers=FETCH_HEADERS, timeout=30)
                 resp.raise_for_status()
                 raw = resp.content
                 fetched_at = resp.headers.get("Last-Modified")
