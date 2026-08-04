@@ -55,7 +55,7 @@ import json
 import re
 import sys
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from html import unescape
 from pathlib import Path
 
@@ -69,6 +69,7 @@ from matplotlib.patches import Patch, PathPatch
 from matplotlib.axes import Axes
 import numpy as np
 import requests
+import shapefile
 
 import cartopy.crs as ccrs
 from cartopy.mpl.path import shapely_to_path
@@ -95,13 +96,12 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
-# The droplet got a flat 403 fetching spc.noaa.gov with requests' default
-# User-Agent ("python-requests/x.x.x"); same URLs worked fine without one
-# from this environment, so it's plausibly (not confirmed) a WAF rule aimed
-# at that default UA string specifically, not a wholesale IP block. A
-# descriptive one, same spirit as fetch_forecast.py's for api.weather.gov,
-# is a normal, honest thing to send regardless -- worth trying first since
-# it's a one-line change, before assuming something harder like an IP block.
+# A descriptive User-Agent, same spirit as fetch_forecast.py's for
+# api.weather.gov, is a normal, honest thing to send on every request.
+# (It was first tried as a fix for the droplet's spc.noaa.gov 403s; a
+# curl -sv capture later showed those came from a CloudFront/WAF edge
+# block on the droplet's IP range, not a User-Agent rule -- see the IEM
+# fetch/parse comment below for the actual fix.)
 FETCH_HEADERS = {"User-Agent": "(ingallswx.com, contact@ingallswx.com)"}
 
 # State/province and country borders are drawn from admin1_boundary_lines.json
@@ -320,6 +320,111 @@ def parse_usdm_geojson(text):
             continue
         results.append({"fields": feat.get("properties", {}), "rings": rings})
     return results
+
+
+# ---------------------------------------------------------------------------
+# IEM fetch/parse -- SPC's own site (spc.noaa.gov) is fronted by a
+# CloudFront distribution whose WAF flatly blocks the droplet's hosting-
+# provider IP range (confirmed via curl -sv: "server: CloudFront",
+# "x-cache: Error from cloudfront" -- the block happens at the CDN edge,
+# before the request ever reaches SPC's origin, so no User-Agent or header
+# trick gets around it; CPC and the drought monitor's ArcGIS source aren't
+# affected). Iowa Environmental Mesonet mirrors the same SPC outlook data
+# as bulk shapefiles and isn't behind that block, so all nine SPC-domain
+# products fetch from IEM instead. Confirmed live against IEM:
+#   - type=C (convective) for a given day bundles CATEGORICAL, WIND, HAIL,
+#     and TORNADO together in one shapefile -- SPC issues them as a single
+#     product -- filtered here by the CATEGORY field. Day 3 only carries
+#     CATEGORICAL and ANY SEVERE (no separate wind/hail), matching SPC's
+#     own Day 3 product.
+#   - type=F (fire weather) THRESHOLD comes through directly as
+#     ELEV/CRIT/EXTM/IDRT under one category, "FIRE WEATHER CATEGORICAL" --
+#     dry thunderstorm risk (IDRT) is NOT a separate category as originally
+#     assumed, it's just another THRESHOLD value alongside the fire-index
+#     tiers, so it maps onto SPC_FIRE_STYLE with no special-casing needed.
+#   - WIND/HAIL THRESHOLD is a fraction ("0.05", "0.15", ...) rather than a
+#     bare percentage, and "CIG1" for the significant tier (matching
+#     spc_prob_style's existing "CIG" check exactly).
+# ---------------------------------------------------------------------------
+
+IEM_OUTLOOKS_URL = "https://mesonet.agron.iastate.edu/cgi-bin/request/gis/outlooks.py"
+
+# A bulk request over this window can span several issuance cycles (SPC
+# reissues Day 1 outlooks multiple times a day); fetch_iem_outlook() keeps
+# only the most-recently-issued cycle's records, so this just needs to
+# comfortably bracket the longest gap between cycles, not match it exactly.
+IEM_FETCH_WINDOW_HOURS = 48
+
+
+def _iem_iso(yyyymmddhhmm):
+    return datetime.strptime(yyyymmddhhmm, "%Y%m%d%H%M").replace(tzinfo=timezone.utc).isoformat()
+
+
+def _shapefile_rings(shp):
+    """pyshp gives one flat points list per shape plus part-start indices --
+    convert to a list of rings. Like parse_usdm_geojson's exterior-only
+    simplification, this doesn't distinguish holes from exterior rings, but
+    SPC outlook polygons essentially never have donut holes in practice."""
+    parts = list(shp.parts) + [len(shp.points)]
+    return [shp.points[parts[i]:parts[i + 1]] for i in range(len(parts) - 1)
+            if parts[i + 1] - parts[i] >= 3]
+
+
+def fetch_iem_outlook(day, iem_type, category, hazard_label=None):
+    """Fetches one SPC outlook product from IEM's bulk shapefile mirror and
+    returns placemarks in the same {"fields": {...}, "rings": [...]} shape
+    the KML parsers produce, so the existing style/date functions
+    (spc_style, spc_prob_style, date_from_valid_expire_iso) work unchanged.
+
+    `category` is the IEM CATEGORY value to keep ("CATEGORICAL", "WIND",
+    "HAIL", or "FIRE WEATHER CATEGORICAL"). WIND/HAIL need hazard_label
+    ("wind"/"hail") to build a human-readable LABEL2 -- IEM has no
+    equivalent of SPC's own KML LABEL2 field."""
+    now = datetime.now(timezone.utc)
+    params = {
+        "d": day,
+        "type": iem_type,
+        "sts": (now - timedelta(hours=IEM_FETCH_WINDOW_HOURS)).strftime("%Y-%m-%dT%H:%MZ"),
+        "ets": (now + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%MZ"),
+        "geom": "geom_layers",
+    }
+    print(f"Fetching {IEM_OUTLOOKS_URL} (day={day}, type={iem_type}, category={category}) ...")
+    resp = requests.get(IEM_OUTLOOKS_URL, headers=FETCH_HEADERS, params=params, timeout=60)
+    resp.raise_for_status()
+    with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+        base = next(n[:-4] for n in zf.namelist() if n.lower().endswith(".shp"))
+        shp_bytes = io.BytesIO(zf.read(base + ".shp"))
+        shx_bytes = io.BytesIO(zf.read(base + ".shx"))
+        dbf_bytes = io.BytesIO(zf.read(base + ".dbf"))
+    reader = shapefile.Reader(shp=shp_bytes, shx=shx_bytes, dbf=dbf_bytes)
+
+    rows = [sr for sr in reader.iterShapeRecords() if sr.record["CATEGORY"] == category]
+    if not rows:
+        return []
+    latest_issue = max(sr.record["ISSUE"] for sr in rows)
+    rows = [sr for sr in rows if sr.record["ISSUE"] == latest_issue]
+
+    placemarks = []
+    for sr in rows:
+        rings = _shapefile_rings(sr.shape)
+        if not rings:
+            continue
+        threshold = sr.record["THRESHOLD"]
+        label2 = None
+        if hazard_label and not threshold.startswith("CIG"):
+            pct = f"{float(threshold) * 100:.0f}"
+            label, label2 = pct, f"{pct}% {hazard_label.title()} Risk"
+        else:
+            label = threshold
+        fields = {
+            "LABEL": label,
+            "VALID_ISO": _iem_iso(sr.record["ISSUE"]),
+            "EXPIRE_ISO": _iem_iso(sr.record["EXPIRE"]),
+        }
+        if label2:
+            fields["LABEL2"] = label2
+        placemarks.append({"fields": fields, "rings": rings})
+    return placemarks
 
 
 # ---------------------------------------------------------------------------
@@ -607,37 +712,56 @@ def spc_style(style_map, warning_label):
     return style
 
 
+# SPC's own KML embeds each wind/hail probability tier's fill/stroke hex
+# directly in ExtendedData; IEM's shapefile mirror (fetch_iem_outlook) has
+# no color fields at all. Only the 5% and 15% tiers are confirmed against a
+# real spc.noaa.gov KML capture (fill #C5A392/#FFEB7F, stroke
+# #8B4726/#FF9600) -- SPC doesn't publish the 30/45/60% hex values anywhere
+# findable (its own info page and two mapservices.weather.gov MapServer
+# legend endpoints both 404'd), so this interpolates a smooth ramp through
+# those two confirmed anchors and on toward warmer, more saturated hues at
+# the higher tiers -- the same tan-to-magenta progression SPC_SEVERE_STYLE
+# uses across its own MRGL->HIGH tiers. Used as a fallback only when a
+# placemark has no real fill/stroke (i.e. every IEM-sourced product).
+WIND_HAIL_FILL_RAMP = mcolors.LinearSegmentedColormap.from_list(
+    "wind_hail_fill", ["#C5A392", "#FFEB7F", "#FFA733", "#FF6B35", "#C81E3A"])
+WIND_HAIL_STROKE_RAMP = mcolors.LinearSegmentedColormap.from_list(
+    "wind_hail_stroke", ["#8B4726", "#FF9600", "#E85D04", "#C1272D", "#7A0C1E"])
+WIND_HAIL_PROB_MIN, WIND_HAIL_PROB_MAX = 5.0, 60.0
+
+
+def _wind_hail_ramp_color(cmap, probability):
+    t = max(0.0, min(1.0, (probability - WIND_HAIL_PROB_MIN) / (WIND_HAIL_PROB_MAX - WIND_HAIL_PROB_MIN)))
+    return mcolors.to_hex(cmap(t))
+
+
 def spc_prob_style(hazard_label):
     """Style for SPC's Day 1/2 Wind and Hail probabilistic outlooks. Unlike
     the fixed categorical tiers above (SPC_FIRE_STYLE, SPC_SEVERE_STYLE),
-    these are a probability scale (2/5/15/30/45/60%) plus a "CIG1" tier --
-    SPC's current name for what's commonly called "significant" risk
-    (hatched on their own graphics), confirmed against a live fetch. Rather
-    than hand-picking a color per tier, this reads the fill/stroke colors
-    NOAA already embeds in the KML's ExtendedData, so it stays correct
-    automatically if SPC ever adds a tier or changes their palette. CIG1
-    gets its own "axis" (same stripe-on-overlap mechanism spc_fire uses for
-    dry-thunderstorm risk) since it can overlap a probability polygon
-    rather than nesting inside it like the fixed categorical tiers do."""
+    these are a probability scale (5/15/30/45/60%) plus a "CIG1" tier --
+    SPC's current name for what's commonly called "significant" risk,
+    confirmed against a live fetch. Prefers the fill/stroke colors NOAA
+    embeds directly in its own KML when present, falling back to
+    WIND_HAIL_FILL_RAMP/_STROKE_RAMP for IEM-sourced placemarks, which
+    carry no color fields. CIG1 gets its own "axis" (same stripe-on-overlap
+    mechanism spc_fire uses for dry-thunderstorm risk) since it can overlap
+    a probability polygon rather than nesting inside it like the fixed
+    categorical tiers do."""
     def style(pm):
         fields = pm["fields"]
         code = fields.get("LABEL", "")
-        fill = fields.get("fill")
-        if not fill:
-            print(f"WARNING: {hazard_label} placemark has no fill color, skipping.")
-            return None
         label = fields.get("LABEL2") or code
         if code.startswith("CIG"):
-            # LABEL2 for this tier is NOAA's internal name ("Wind Conditional
-            # Intensity Group 1 Risk") -- use the commonly-understood term
-            # for the legend instead.
-            return {"color": fields.get("stroke", fill), "alpha": 0.35, "order_key": 99,
+            color = fields.get("stroke") or fields.get("fill") \
+                or mcolors.to_hex(WIND_HAIL_STROKE_RAMP(1.0))
+            return {"color": color, "alpha": 0.35, "order_key": 99,
                     "label": f"Significant {hazard_label.title()} Risk", "axis": "significant"}
         try:
             probability = float(code)
         except ValueError:
             print(f"WARNING: unrecognized {hazard_label} category '{code}', skipping.")
             return None
+        fill = fields.get("fill") or _wind_hail_ramp_color(WIND_HAIL_FILL_RAMP, probability)
         return {"color": fill, "alpha": 0.7, "order_key": probability, "label": label, "axis": "index"}
     return style
 
@@ -763,8 +887,7 @@ PRODUCTS = {
         title="Western U.S. Fire Weather Outlook",
         subtitle_prefix="NWS Storm Prediction Center — Day 1 Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/fire_wx/day1fireotlk.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=1, iem_type="F", category="FIRE WEATHER CATEGORICAL"),
         style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire.png",
@@ -774,8 +897,7 @@ PRODUCTS = {
         title="Western U.S. Fire Weather Outlook — Day 2",
         subtitle_prefix="NWS Storm Prediction Center — Day 2 Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/fire_wx/day2fireotlk.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=2, iem_type="F", category="FIRE WEATHER CATEGORICAL"),
         style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire_day2.png",
@@ -785,8 +907,7 @@ PRODUCTS = {
         title="Western U.S. Severe Weather Outlook",
         subtitle_prefix="NWS Storm Prediction Center — Day 1 Categorical Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/outlook/day1otlk_cat.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=1, iem_type="C", category="CATEGORICAL"),
         style=spc_style(SPC_SEVERE_STYLE, "severe outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_severe.png",
@@ -795,8 +916,7 @@ PRODUCTS = {
         title="Western U.S. Severe Weather Outlook — Day 2",
         subtitle_prefix="NWS Storm Prediction Center — Day 2 Categorical Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/outlook/day2otlk_cat.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=2, iem_type="C", category="CATEGORICAL"),
         style=spc_style(SPC_SEVERE_STYLE, "severe outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_convective_day2.png",
@@ -805,8 +925,7 @@ PRODUCTS = {
         title="Western U.S. Severe Weather Outlook — Day 3",
         subtitle_prefix="NWS Storm Prediction Center — Day 3 Categorical Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/outlook/day3otlk_cat.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=3, iem_type="C", category="CATEGORICAL"),
         style=spc_style(SPC_SEVERE_STYLE, "severe outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_convective_day3.png",
@@ -815,8 +934,7 @@ PRODUCTS = {
         title="Western U.S. Wind Outlook",
         subtitle_prefix="NWS Storm Prediction Center — Day 1 Wind Probability Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/outlook/day1otlk_wind.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=1, iem_type="C", category="WIND", hazard_label="wind"),
         style=spc_prob_style("wind"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_wind_day1.png",
@@ -826,8 +944,7 @@ PRODUCTS = {
         title="Western U.S. Wind Outlook — Day 2",
         subtitle_prefix="NWS Storm Prediction Center — Day 2 Wind Probability Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/outlook/day2otlk_wind.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=2, iem_type="C", category="WIND", hazard_label="wind"),
         style=spc_prob_style("wind"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_wind_day2.png",
@@ -837,8 +954,7 @@ PRODUCTS = {
         title="Western U.S. Hail Outlook",
         subtitle_prefix="NWS Storm Prediction Center — Day 1 Hail Probability Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/outlook/day1otlk_hail.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=1, iem_type="C", category="HAIL", hazard_label="hail"),
         style=spc_prob_style("hail"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_hail_day1.png",
@@ -848,8 +964,7 @@ PRODUCTS = {
         title="Western U.S. Hail Outlook — Day 2",
         subtitle_prefix="NWS Storm Prediction Center — Day 2 Hail Probability Outlook",
         agency="SPC",
-        urls=["https://www.spc.noaa.gov/products/outlook/day2otlk_hail.kmz"],
-        parser=parse_kml_extended_data,
+        iem=dict(day=2, iem_type="C", category="HAIL", hazard_label="hail"),
         style=spc_prob_style("hail"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_hail_day2.png",
@@ -987,8 +1102,12 @@ def build_map(product_key, output_path, override_path=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
 
-    text, fetched_at = fetch_source(cfg, override_path)
-    placemarks = cfg["parser"](text)
+    if "iem" in cfg:
+        placemarks = fetch_iem_outlook(**cfg["iem"])
+        fetched_at = None
+    else:
+        text, fetched_at = fetch_source(cfg, override_path)
+        placemarks = cfg["parser"](text)
     if not placemarks:
         sys.exit(f"No placemarks found for '{product_key}' — is the source format as expected?")
 
