@@ -33,7 +33,10 @@ To render from a KML/KMZ you already have on disk instead of fetching
 
 REQUIRES (already checked into /maps at repo root, shared across all
 Ingalls Weather map projects):
-    land_slim.json, countries_slim.json, states_lakes_slim.json
+    land_slim.json, states_lakes_slim.json (lake polygons only -- state and
+    country borders come from admin1_boundary_lines.json and
+    admin0_boundary_lines.json instead, see the comment above
+    GEOM_SIMPLIFY_TOLERANCE_DEG for why)
   Sourced from raw.githubusercontent.com/martynafford/natural-earth-geojson
   (10m), clipped down to North America.
 
@@ -64,7 +67,7 @@ import requests
 import cartopy.crs as ccrs
 from cartopy.mpl.path import shapely_to_path
 import shapely
-from shapely.geometry import shape, box, MultiPolygon, Polygon as ShPolygon, MultiPolygon as ShMultiPolygon
+from shapely.geometry import shape, box, Polygon as ShPolygon, MultiPolygon as ShMultiPolygon
 from shapely.ops import unary_union
 from PIL import Image
 
@@ -80,38 +83,60 @@ OUTPUT_DIR = THIS_DIR / "output"
 
 LAND_FILE = MAPS_DIR / "land_slim.json"
 STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
+ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
+ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
-# Natural Earth's admin-1 polygons aren't a clean topological coverage --
-# neighboring state/province polygons (same country or, worse, across a
-# country line) don't share identical boundary vertices, even at full 10m
-# resolution. Rendering each polygon's own edge independently then shows a
-# visible double line everywhere two of them meet. shapely.coverage_simplify
-# (called per country, below) simplifies a set of polygons while snapping
-# their shared edges together, which fixes state/province pairs within a
-# country; it happens to also clean up most of the cross-country jitter
-# along the international border (though that's not guaranteed the way the
-# within-country case is, since the US/Canada/Mexico polygons aren't
-# simplified as one shared coverage). Also used as a plain .simplify()
-# tolerance for the land layer, which has no adjacency to preserve.
-GEOM_SIMPLIFY_TOLERANCE_DEG = 0.02
+# State/province and country borders are drawn from admin1_boundary_lines.json
+# / admin0_boundary_lines.json -- dedicated line datasets -- rather than
+# derived by outlining Natural Earth's admin-1 *polygons*
+# (states_lakes_slim.json). Two things drove this, one that panned out and
+# one that didn't:
+#  - A sliver-shaped gap right at the Idaho/Utah/Wyoming tripoint looked
+#    exactly like a classic "independently-stroked polygons don't quite
+#    meet" artifact, and switching to line data was the obvious fix to try.
+#    Turned out to be a red herring: it's a real small lake sitting almost
+#    exactly on the state line (confirmed by outlining it) -- the original
+#    polygon-outline approach was already rendering that tripoint cleanly.
+#  - What line data actually did fix: admin1_boundary_lines.json includes a
+#    state's international-facing edge as an ordinary line -- e.g.
+#    Washington's northern border through the San Juan Islands is in there
+#    like any other state boundary -- and it isn't vertex-matched to
+#    admin0_boundary_lines.json's own line for that same physical stretch.
+#    Drawing both showed as two visibly diverging lines along the WA/BC
+#    border. See load_state_lines() for how the duplicate stretch gets
+#    trimmed out. Lake polygons still come from states_lakes_slim.json
+#    (they need to be filled, not just outlined), so that file isn't fully
+#    retired even though state/country borders no longer come from it.
+GEOM_SIMPLIFY_TOLERANCE_DEG = 0.02  # land layer's .simplify() tolerance
 
 # Simplifying can leave a very long, nearly-straight run reduced to just its
 # two endpoints (e.g. Montana's entire ~12-degree-long northern border).
 # Under this map's curved perspective projection a 2-point chord that long
-# visibly cuts the corner relative to a neighboring polygon's border that
+# visibly cuts the corner relative to a neighboring line/polygon that
 # happens to keep more points along the same stretch, reading as a second,
-# offset line even though the underlying geography now matches. Re-densifying
+# offset line even though the underlying geography matches. Re-densifying
 # afterwards so no straight run exceeds this length fixes the projected curve.
 BORDER_DENSIFY_SEGMENT_DEG = 0.5
 
-# Buffer-out-then-in amount used to close leftover slivers before tracing
-# each country's outline -- see the comment at its use in
-# load_states_lakes_and_countries(). Small relative to state-sized features,
-# big enough to bridge the gaps actually seen in this dataset.
-COUNTRY_UNION_CLOSE_DEG = 0.01
+# Snaps land-polygon and lake-polygon vertices to a shared coordinate grid
+# (well below GEOM_SIMPLIFY_TOLERANCE_DEG, so it doesn't affect actual
+# shape) before simplifying, closing tiny sub-tolerance gaps between
+# features that should touch exactly. State/country borders don't need
+# this -- see the comment above -- but land/lake polygons still derive
+# from admin-1-style polygon data, so kept here for those.
+COORD_SNAP_GRID_DEG = 0.001
+
+# How far state lines get trimmed back from a country line before drawing
+# both -- see load_state_lines(). Needs to comfortably clear the observed
+# divergence between the two datasets' paths through the San Juan Islands
+# (measured up to roughly 0.03 deg); tested up to 0.12 deg with no adverse
+# effect on genuinely-internal state lines elsewhere, so this has real
+# margin without being so large it could eat a state line that legitimately
+# runs close and parallel to a country line for a stretch.
+STATE_COUNTRY_DEDUP_BUFFER_DEG = 0.08
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -772,74 +797,54 @@ def fetch_source(cfg, override_path):
 def load_land():
     with open(LAND_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]).simplify(GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
-                                     .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+    return [shapely.set_precision(shape(feat["geometry"]), grid_size=COORD_SNAP_GRID_DEG)
+                    .simplify(GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+                    .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
             for feat in data["features"] if feat.get("geometry")]
 
 
-def _as_coverage_ready(geom):
-    """coverage_simplify requires clean Polygon/MultiPolygon input -- fix up
-    the one known-invalid admin-1 polygon in this dataset (Michigan) rather
-    than letting it error out or silently drop that state."""
-    if not geom.is_valid:
-        geom = shapely.make_valid(geom)
-    if geom.geom_type == "GeometryCollection":
-        parts = []
-        for part in geom.geoms:
-            if part.geom_type == "Polygon":
-                parts.append(part)
-            elif part.geom_type == "MultiPolygon":
-                parts.extend(part.geoms)
-        geom = MultiPolygon(parts)
-    return geom
-
-
-def load_states_lakes_and_countries():
-    """State/province + lake geometries, plus a country outline per
-    TARGET_COUNTRIES dissolved from those same state/province polygons
-    (rather than a separately-sourced country layer) so the international
-    border lines up exactly with the state/province borders drawn on top
-    of it.
-
-    Each country's polygons are run through coverage_simplify together (not
-    one at a time) so shared state/province edges are snapped identical
-    rather than merely close -- see GEOM_SIMPLIFY_TOLERANCE_DEG. Re-densified
-    afterwards per BORDER_DENSIFY_SEGMENT_DEG so the simplified border still
-    projects as a smooth curve instead of a handful of long, corner-cutting
-    chords."""
+def load_lakes():
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
-    lake_geoms = []
-    by_country = {c: [] for c in TARGET_COUNTRIES}
-    for feat in data["features"]:
-        props = feat["properties"]
-        featurecla = props.get("featurecla", "")
-        if "Lake" in featurecla:
-            lake_geoms.append(shape(feat["geometry"]))
-            continue
-        admin = props.get("admin")
-        if admin in TARGET_COUNTRIES:
-            by_country[admin].append(_as_coverage_ready(shape(feat["geometry"])))
+    return [shapely.set_precision(shape(feat["geometry"]), grid_size=COORD_SNAP_GRID_DEG)
+                    .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+            for feat in data["features"] if "Lake" in feat["properties"].get("featurecla", "")]
 
-    state_geoms, country_geoms = [], []
-    for geoms in by_country.values():
-        if not geoms:
-            continue
-        simplified = [g.segmentize(BORDER_DENSIFY_SEGMENT_DEG)
-                      for g in shapely.coverage_simplify(geoms, tolerance=GEOM_SIMPLIFY_TOLERANCE_DEG)]
-        state_geoms.extend(simplified)
-        # coverage_simplify guarantees matching edges only where the *input*
-        # already roughly agrees. A few state/province pairs disagree by
-        # tens of km even in the raw data (e.g. Idaho's and Montana's claims
-        # about their shared border don't quite meet Wyoming's dead-straight
-        # 111st-meridian line), which leaves unary_union unable to fully
-        # dissolve that internal seam -- the leftover sliver's edges then
-        # draw as a second, thicker-looking line right on top of the normal
-        # state line. Buffering out and back in by a small amount closes
-        # slivers like that before we trace the country outline from it.
-        country_geoms.append(unary_union([g.buffer(COUNTRY_UNION_CLOSE_DEG) for g in simplified])
-                              .buffer(-COUNTRY_UNION_CLOSE_DEG))
-    return state_geoms, lake_geoms, country_geoms
+
+def load_boundary_lines(path, country_filter):
+    """Load a Natural Earth boundary-line dataset, keeping only segments
+    country_filter accepts (a function over each feature's properties).
+    See the comment above GEOM_SIMPLIFY_TOLERANCE_DEG for why borders come
+    from these dedicated line files rather than from outlining
+    states_lakes_slim.json's admin-1 polygons."""
+    with open(path) as f:
+        data = json.load(f)
+    return [shape(feat["geometry"]).segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+            for feat in data["features"] if country_filter(feat["properties"])]
+
+
+def load_state_lines(country_lines):
+    """State/province border lines, with any segment that duplicates an
+    international border trimmed out. admin1_boundary_lines.json includes
+    a state's international-facing edge as an ordinary line (e.g.
+    Washington's northern border through the San Juan Islands is in there
+    as if it were ANY other state boundary), independently of and not
+    vertex-matched to admin0_boundary_lines.json's own line for that same
+    physical stretch -- drawing both showed as two visibly diverging lines
+    along the WA/BC border. Buffering the country lines out slightly and
+    subtracting that from every state line removes the duplicate stretch,
+    leaving the single, more-authoritative country line to represent it."""
+    lines = load_boundary_lines(ADMIN1_LINES_FILE, lambda props: props.get("adm0_name") in TARGET_COUNTRIES)
+    country_buffer = unary_union(country_lines).buffer(STATE_COUNTRY_DEDUP_BUFFER_DEG)
+    trimmed = (line.difference(country_buffer) for line in lines)
+    return [g for g in trimmed if not g.is_empty]
+
+
+def load_country_lines():
+    return load_boundary_lines(
+        ADMIN0_LINES_FILE,
+        lambda props: props.get("adm0_left") in TARGET_COUNTRIES and props.get("adm0_right") in TARGET_COUNTRIES,
+    )
 
 
 def build_map(product_key, output_path, override_path=None):
@@ -879,7 +884,9 @@ def build_map(product_key, output_path, override_path=None):
 
     print("Loading basemap layers...")
     land_geoms = load_land()
-    state_geoms, lake_geoms, country_geoms = load_states_lakes_and_countries()
+    lake_geoms = load_lakes()
+    country_lines = load_country_lines()
+    state_lines = load_state_lines(country_lines)
 
     proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
                                      satellite_height=4_000_000)
@@ -899,9 +906,9 @@ def build_map(product_key, output_path, override_path=None):
     ax_w_px, ax_h_px = int(ax_bbox.width), int(ax_bbox.height)
 
     ax.add_geometries(land_geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", linewidth=0, zorder=1)
-    ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=2)
+    ax.add_geometries(state_lines, crs=pc, facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=2)
     ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac", linewidth=0.7, zorder=2.2)
-    ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=2.5)
+    ax.add_geometries(country_lines, crs=pc, facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=2.5)
 
     # Outlook polygons, least to most severe so more severe areas draw on top
     # where same-axis categories overlap; cross-axis overlaps get striped
