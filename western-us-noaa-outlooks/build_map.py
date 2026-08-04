@@ -122,15 +122,32 @@ POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN, FIG_HEIGHT_IN = 10, 8.9
 FIG_DPI = 200
-AXES_RECT = [0.035, 0.045, 0.93, 0.855]  # [left, bottom, width, height], figure fraction
+AXES_RECT = [0.03, 0.045, 0.94, 0.855]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
 # Map domain (western US) — do not change this when adding new cities;
 # cities right at the edge often still render fine thanks to the curved
 # projection. Only change this if you deliberately want a wider/narrower map.
+#
+# LON_MIN and AXES_RECT above are tuned together, empirically, so the
+# rendered map frame's left/right edges land within ~2px of AXES_RECT's own
+# left/right edges (0.03/0.97 figure-fraction -- matching the title's 0.03
+# left inset on both sides). Cartopy auto-centers the frame within
+# AXES_RECT to preserve true aspect ratio at whatever height AXES_RECT
+# allows, so widening the frame took two coordinated changes: widening
+# AXES_RECT itself (both edges, staying centered) AND widening LON_MIN
+# westward enough that the frame's natural width grows to fill that wider
+# box almost exactly, leaving ~0 leftover centering margin -- extending
+# LON_MIN alone would've just centered a wider frame with the same
+# unwanted margins, not moved its edges out to meet the box. If you need
+# to retune this (e.g. a taller/shorter FIG_HEIGHT_IN), render a test
+# image and measure the frame border's actual pixel x-range (a plain
+# horizontal scan for near-black pixels through the image's vertical
+# middle works) rather than assuming AXES_RECT's numbers are the final
+# on-screen position.
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -128.5, -98.0
+LON_MIN, LON_MAX = -133.7, -98.0
 LAT_MIN, LAT_MAX = 28.0, 51.5
 CENTER_LON, CENTER_LAT = -113.5, 39.5
 
