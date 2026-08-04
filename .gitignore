@@ -34,6 +34,9 @@ columbia-basin-alerts-map/columbia_basin_alerts*.png
 western-us-noaa-outlooks/data/*.kml
 western-us-noaa-outlooks/data/*.kmz
 western-us-noaa-outlooks/output/*.png
+# state/ is the droplet-deploy guard's runtime state (lock file, logs) --
+# created on the server, not source.
+western-us-noaa-outlooks/state/
 
 # --- columbia-basin-temps ---
 # build_map.py fetches its source grids live; data/ only holds saved
