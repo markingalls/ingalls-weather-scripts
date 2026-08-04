@@ -540,19 +540,17 @@ def make_stripe_image(colors, width_px, height_px, stripe_px=20):
     return img
 
 
-def draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px, stripe_overlaps):
-    """Draw the parsed hazard polygons. When stripe_overlaps is set, regions
-    where two different hazard axes overlap (see the "axis" style field) are
-    drawn as candy-stripe fills instead of alpha-stacking; regions where
-    same-axis categories overlap (i.e. ordinary nested severity, like
-    Critical sitting inside Elevated) still just let the more severe one's
-    solid color win, unchanged from the non-striped path."""
-    if not stripe_overlaps:
-        for i, item in enumerate(styled):
-            ax.add_geometries([item["geom"]], crs=pc, facecolor=item["color"], edgecolor=item["color"],
-                               linewidth=1.2, alpha=item["alpha"], zorder=3 + i)
-        return
-
+def draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px):
+    """Draw the parsed hazard polygons, partitioned into disjoint regions
+    first rather than alpha-stacked directly, so a region covered by more
+    than one same-severity-scale polygon (e.g. Critical nested inside
+    Elevated, or Slight nested inside Marginal inside General Thunder)
+    renders as one solid color instead of the more severe polygon's
+    semi-transparent fill letting the less severe one's color show through
+    underneath. Regions where two different hazard axes overlap (see the
+    "axis" style field -- e.g. SPC's fire-weather-index tiers vs. its
+    separate dry-thunderstorm risk) get a candy-stripe fill instead, since
+    neither axis is "more severe" than the other."""
     # Union polygons sharing a label (defensive -- each category is
     # typically already a single placemark) before partitioning.
     by_label = {}
@@ -680,7 +678,7 @@ SPC_FIRE_STYLE = {
     # Official SPC categorical colors, from the fire_weather/SPC_firewx
     # MapServer renderer (mapservices.weather.noaa.gov) rather than a
     # hand-picked approximation. "axis" marks which independent hazard
-    # dimension a category belongs to -- see stripe_overlaps in PRODUCTS.
+    # dimension a category belongs to -- see draw_hazard_layers.
     "ELEV": {"color": "#e69800", "alpha": 0.65, "order_key": 1, "label": "Elevated", "axis": "index"},
     "CRIT": {"color": "#ff0000", "alpha": 0.65, "order_key": 2, "label": "Critical", "axis": "index"},
     "EXTM": {"color": "#e600a9", "alpha": 0.65, "order_key": 3, "label": "Extreme", "axis": "index"},
@@ -891,7 +889,6 @@ PRODUCTS = {
         style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire.png",
-        stripe_overlaps=True,
     ),
     "spc_fire_day2": dict(
         title="Western U.S. Fire Weather Outlook — Day 2",
@@ -901,7 +898,6 @@ PRODUCTS = {
         style=spc_style(SPC_FIRE_STYLE, "fire outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire_day2.png",
-        stripe_overlaps=True,
     ),
     "spc_severe": dict(
         title="Western U.S. Severe Weather Outlook",
@@ -938,7 +934,6 @@ PRODUCTS = {
         style=spc_prob_style("wind"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_wind_day1.png",
-        stripe_overlaps=True,
     ),
     "spc_wind_day2": dict(
         title="Western U.S. Wind Outlook — Day 2",
@@ -948,7 +943,6 @@ PRODUCTS = {
         style=spc_prob_style("wind"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_wind_day2.png",
-        stripe_overlaps=True,
     ),
     "spc_hail_day1": dict(
         title="Western U.S. Hail Outlook",
@@ -958,7 +952,6 @@ PRODUCTS = {
         style=spc_prob_style("hail"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_hail_day1.png",
-        stripe_overlaps=True,
     ),
     "spc_hail_day2": dict(
         title="Western U.S. Hail Outlook — Day 2",
@@ -968,7 +961,6 @@ PRODUCTS = {
         style=spc_prob_style("hail"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_hail_day2.png",
-        stripe_overlaps=True,
     ),
     "wpc_precip": dict(
         title="Western U.S. Excessive Rainfall Outlook",
@@ -1170,10 +1162,10 @@ def build_map(product_key, output_path, override_path=None):
     ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac", linewidth=0.7, zorder=2.2)
     ax.add_geometries(country_lines, crs=pc, facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=2.5)
 
-    # Outlook polygons, least to most severe so more severe areas draw on top
-    # where same-axis categories overlap; cross-axis overlaps get striped
-    # instead when the product opts in (see PRODUCTS[...]["stripe_overlaps"]).
-    draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px, cfg.get("stripe_overlaps", False))
+    # Outlook polygons, partitioned so overlapping same-axis categories
+    # render as one solid color (most severe wins) and cross-axis overlaps
+    # get striped -- see draw_hazard_layers.
+    draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px)
 
     # City labels
     for name, lon, lat, pos in CITIES:
