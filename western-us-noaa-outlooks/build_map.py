@@ -174,6 +174,10 @@ FIG_DPI = 200
 AXES_RECT = [0.03, 0.045, 0.94, 0.855]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
+# Vertical space reserved below the legend/no-risk box for the "Updated"
+# timestamp line, so the two never overlap regardless of legend height.
+UPDATED_TEXT_RESERVE_PX = 24
+
 # ---------------------------------------------------------------------------
 # Map domain (western US) — do not change this when adding new cities;
 # cities right at the edge often still render fine thanks to the curved
@@ -425,7 +429,8 @@ def fetch_iem_outlook(day, iem_type, category, hazard_label=None):
         sys.exit(f"IEM returned no outlook data at all for day={day}, type={iem_type} "
                  f"within the last {IEM_FETCH_WINDOW_HOURS}h -- feed issue, not a quiet day.")
     latest_issue = max(sr.record["ISSUE"] for sr in all_records)
-    rows = [sr for sr in all_records if sr.record["CATEGORY"] == category and sr.record["ISSUE"] == latest_issue]
+    latest_cycle = [sr for sr in all_records if sr.record["ISSUE"] == latest_issue]
+    rows = [sr for sr in latest_cycle if sr.record["CATEGORY"] == category]
 
     placemarks = []
     for sr in rows:
@@ -447,6 +452,25 @@ def fetch_iem_outlook(day, iem_type, category, hazard_label=None):
         if label2:
             fields["LABEL2"] = label2
         placemarks.append({"fields": fields, "rings": rings})
+
+    if not placemarks:
+        # `category` is genuinely empty at the latest cycle (e.g. no
+        # tornado risk anywhere in the country right now) -- every category
+        # in a cycle shares the same ISSUE/EXPIRE window, so pull it from
+        # any other row in the same cycle (CATEGORICAL is always present)
+        # rather than showing "valid period unavailable" on what's likely
+        # the single most common state for a product like tornado risk.
+        # No rings, so this never reaches styling/drawing -- build_map
+        # skips ring-less placemarks before calling the style function --
+        # it exists purely to carry the date through to date_from_valid_expire_iso.
+        any_row = latest_cycle[0]
+        placemarks.append({
+            "fields": {
+                "VALID_ISO": _iem_iso(any_row.record["ISSUE"]),
+                "EXPIRE_ISO": _iem_iso(any_row.record["EXPIRE"]),
+            },
+            "rings": [],
+        })
     return placemarks
 
 
@@ -1157,6 +1181,11 @@ def build_map(product_key, output_path, override_path=None):
 
     styled = []
     for pm in placemarks:
+        if not pm["rings"]:
+            # fetch_iem_outlook's date-only placemark (see its docstring) --
+            # carries VALID_ISO/EXPIRE_ISO for cfg["date"] below but has no
+            # geometry to style or draw.
+            continue
         sty = cfg["style"](pm)
         if sty is None:
             continue
@@ -1243,9 +1272,16 @@ def build_map(product_key, output_path, override_path=None):
     # actually landed instead of assuming.
     fig.canvas.draw()
     frame_px = ax.get_window_extent()
-    legend_anchor = (
+    updated_anchor = (
         (frame_px.x0 + MAP_FRAME_INSET_PX) / (FIG_WIDTH_IN * FIG_DPI),
         (frame_px.y0 + MAP_FRAME_INSET_PX) / (FIG_HEIGHT_IN * FIG_DPI),
+    )
+    # Legend/no-risk box sits UPDATED_TEXT_RESERVE_PX above the frame's
+    # bottom-left inset instead of right at it, leaving room for the
+    # "Updated" timestamp (drawn below, at updated_anchor) without overlap.
+    legend_anchor = (
+        updated_anchor[0],
+        (frame_px.y0 + MAP_FRAME_INSET_PX + UPDATED_TEXT_RESERVE_PX) / (FIG_HEIGHT_IN * FIG_DPI),
     )
     if not styled:
         fig.text(legend_anchor[0], legend_anchor[1], "No areas of concern",
@@ -1270,6 +1306,17 @@ def build_map(product_key, output_path, override_path=None):
                           bbox_to_anchor=legend_anchor)
         for text in leg.get_texts():
             text.set_color("#2b2a26")
+
+    # "Updated" timestamp -- when this image was actually generated (not
+    # the outlook's own valid/issued time in the subtitle above, which can
+    # lag the render by however long publish_outlooks.py's cron buffer
+    # allows). UTC to match the "Z" convention used throughout the rest of
+    # the map. Bottom-left, below the legend/no-risk box (see
+    # UPDATED_TEXT_RESERVE_PX).
+    updated_str = datetime.now(timezone.utc).strftime("%b %d, %Y %H:%M UTC")
+    fig.text(updated_anchor[0], updated_anchor[1], f"Updated {updated_str}",
+              fontsize=7, fontproperties=poppins_reg, color="#8a887e", ha="left", va="bottom",
+              bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", boxstyle="round,pad=0.3"))
 
     # Title & subtitle above the map
     fig.text(0.03, 0.975, cfg["title"], fontsize=22,
