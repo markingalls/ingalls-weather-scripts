@@ -138,6 +138,13 @@ COORD_SNAP_GRID_DEG = 0.001
 # runs close and parallel to a country line for a stretch.
 STATE_COUNTRY_DEDUP_BUFFER_DEG = 0.08
 
+# Cutoff for excluding a state line as an offshore maritime boundary rather
+# than a real land border -- see load_state_lines(). Measured every
+# offshore boundary segment within this map's frame at >=0.026 deg from the
+# (unsimplified) land layer, and every genuine state line at essentially
+# 0.0, so this sits with wide margin in the untouched gap between the two.
+OFFSHORE_LINE_DISTANCE_DEG = 0.02
+
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
@@ -833,11 +840,25 @@ def load_state_lines(country_lines):
     physical stretch -- drawing both showed as two visibly diverging lines
     along the WA/BC border. Buffering the country lines out slightly and
     subtracting that from every state line removes the duplicate stretch,
-    leaving the single, more-authoritative country line to represent it."""
+    leaving the single, more-authoritative country line to represent it.
+
+    Also drops each coastal state's 3-nautical-mile offshore maritime
+    boundary (its state-waters extent, e.g. California/Oregon/Washington),
+    which Natural Earth includes as ordinary admin-1 boundary lines running
+    parallel to, but detached from, the actual coastline -- confirmed by
+    distance from the (unsimplified, for an accurate coastline reference)
+    land layer: every offshore boundary segment in this frame sits >=0.026
+    deg out, while every genuine land-touching state line sits right on it,
+    a clean, wide margin either side of OFFSHORE_LINE_DISTANCE_DEG."""
     lines = load_boundary_lines(ADMIN1_LINES_FILE, lambda props: props.get("adm0_name") in TARGET_COUNTRIES)
     country_buffer = unary_union(country_lines).buffer(STATE_COUNTRY_DEDUP_BUFFER_DEG)
     trimmed = (line.difference(country_buffer) for line in lines)
-    return [g for g in trimmed if not g.is_empty]
+    trimmed = [g for g in trimmed if not g.is_empty]
+
+    with open(LAND_FILE) as f:
+        land_data = json.load(f)
+    land_union = unary_union([shape(feat["geometry"]) for feat in land_data["features"] if feat.get("geometry")])
+    return [g for g in trimmed if g.distance(land_union) <= OFFSHORE_LINE_DISTANCE_DEG]
 
 
 def load_country_lines():
