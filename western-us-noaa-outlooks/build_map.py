@@ -16,6 +16,12 @@ frame/style. Pick one with --product:
     spc_fire      SPC Day 1 Fire Weather Outlook
     spc_fire_day2 SPC Day 2 Fire Weather Outlook
     spc_severe    SPC Day 1 Categorical (Severe Weather) Outlook
+    spc_convective_day2  SPC Day 2 Categorical (Severe Weather) Outlook
+    spc_convective_day3  SPC Day 3 Categorical (Severe Weather) Outlook
+    spc_wind_day1 SPC Day 1 Wind Probability Outlook
+    spc_wind_day2 SPC Day 2 Wind Probability Outlook
+    spc_hail_day1 SPC Day 1 Hail Probability Outlook
+    spc_hail_day2 SPC Day 2 Hail Probability Outlook
     wpc_precip    WPC Day 1 Excessive Rainfall Outlook
     drought_monitor  U.S. Drought Monitor (NDMC weekly D0-D4 categories)
 
@@ -543,6 +549,41 @@ def spc_style(style_map, warning_label):
     return style
 
 
+def spc_prob_style(hazard_label):
+    """Style for SPC's Day 1/2 Wind and Hail probabilistic outlooks. Unlike
+    the fixed categorical tiers above (SPC_FIRE_STYLE, SPC_SEVERE_STYLE),
+    these are a probability scale (2/5/15/30/45/60%) plus a "CIG1" tier --
+    SPC's current name for what's commonly called "significant" risk
+    (hatched on their own graphics), confirmed against a live fetch. Rather
+    than hand-picking a color per tier, this reads the fill/stroke colors
+    NOAA already embeds in the KML's ExtendedData, so it stays correct
+    automatically if SPC ever adds a tier or changes their palette. CIG1
+    gets its own "axis" (same stripe-on-overlap mechanism spc_fire uses for
+    dry-thunderstorm risk) since it can overlap a probability polygon
+    rather than nesting inside it like the fixed categorical tiers do."""
+    def style(pm):
+        fields = pm["fields"]
+        code = fields.get("LABEL", "")
+        fill = fields.get("fill")
+        if not fill:
+            print(f"WARNING: {hazard_label} placemark has no fill color, skipping.")
+            return None
+        label = fields.get("LABEL2") or code
+        if code.startswith("CIG"):
+            # LABEL2 for this tier is NOAA's internal name ("Wind Conditional
+            # Intensity Group 1 Risk") -- use the commonly-understood term
+            # for the legend instead.
+            return {"color": fields.get("stroke", fill), "alpha": 0.35, "order_key": 99,
+                    "label": f"Significant {hazard_label.title()} Risk", "axis": "significant"}
+        try:
+            probability = float(code)
+        except ValueError:
+            print(f"WARNING: unrecognized {hazard_label} category '{code}', skipping.")
+            return None
+        return {"color": fill, "alpha": 0.7, "order_key": probability, "label": label, "axis": "index"}
+    return style
+
+
 WPC_ERO_STYLE = [
     ("Marginal", {"color": "#6fae6f", "alpha": 0.58}),
     ("Slight",   {"color": "#e0c84b", "alpha": 0.62}),
@@ -691,6 +732,70 @@ PRODUCTS = {
         style=spc_style(SPC_SEVERE_STYLE, "severe outlook"),
         date=date_from_valid_expire_iso,
         output="western_us_spc_severe.png",
+    ),
+    "spc_convective_day2": dict(
+        title="Western U.S. Severe Weather Outlook — Day 2",
+        subtitle_prefix="NWS Storm Prediction Center — Day 2 Categorical Outlook",
+        agency="SPC",
+        urls=["https://www.spc.noaa.gov/products/outlook/day2otlk_cat.kmz"],
+        parser=parse_kml_extended_data,
+        style=spc_style(SPC_SEVERE_STYLE, "severe outlook"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_convective_day2.png",
+    ),
+    "spc_convective_day3": dict(
+        title="Western U.S. Severe Weather Outlook — Day 3",
+        subtitle_prefix="NWS Storm Prediction Center — Day 3 Categorical Outlook",
+        agency="SPC",
+        urls=["https://www.spc.noaa.gov/products/outlook/day3otlk_cat.kmz"],
+        parser=parse_kml_extended_data,
+        style=spc_style(SPC_SEVERE_STYLE, "severe outlook"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_convective_day3.png",
+    ),
+    "spc_wind_day1": dict(
+        title="Western U.S. Wind Outlook",
+        subtitle_prefix="NWS Storm Prediction Center — Day 1 Wind Probability Outlook",
+        agency="SPC",
+        urls=["https://www.spc.noaa.gov/products/outlook/day1otlk_wind.kmz"],
+        parser=parse_kml_extended_data,
+        style=spc_prob_style("wind"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_wind_day1.png",
+        stripe_overlaps=True,
+    ),
+    "spc_wind_day2": dict(
+        title="Western U.S. Wind Outlook — Day 2",
+        subtitle_prefix="NWS Storm Prediction Center — Day 2 Wind Probability Outlook",
+        agency="SPC",
+        urls=["https://www.spc.noaa.gov/products/outlook/day2otlk_wind.kmz"],
+        parser=parse_kml_extended_data,
+        style=spc_prob_style("wind"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_wind_day2.png",
+        stripe_overlaps=True,
+    ),
+    "spc_hail_day1": dict(
+        title="Western U.S. Hail Outlook",
+        subtitle_prefix="NWS Storm Prediction Center — Day 1 Hail Probability Outlook",
+        agency="SPC",
+        urls=["https://www.spc.noaa.gov/products/outlook/day1otlk_hail.kmz"],
+        parser=parse_kml_extended_data,
+        style=spc_prob_style("hail"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_hail_day1.png",
+        stripe_overlaps=True,
+    ),
+    "spc_hail_day2": dict(
+        title="Western U.S. Hail Outlook — Day 2",
+        subtitle_prefix="NWS Storm Prediction Center — Day 2 Hail Probability Outlook",
+        agency="SPC",
+        urls=["https://www.spc.noaa.gov/products/outlook/day2otlk_hail.kmz"],
+        parser=parse_kml_extended_data,
+        style=spc_prob_style("hail"),
+        date=date_from_valid_expire_iso,
+        output="western_us_spc_hail_day2.png",
+        stripe_overlaps=True,
     ),
     "wpc_precip": dict(
         title="Western U.S. Excessive Rainfall Outlook",
@@ -854,7 +959,13 @@ def build_map(product_key, output_path, override_path=None):
             continue  # outside the Western US frame -- drop so it doesn't pad out the legend
         styled.append({**sty, "geom": geom})
     if not styled:
-        sys.exit(f"No recognized categories found for '{product_key}' within the map frame.")
+        # A legitimate "no risk anywhere in the frame today" result -- common
+        # outside severe weather season, or for narrower products like hail
+        # on a quiet day -- not an error. Render a normal, current map with
+        # no shaded areas and a small note instead of a legend, rather than
+        # failing the run and leaving a stale, possibly-misleading previous
+        # map (with old shading) published in its place.
+        print(f"No recognized categories for '{product_key}' within the map frame -- rendering a no-risk map.")
     styled.sort(key=lambda d: d["order_key"])
 
     date_str = cfg["date"](placemarks, fetched_at)
@@ -906,17 +1017,11 @@ def build_map(product_key, output_path, override_path=None):
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
 
-    # Legend — one swatch per distinct label actually present, most severe first
-    legend_by_label = {}
-    for item in styled:
-        legend_by_label.setdefault(item["label"], item)
-    ordered = sorted(legend_by_label.values(), key=lambda d: d["order_key"], reverse=True)
-    handles = [Patch(facecolor=d["color"], edgecolor=d["color"], alpha=d["alpha"], label=d["label"])
-               for d in ordered]
-    # Anchor the legend's lower-left corner the same MAP_FRAME_INSET_PX away
-    # from the axes frame's lower-left corner as the logo sits from the
-    # frame's lower-right corner. Cartopy shrinks the axes box to preserve
-    # the projection's aspect ratio, so the rendered frame doesn't sit at
+    # Legend — one swatch per distinct label actually present, most severe first.
+    # Anchor position is the same MAP_FRAME_INSET_PX away from the axes
+    # frame's lower-left corner as the logo sits from the frame's
+    # lower-right corner. Cartopy shrinks the axes box to preserve the
+    # projection's aspect ratio, so the rendered frame doesn't sit at
     # AXES_RECT's raw figure-fraction position -- ask the canvas where it
     # actually landed instead of assuming.
     fig.canvas.draw()
@@ -925,17 +1030,29 @@ def build_map(product_key, output_path, override_path=None):
         (frame_px.x0 + MAP_FRAME_INSET_PX) / (FIG_WIDTH_IN * FIG_DPI),
         (frame_px.y0 + MAP_FRAME_INSET_PX) / (FIG_HEIGHT_IN * FIG_DPI),
     )
-    # Products with more than a handful of categories (e.g. the drought
-    # monitor's five D0-D4 tiers) get a second column so the box stays
-    # short enough not to grow up into a city label near the bottom-left
-    # corner, instead of just getting taller.
-    legend_ncols = 2 if len(handles) > 4 else 1
-    leg = fig.legend(handles=handles, loc="lower left", frameon=True, fontsize=8.25,
-                      prop=poppins_reg, handlelength=1.05, handleheight=1.05, borderpad=0.3,
-                      facecolor="white", framealpha=0.7, edgecolor="none", ncols=legend_ncols,
-                      bbox_to_anchor=legend_anchor)
-    for text in leg.get_texts():
-        text.set_color("#2b2a26")
+    if not styled:
+        fig.text(legend_anchor[0], legend_anchor[1], "No areas of concern",
+                  fontsize=8.25, fontproperties=poppins_reg, color="#5a584f",
+                  ha="left", va="bottom",
+                  bbox=dict(facecolor="white", alpha=0.7, edgecolor="none", boxstyle="round,pad=0.35"))
+    else:
+        legend_by_label = {}
+        for item in styled:
+            legend_by_label.setdefault(item["label"], item)
+        ordered = sorted(legend_by_label.values(), key=lambda d: d["order_key"], reverse=True)
+        handles = [Patch(facecolor=d["color"], edgecolor=d["color"], alpha=d["alpha"], label=d["label"])
+                   for d in ordered]
+        # Products with more than a handful of categories (e.g. the drought
+        # monitor's five D0-D4 tiers) get a second column so the box stays
+        # short enough not to grow up into a city label near the bottom-left
+        # corner, instead of just getting taller.
+        legend_ncols = 2 if len(handles) > 4 else 1
+        leg = fig.legend(handles=handles, loc="lower left", frameon=True, fontsize=8.25,
+                          prop=poppins_reg, handlelength=1.05, handleheight=1.05, borderpad=0.3,
+                          facecolor="white", framealpha=0.7, edgecolor="none", ncols=legend_ncols,
+                          bbox_to_anchor=legend_anchor)
+        for text in leg.get_texts():
+            text.set_color("#2b2a26")
 
     # Title & subtitle above the map
     fig.text(0.03, 0.975, cfg["title"], fontsize=22,

@@ -19,6 +19,12 @@ per outlook.
 | `spc_fire`    | Fire Weather Outlook, Day 1                  | SPC |
 | `spc_fire_day2` | Fire Weather Outlook, Day 2                | SPC |
 | `spc_severe`  | Severe Weather (Categorical) Outlook, Day 1  | SPC |
+| `spc_convective_day2` | Severe Weather (Categorical) Outlook, Day 2 | SPC |
+| `spc_convective_day3` | Severe Weather (Categorical) Outlook, Day 3 | SPC |
+| `spc_wind_day1` | Wind Probability Outlook, Day 1            | SPC |
+| `spc_wind_day2` | Wind Probability Outlook, Day 2            | SPC |
+| `spc_hail_day1` | Hail Probability Outlook, Day 1            | SPC |
+| `spc_hail_day2` | Hail Probability Outlook, Day 2            | SPC |
 | `wpc_precip`  | Excessive Rainfall Outlook, Day 1            | WPC |
 | `drought_monitor` | U.S. Drought Monitor (D0–D4)             | NDMC |
 
@@ -69,8 +75,16 @@ The Ingalls Weather logo (placed bottom-right on the map) lives in
   fill color is sampled from a colormap by probability (blue/orange-red for
   temperature, brown/green for precipitation) rather than a hand-picked
   swatch per tier.
-- SPC and WPC outlooks use small, fixed category sets (e.g. Marginal /
-  Slight / Moderate / High), styled with a hand-picked swatch per category
-  in `build_map.py`.
+- SPC's categorical outlooks (Day 1-3) and Fire Weather outlooks use small,
+  fixed category sets (e.g. Marginal / Slight / Moderate / High), styled
+  with a hand-picked swatch per category in `build_map.py`. The Wind/Hail
+  probability outlooks are a percentage scale (plus a "CIG1" significant-risk
+  tier) instead, so those read the fill/stroke colors NOAA already embeds
+  in the KML rather than a hand-picked map -- see `spc_prob_style()`.
+- SPC only publishes separate Wind and Hail probability outlooks for Day 1
+  and Day 2 -- Day 3 only has a combined all-hazard "Probabilistic" outlook,
+  not split by hazard type, so there's no `spc_wind_day3`/`spc_hail_day3`.
+- WPC's excessive rainfall outlook uses a small, fixed category set too,
+  styled with a hand-picked swatch per category in `build_map.py`.
 - The map domain, city labels, etc. are all defined near the top of
   `build_map.py` — edit directly to adjust.
