@@ -4,13 +4,15 @@
 # crontab (WindBorne account/key, shared across every project that uses it
 # -- no new key needed here).
 #
-# WM-6 updates hourly, so this runs hourly too, 10 min past the hour as a
-# starting buffer -- unlike the SPC/IEM buffer in western-us-noaa-outlooks,
-# this hasn't been empirically checked against a live cycle boundary yet.
-# Worth confirming against a few real days of state/publish.log (does the
-# forecast's own "init" timestamp actually advance every single run, or
-# does it sometimes still show the previous hour's cycle?) and tightening
-# or loosening this if it's off.
+# Runs every 3 hours at :50 (00:50, 03:50, 06:50, ... 21:50 UTC) -- chosen
+# over hourly, since WM-6 forecasts don't meaningfully change enough run to
+# run at a single point to justify 24 renders/day across 9 cities; :50 as
+# a buffer before the top of the next hour, unlike the SPC/IEM buffer in
+# western-us-noaa-outlooks, this hasn't been empirically checked against a
+# live cycle boundary. Worth confirming against a few real days of
+# state/publish.log (does the forecast's own "init" timestamp actually
+# advance every run, or does it sometimes still show a stale cycle?) and
+# adjusting if it's off.
 #
 # Before the first run: seed each location's climatology cache once --
 #   cd /opt/ingalls-weather-scripts/850-700-temp-chart
@@ -18,4 +20,4 @@
 # publish_charts.py will hard-fail any location whose cached climatology
 # file is missing, rather than silently skipping the climatology overlay.
 
-10 * * * * /opt/ingalls-weather-scripts/850-700-temp-chart/venv/bin/python3 /opt/ingalls-weather-scripts/850-700-temp-chart/deploy/publish_charts.py >> /opt/ingalls-weather-scripts/850-700-temp-chart/state/cron.log 2>&1
+50 0,3,6,9,12,15,18,21 * * * /opt/ingalls-weather-scripts/850-700-temp-chart/venv/bin/python3 /opt/ingalls-weather-scripts/850-700-temp-chart/deploy/publish_charts.py >> /opt/ingalls-weather-scripts/850-700-temp-chart/state/cron.log 2>&1

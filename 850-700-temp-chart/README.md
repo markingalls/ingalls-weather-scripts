@@ -13,11 +13,12 @@ lat/lon and any WM-6 pressure level works.
 
 ## Live deployment (`deploy/`)
 
-Published hourly to `images.ingallswx.com` for: Tri-Cities, Hermiston, and
-Portland (same coordinates as `tri-cities-7day-forecast`), plus Seattle,
-Spokane, Eugene, Bellingham, Bend, and Prince George, BC. All at 850 mb.
+Published every 3 hours (00:50, 03:50, ... 21:50 UTC) to
+`images.ingallswx.com` for: Tri-Cities, Hermiston, and Portland (same
+coordinates as `tri-cities-7day-forecast`), plus Seattle, Spokane, Eugene,
+Bellingham, Bend, and Prince George, BC. All at 850 mb.
 
-- `deploy/publish_charts.py` — hourly cron entry point. Fetches each
+- `deploy/publish_charts.py` — cron entry point. Fetches each
   location's current forecast, builds the chart against that location's
   *cached* climatology (see below), and atomically publishes
   `850mb_<slug>.png` to `/var/www/images/`. One location failing doesn't
