@@ -299,17 +299,17 @@ for tags, geom in combo_geoms.items():
         fill = NWS_COLORS.get(event, "#e8a33d")
         edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
         ax.add_geometries([geom], crs=pc, facecolor=fill, edgecolor=edge,
-                           alpha=0.55, linewidth=1.2, zorder=4.5)
+                           alpha=0.68, linewidth=1.2, zorder=4.5)
         ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=edge,
                            linewidth=1.2, alpha=1.0, zorder=4.6)
         continue
 
     # Overlap region: fill with alternating stripes, one band per
-    # contributing event, clipped to the region's exact shape. Slightly
-    # higher alpha than the single-event fill (0.68 vs 0.55) so each band
-    # keeps enough contrast against the basemap to read as its own color
-    # instead of the pair blurring into a single tone -- most visible
-    # when Air Quality Alert's gray sits next to another pale color.
+    # contributing event, clipped to the region's exact shape. Same
+    # alpha as the single-event fill (0.68) so each band keeps enough
+    # contrast against the basemap to read as its own color instead of
+    # the pair blurring into a single tone -- most visible when Air
+    # Quality Alert's gray sits next to another pale color.
     colors = [NWS_COLORS.get(e, "#e8a33d") for e in sorted(tags)]
     stripe_img = make_stripe_image(colors, AX_W_PX, AX_H_PX)
     proj_geom = ax.projection.project_geometry(geom, pc)
