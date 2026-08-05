@@ -163,14 +163,20 @@ Already handled:
   (`/var/www/images/{tricities,hermiston,portland}_forecast.png`), via a
   temp file + atomic rename so nginx never serves a half-written PNG
   mid-save.
-- `nginx-images.conf` sets `Cache-Control: no-cache` on the whole folder,
-  so every normal browser reload revalidates with the server (a cheap 304
-  if unchanged, courtesy of nginx's automatic Last-Modified/ETag support
-  on static files) instead of trusting a stale cached copy -- no hard
-  refresh or cache-busting query string needed. Confirmed working when
-  embedded in a WordPress.com post too -- these images aren't proxied
-  through Jetpack's Image CDN, so the origin's `no-cache` header applies
-  directly.
+- `nginx-images.conf` sets `Cache-Control: no-cache, max-age=60` on the
+  whole folder, so every normal browser reload revalidates with the
+  server (a cheap 304 if unchanged, courtesy of nginx's automatic
+  Last-Modified/ETag support on static files) instead of trusting a
+  stale cached copy -- no hard refresh or cache-busting query string
+  needed. These images ARE proxied through Jetpack's Image CDN
+  (i0.wp.com) when embedded in a WordPress.com post -- confirmed live,
+  contrary to an earlier assumption here -- and Photon doesn't revalidate
+  with origin on every viewer request the way a browser does, so it can
+  hold a stale copy well past whatever the origin's Last-Modified says.
+  The explicit `max-age=60` gives it (and any similar CDN) an
+  unambiguous, short TTL to respect instead of falling back to its own
+  longer default, so it self-heals within a minute rather than needing a
+  manual purge or cache-busting query string on the WordPress side.
 
 ## Phase 10 -- End-to-end test
 
