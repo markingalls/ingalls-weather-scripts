@@ -126,14 +126,20 @@ def polygons_only(geom):
     return unary_union(kept) if len(kept) > 1 else kept[0]
 
 
-def make_stripe_image(colors, width_px, height_px, stripe_px=20):
+def make_stripe_image(colors, width_px, height_px, stripe_px=20, seam_px=2):
     """Diagonal candy-stripe raster alternating full-opacity bands of
-    each color in `colors`, sized to cover width_px x height_px."""
+    each color in `colors`, sized to cover width_px x height_px. A thin
+    darkened seam is drawn at each band boundary so low-contrast color
+    pairs (e.g. Air Quality Alert's gray next to a pale watch color)
+    still read as distinct bands instead of blurring into a flat wash."""
     yy, xx = np.mgrid[0:height_px, 0:width_px]
-    band = ((xx + yy) // stripe_px) % len(colors)
+    diag = xx + yy
+    band = (diag // stripe_px) % len(colors)
     img = np.zeros((height_px, width_px, 3), dtype=np.uint8)
     for i, c in enumerate(colors):
         img[band == i] = hex_to_rgb(c)
+    seam = (diag % stripe_px) < seam_px
+    img[seam] = (img[seam].astype(float) * 0.55).astype(np.uint8)
     return img
 
 
@@ -299,8 +305,11 @@ for tags, geom in combo_geoms.items():
         continue
 
     # Overlap region: fill with alternating stripes, one band per
-    # contributing event, clipped to the region's exact shape. Same
-    # alpha as the single-event fill so overlap zones don't read darker.
+    # contributing event, clipped to the region's exact shape. Slightly
+    # higher alpha than the single-event fill (0.68 vs 0.55) so each band
+    # keeps enough contrast against the basemap to read as its own color
+    # instead of the pair blurring into a single tone -- most visible
+    # when Air Quality Alert's gray sits next to another pale color.
     colors = [NWS_COLORS.get(e, "#e8a33d") for e in sorted(tags)]
     stripe_img = make_stripe_image(colors, AX_W_PX, AX_H_PX)
     proj_geom = ax.projection.project_geometry(geom, pc)
@@ -309,7 +318,7 @@ for tags, geom in combo_geoms.items():
     # GeoAxes overrides imshow to require a CRS transform; we're placing
     # this in plain axes-fraction space, so call the base Axes.imshow.
     im = Axes.imshow(ax, stripe_img, extent=(0, 1, 0, 1), transform=ax.transAxes,
-                      origin="upper", interpolation="nearest", alpha=0.55, zorder=4.5)
+                      origin="upper", interpolation="nearest", alpha=0.68, zorder=4.5)
     im.set_clip_path(clip_patch)
     ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
                        linewidth=1.2, alpha=1.0, zorder=4.6)
