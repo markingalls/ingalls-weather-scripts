@@ -2,13 +2,36 @@
 
 Generates a styled meteogram of the WindBorne WeatherMesh-6 (WM-6) ensemble
 forecast for a pressure-level temperature at a single point, shown against
-long-term climatology, for Ingalls Weather's Instagram. Same canvas
-footprint and fonts as the
+long-term climatology, originally built for Ingalls Weather's Instagram and
+now also deployed live on the site for 9 Pacific Northwest cities (see
+`deploy/`). Same canvas footprint and fonts as the
 [Columbia Basin alerts map](../columbia-basin-alerts-map/), just a chart
 instead of a map.
 
 Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA) and **850 mb**, but any
 lat/lon and any WM-6 pressure level works.
+
+## Live deployment (`deploy/`)
+
+Published hourly to `images.ingallswx.com` for: Tri-Cities, Hermiston, and
+Portland (same coordinates as `tri-cities-7day-forecast`), plus Seattle,
+Spokane, Eugene, Bellingham, Bend, and Prince George, BC. All at 850 mb.
+
+- `deploy/publish_charts.py` — hourly cron entry point. Fetches each
+  location's current forecast, builds the chart against that location's
+  *cached* climatology (see below), and atomically publishes
+  `850mb_<slug>.png` to `/var/www/images/`. One location failing doesn't
+  stop the others, same pattern as `tri-cities-7day-forecast`.
+- `deploy/seed_climatology.py` — one-time (or re-run-when-locations-change)
+  step that fetches and caches each location's climatology under
+  `deploy/climatology/<slug>.json`. Climatology is a static 1991-2020
+  normal, not something that changes run to run, so it's deliberately
+  *not* refetched every hourly cron tick -- that would just be unnecessary
+  load on NOAA PSL's public OPeNDAP server for data that never changes.
+  `publish_charts.py` hard-fails a location if its cached file is missing
+  rather than silently rendering without the climatology overlay.
+- `deploy/crontab.example` — the hourly cron line, plus first-run
+  instructions for seeding climatology.
 
 ## Files
 

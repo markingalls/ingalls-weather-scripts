@@ -1,0 +1,21 @@
+# Add this line to the droplet's existing crontab (crontab -e) alongside
+# the tri-cities-7day-forecast and western-us-noaa-outlooks lines already
+# there. Needs the same WB_API_KEY already exported at the top of that
+# crontab (WindBorne account/key, shared across every project that uses it
+# -- no new key needed here).
+#
+# WM-6 updates hourly, so this runs hourly too, 10 min past the hour as a
+# starting buffer -- unlike the SPC/IEM buffer in western-us-noaa-outlooks,
+# this hasn't been empirically checked against a live cycle boundary yet.
+# Worth confirming against a few real days of state/publish.log (does the
+# forecast's own "init" timestamp actually advance every single run, or
+# does it sometimes still show the previous hour's cycle?) and tightening
+# or loosening this if it's off.
+#
+# Before the first run: seed each location's climatology cache once --
+#   cd /opt/ingalls-weather-scripts/850-700-temp-chart
+#   venv/bin/python3 deploy/seed_climatology.py
+# publish_charts.py will hard-fail any location whose cached climatology
+# file is missing, rather than silently skipping the climatology overlay.
+
+10 * * * * /opt/ingalls-weather-scripts/850-700-temp-chart/venv/bin/python3 /opt/ingalls-weather-scripts/850-700-temp-chart/deploy/publish_charts.py >> /opt/ingalls-weather-scripts/850-700-temp-chart/state/cron.log 2>&1
