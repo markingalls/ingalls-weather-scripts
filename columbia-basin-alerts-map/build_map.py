@@ -123,10 +123,10 @@ LON_SPAN, LAT_SPAN = 5.5, 3.6
 SATELLITE_HEIGHT = 4_000_000
 
 
-def region_extent(center_lon, center_lat):
+def region_extent(center_lon, center_lat, lon_span=LON_SPAN, lat_span=LAT_SPAN):
     return [
-        round(center_lon - LON_SPAN / 2, 2), round(center_lon + LON_SPAN / 2, 2),
-        round(center_lat - LAT_SPAN / 2, 2), round(center_lat + LAT_SPAN / 2, 2),
+        round(center_lon - lon_span / 2, 2), round(center_lon + lon_span / 2, 2),
+        round(center_lat - lat_span / 2, 2), round(center_lat + lat_span / 2, 2),
     ]
 
 
@@ -198,12 +198,51 @@ REGIONS = {
             ("Redmond", -121.1739, 44.2726, "right"),
         ],
     ),
-    # A wider "Washington + Oregon + adjacent areas" region is planned but
-    # not built yet -- it'll need its own city list tuned for a much larger
-    # area, and likely more roads coverage than washington/oregon/
-    # idaho_roads_north.geojson currently provide (southern OR below ~44N
-    # is clipped out of oregon_roads.geojson, and there's no CA/NV/BC roads
-    # data at all yet) depending on how far "adjacent" ends up reaching.
+    # PREVIEW ONLY -- California roads aren't pulled in yet (full-state CA
+    # OSM extract is ~1.3GB, so it's a real download-time decision, not a
+    # rendering one) -- city markers for Redding/Eureka are included with
+    # no road lines under them so the actual visible extent is easy to
+    # judge before deciding how far south into CA to go. lon_span/lat_span/
+    # satellite_height are overridden here since this region is a
+    # fundamentally different (much wider) zoom than Columbia Basin/
+    # Portland's shared true-zoom-level setup, not a variant of it.
+    "pnw_wide": dict(
+        title="Pacific Northwest + Adjacent Areas",
+        center_lon=-118.0, center_lat=44.5,
+        lon_span=15.5, lat_span=10.6, satellite_height=26_000_000,
+        legend_loc="upper right",
+        roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads.geojson",
+                     "nevada_roads_north.geojson", "montana_roads_west.geojson"],
+        output="pnw_wide_alerts_PREVIEW.png",
+        cities=[
+            ("Seattle", -122.3321, 47.6062, "left"),
+            ("Spokane", -117.4260, 47.6588, "left"),
+            ("Tacoma", -122.4443, 47.2529, "left"),
+            ("Olympia", -122.9007, 47.0379, "left"),
+            ("Vancouver", -122.6615, 45.6387, "left"),
+            ("Yakima", -120.5059, 46.6021, "right"),
+            ("Wenatchee", -120.3103, 47.4235, "right"),
+            ("Walla Walla", -118.3430, 46.0646, "right"),
+            ("Portland", -122.6765, 45.5152, "below-left"),
+            ("Salem", -123.0351, 44.9429, "left"),
+            ("Eugene", -123.0868, 44.0521, "left"),
+            ("Bend", -121.3153, 44.0582, "right"),
+            ("Medford", -122.8756, 42.3265, "left"),
+            ("Klamath Falls", -121.7817, 42.2249, "right"),
+            ("Pendleton", -118.7879, 45.6721, "right"),
+            ("Astoria", -123.8313, 46.1879, "left"),
+            ("Boise", -116.2023, 43.6150, "right"),
+            ("Coeur d'Alene", -116.7805, 47.6777, "right"),
+            ("Twin Falls", -114.4609, 42.5629, "right"),
+            ("Idaho Falls", -112.0362, 43.4917, "right"),
+            ("Missoula", -113.9940, 46.8721, "right"),
+            ("Kalispell", -114.3129, 48.1958, "below-left"),
+            ("Reno", -119.8138, 39.5296, "left"),
+            ("Winnemucca", -117.7357, 40.9730, "right"),
+            ("Redding", -122.3917, 40.5865, "left"),
+            ("Eureka", -124.1637, 40.8021, "left"),
+        ],
+    ),
 }
 
 
@@ -286,11 +325,12 @@ def make_stripe_image(colors, width_px, height_px, stripe_px=20):
 
 def build_map(region_key, alerts_path, output_path):
     cfg = REGIONS[region_key]
-    extent = region_extent(cfg["center_lon"], cfg["center_lat"])
+    extent = region_extent(cfg["center_lon"], cfg["center_lat"],
+                            cfg.get("lon_span", LON_SPAN), cfg.get("lat_span", LAT_SPAN))
 
     proj = ccrs.NearsidePerspective(central_longitude=cfg["center_lon"],
                                      central_latitude=cfg["center_lat"],
-                                     satellite_height=SATELLITE_HEIGHT)
+                                     satellite_height=cfg.get("satellite_height", SATELLITE_HEIGHT))
     pc = ccrs.PlateCarree()
 
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
@@ -567,8 +607,17 @@ def build_map(region_key, alerts_path, output_path):
         edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
         legend_handles.append(Patch(facecolor=fill, edgecolor=edge, alpha=0.85, label=event))
 
-    leg = fig.legend(handles=legend_handles, loc="lower left",
-                      bbox_to_anchor=(left_x + 0.012, map_pos.y0 + 0.012),
+    # Legend corner defaults to lower-left (tuned so it sits over open ocean
+    # on Columbia Basin/Portland) -- pnw_wide overrides to upper-right since
+    # its lower-left corner covers real cities (Redding/Eureka, CA) at this
+    # much wider zoom instead of empty ocean.
+    legend_loc = cfg.get("legend_loc", "lower left")
+    if legend_loc == "upper right":
+        legend_anchor = (right_x - 0.012, top_y - 0.012)
+    else:
+        legend_anchor = (left_x + 0.012, map_pos.y0 + 0.012)
+    leg = fig.legend(handles=legend_handles, loc=legend_loc,
+                      bbox_to_anchor=legend_anchor,
                       bbox_transform=fig.transFigure,
                       frameon=True, facecolor="white", edgecolor="#d8d5cc",
                       framealpha=1.0, prop=f_reg, fontsize=10, borderpad=0.8)
