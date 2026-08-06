@@ -11,7 +11,7 @@ from matplotlib.lines import Line2D
 from matplotlib.axes import Axes
 import cartopy.crs as ccrs
 from cartopy.mpl.path import shapely_to_path
-from shapely.geometry import shape, box, Polygon
+from shapely.geometry import shape, box, Polygon, LineString, Point
 from shapely.ops import transform as shp_transform, unary_union
 import numpy as np
 from datetime import datetime
@@ -166,12 +166,17 @@ REGIONS = {
         # Same coordinates tri-cities-7day-forecast/deploy/build_and_publish.py
         # uses for Portland, so every product that has a "Portland point"
         # refers to the same physical location.
-        center_lon=-122.60917, center_lat=45.59578,
+        # Shifted ~0.35 deg west of the true Portland point (-122.60917) so
+        # the bottom-left legend lands mostly over open ocean instead of on
+        # top of Newport/Lincoln City -- everything else in this project
+        # that shares "the Portland point" (e.g. tri-cities-7day-forecast)
+        # still uses the unshifted -122.60917.
+        center_lon=-122.95917, center_lat=45.59578,
         roads_files=["washington_roads.geojson", "oregon_roads.geojson"],
         output="portland_alerts.png",
         cities=[
-            ("Portland", -122.6765, 45.5152, "below"),
-            ("Vancouver", -122.6615, 45.6387, "above"),
+            ("Portland", -122.6765, 45.5152, "right"),
+            ("Vancouver", -122.6615, 45.6387, "right"),
             ("Hillsboro", -122.9898, 45.5229, "left"),
             ("Salem", -123.0351, 44.9429, "left"),
             ("Eugene", -123.0868, 44.0521, "left"),
@@ -181,12 +186,14 @@ REGIONS = {
             ("Lincoln City", -124.0179, 44.9582, "left"),
             ("Tillamook", -123.8429, 45.4554, "left"),
             ("Aberdeen", -123.8157, 46.9754, "left"),
-            ("Longview", -122.9382, 46.1382, "left"),
+            ("Longview", -122.9382, 46.1382, "right"),
             ("Olympia", -122.9007, 47.0379, "left"),
             ("Tacoma", -122.4443, 47.2529, "right"),
             ("Centralia", -122.9543, 46.7162, "left"),
             ("The Dalles", -121.1787, 45.5946, "right"),
             ("Hood River", -121.5215, 45.7054, "right"),
+            ("Government Camp", -121.7550, 45.3021, "below-right"),
+            ("Packwood", -121.6733, 46.6088, "right"),
             ("Bend", -121.3153, 44.0582, "right"),
             ("Redmond", -121.1739, 44.2726, "right"),
         ],
@@ -210,6 +217,33 @@ def darken(hexcolor, factor=0.6):
 def hex_to_rgb(hexcolor):
     hexcolor = hexcolor.lstrip("#")
     return tuple(int(hexcolor[i:i+2], 16) for i in (0, 2, 4))
+
+
+def trim_offshore_segments(geom, land_union, threshold):
+    """Cut interior offshore-excursion vertices out of an admin-1 boundary
+    line instead of an all-or-nothing whole-feature filter. Oregon's 3nm
+    state-waters jog is its own separate feature (entirely offshore, so a
+    whole-feature min-distance filter drops it cleanly), but Washington's
+    equivalent jog is fused into the *same* LineString as its real Canada
+    and Columbia River land borders -- since part of that line touches
+    land, the feature's overall min distance is 0 and a whole-feature
+    filter keeps the whole thing, offshore jog included. Splitting on
+    per-vertex distance and keeping only the near-land runs handles both
+    shapes correctly."""
+    lines = geom.geoms if geom.geom_type == "MultiLineString" else [geom]
+    kept = []
+    for line in lines:
+        run = []
+        for x, y in line.coords:
+            if Point(x, y).distance(land_union) <= threshold:
+                run.append((x, y))
+            else:
+                if len(run) >= 2:
+                    kept.append(LineString(run))
+                run = []
+        if len(run) >= 2:
+            kept.append(LineString(run))
+    return kept
 
 
 # Degree^2 area floor for keeping a polygon from an overlay op. The
@@ -296,16 +330,21 @@ def build_map(region_key, alerts_path, output_path):
     # state boundaries. Lakes still come from states_lakes_slim.json since
     # that's the only source for them.
     admin1_lines = json.load(open(f"{MAPS_DIR}/admin1_boundary_lines.json"))
-    s_geoms = [shape(f["geometry"]) for f in admin1_lines["features"]]
+    raw_geoms = [shape(f["geometry"]) for f in admin1_lines["features"]]
     # Drop each coastal state's 3-nautical-mile offshore maritime boundary
     # (its state-waters extent), which Natural Earth includes as an
     # ordinary admin-1 boundary line running parallel to, but detached
     # from, the actual coastline -- confirmed by distance from the land
-    # layer, same as western-us-noaa-outlooks: genuine land-touching state
-    # lines sit right on the coastline, offshore lines sit measurably away
-    # from it, with a clean margin either side of OFFSHORE_LINE_DISTANCE_DEG.
+    # layer, same as western-us-noaa-outlooks. Oregon's version is its own
+    # feature (entirely offshore) so a whole-feature filter drops it
+    # cleanly; Washington's is fused into the same line as its real land
+    # borders, so it needs the per-vertex trim in trim_offshore_segments()
+    # too -- see that function's docstring.
     land_union = unary_union(geoms)
-    s_geoms = [g for g in s_geoms if g.distance(land_union) <= OFFSHORE_LINE_DISTANCE_DEG]
+    s_geoms = []
+    for g in raw_geoms:
+        if g.distance(land_union) <= OFFSHORE_LINE_DISTANCE_DEG:
+            s_geoms.extend(trim_offshore_segments(g, land_union, OFFSHORE_LINE_DISTANCE_DEG))
 
     states = json.load(open(f"{MAPS_DIR}/states_lakes_slim.json"))
     lake_geoms = []
@@ -327,12 +366,21 @@ def build_map(region_key, alerts_path, output_path):
                        linewidth=0.5, zorder=4)
 
     # ---------- roads ----------
+    # oregon_roads.geojson/washington_roads.geojson/idaho_roads_north.geojson
+    # originally only had motorway/trunk OSM tags -- primary was added later
+    # (regenerated from fresh Geofabrik OR/WA/ID extracts) specifically
+    # because US-26 toward Government Camp, US-97 through Bend/Redmond, and
+    # most of the Willamette Valley's highways south of Portland are tagged
+    # `primary` in OSM, not `trunk` -- they were structurally absent before,
+    # not just filtered out here.
     MOTORWAY = {"motorway", "motorway_link"}
     TRUNK = {"trunk", "trunk_link"}
+    PRIMARY = {"primary", "primary_link"}
     MOTORWAY_COLOR = "#8FB8E0"  # pastel blue
     TRUNK_COLOR = "#F2B880"     # pastel orange
+    PRIMARY_COLOR = "#E8C9A0"   # lighter/duller pastel orange -- one step down from trunk
 
-    motorway_geoms, trunk_geoms = [], []
+    motorway_geoms, trunk_geoms, primary_geoms = [], [], []
     for region_file in cfg["roads_files"]:
         d = json.load(open(f"{MAPS_DIR}/{region_file}"))
         for f in d["features"]:
@@ -342,7 +390,11 @@ def build_map(region_key, alerts_path, output_path):
                 motorway_geoms.append(geom)
             elif hwy in TRUNK:
                 trunk_geoms.append(geom)
+            elif hwy in PRIMARY:
+                primary_geoms.append(geom)
 
+    ax.add_geometries(primary_geoms, crs=pc, facecolor="none", edgecolor=PRIMARY_COLOR,
+                       linewidth=0.9, zorder=4.8)
     ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR,
                        linewidth=1.1, zorder=5)
     ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR,

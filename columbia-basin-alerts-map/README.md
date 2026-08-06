@@ -37,11 +37,13 @@ point at render time.
   the same hand-tuned extent (`[-122.5, -117.0, 44.4, 48.0]`) this
   project started with -- `LON_SPAN`/`LAT_SPAN`/`SATELLITE_HEIGHT` were
   reverse-engineered from it, not the other way around.
-- **`portland`** — same span/zoom, centered on Portland
-  (`-122.60917, 45.59578` -- the same point
-  `tri-cities-7day-forecast/deploy/build_and_publish.py` uses for
-  Portland). About 23% of the frame is open ocean at this zoom level given
-  how close Portland sits to the coast -- expected, not a bug.
+- **`portland`** — same span/zoom, centered ~0.35 deg west of the true
+  Portland point (`-122.95917, 45.59578` vs. the unshifted `-122.60917`
+  that `tri-cities-7day-forecast/deploy/build_and_publish.py` uses for
+  Portland) so the bottom-left legend lands mostly over open ocean instead
+  of on top of Newport/Lincoln City. About a quarter of the frame is open
+  ocean at this zoom level given how close Portland sits to the coast --
+  expected, not a bug.
 - **Planned, not built yet**: a wider "Washington + Oregon + adjacent
   areas" region. It'll need its own city list tuned for a much larger
   area, and likely more roads coverage than
@@ -68,6 +70,9 @@ to fit more in -- an earlier version with Beaverton and Gresham also
 included needed the full 8-way set just to keep five tightly-packed
 labels from running together, and even then it read as busy. The 8-way
 system is still there in the code for whichever region needs it next.
+Government Camp, added on the map's southeast corner near the Mt. Hood
+highway, uses `below-right` to stay clear of Hood River's label to its
+north.
 
 ## Shared basemap data
 
@@ -85,11 +90,20 @@ Lives one level up in [`../maps/`](../maps/) so other scripts can reuse it:
   instead, see above.
 - `counties_wa_or_id.geojson` — county boundaries for WA/OR/ID.
 - `washington_roads.geojson`, `oregon_roads.geojson`,
-  `idaho_roads_north.geojson` — motorway/trunk road geometry, full home-state
-  coverage each (Idaho covers everything north of McCall; Oregon is
-  clipped below ~44°N). Not region-specific -- `cfg["roads_files"]` picks
-  which of these each region actually loads (Portland skips Idaho's,
-  since its extent never reaches that far east).
+  `idaho_roads_north.geojson` — motorway/trunk/primary road geometry, full
+  home-state coverage for OR/WA (Idaho covers everything north of
+  McCall). Not region-specific -- `cfg["roads_files"]` picks which of
+  these each region actually loads (Portland skips Idaho's, since its
+  extent never reaches that far east). Regenerated from fresh Geofabrik
+  OR/WA/ID `.osm.pbf` extracts (`osmium tags-filter` on
+  `highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link`,
+  then `osmium export` to GeoJSON) after discovering the original files
+  only ever had `motorway`/`trunk` tags -- `primary` didn't exist in the
+  data at all, so highways tagged that way in OSM (US-26 through
+  Government Camp, US-97 through Bend/Redmond, most of the Willamette
+  Valley's north-south highways) were structurally missing, not just
+  filtered out at render time. `build_map.py` draws `primary` in its own
+  color, one step duller than `trunk`.
 
 The Ingalls Weather logo (placed bottom-right on the map) lives in
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
@@ -119,3 +133,12 @@ python3 build_map.py --region portland
   whatever domain a given region is currently showing.
 - Duplicate NWS products covering the exact same zone (this happens
   sometimes) are deduped so they don't double-stack shading.
+- Natural Earth's `admin1_boundary_lines.json` includes each coastal
+  state's offshore 3-nautical-mile maritime boundary as an ordinary
+  admin-1 line -- `build_map.py` drops it via distance-from-land
+  filtering. Oregon's version is its own separate feature (entirely
+  offshore), so a whole-feature filter drops it cleanly; Washington's is
+  fused into the *same* LineString as its real Canada/Columbia River land
+  borders, so the whole feature's minimum distance from land is 0 and a
+  whole-feature filter alone doesn't catch it -- `trim_offshore_segments()`
+  splits on per-vertex distance instead, keeping only the near-land runs.
