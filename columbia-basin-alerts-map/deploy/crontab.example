@@ -1,0 +1,11 @@
+# Add this line to the droplet's existing crontab (crontab -e) alongside
+# everything else already there. No API key needed -- the NWS alerts API
+# is unauthenticated.
+#
+# Every 5 minutes -- unlike the scheduled-issuance products elsewhere in
+# this repo (SPC/CPC/etc., timed to NOAA's own real issuance schedule),
+# NWS alerts can be issued at any minute, so there's no cycle time to
+# align to; this is a polling interval, matching the original plan for
+# this product ("Columbia Basin alerts -- Every 5 min").
+
+*/5 * * * * /opt/ingalls-weather-scripts/columbia-basin-alerts-map/venv/bin/python3 /opt/ingalls-weather-scripts/columbia-basin-alerts-map/deploy/publish_alerts.py >> /opt/ingalls-weather-scripts/columbia-basin-alerts-map/state/cron.log 2>&1

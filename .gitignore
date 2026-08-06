@@ -111,3 +111,19 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+
+# --- columbia-basin-alerts-map ---
+# fetch_alerts.py fetches its source live every run, and the rendered PNGs
+# are outputs -- neither is source, so don't track them. state/ is the
+# droplet-deploy guard's runtime state (lock file, logs) -- created on the
+# server, not source.
+columbia-basin-alerts-map/alerts_with_zones.json
+columbia-basin-alerts-map/*.png
+columbia-basin-alerts-map/state/
+
+# --- image-hit-stats ---
+# hits.sqlite3/cursor.json are runtime state built up on the server from
+# nginx's own access log, not source -- there's nothing to check in here
+# that a fresh deploy couldn't regenerate from scratch (starting the hit
+# count over at zero, same as the very first deploy).
+image-hit-stats/state/
