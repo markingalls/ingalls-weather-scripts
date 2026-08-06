@@ -1,0 +1,11 @@
+# Add this line to the droplet's existing crontab (crontab -e) alongside
+# everything else already there. No API key or venv needed -- update_stats.py
+# is stdlib-only, so this runs with the system python3 directly, not a
+# project-specific venv like the other cron lines.
+#
+# Every 15 minutes: cheap (incremental log read + a few SQL aggregates over
+# a small table), and keeps the dashboard reasonably current for whoever
+# checks it -- unrelated to how often any individual image itself
+# regenerates, since this is about visitor traffic, not image freshness.
+
+*/15 * * * * /usr/bin/python3 /opt/ingalls-weather-scripts/image-hit-stats/update_stats.py >> /opt/ingalls-weather-scripts/image-hit-stats/state/cron.log 2>&1
