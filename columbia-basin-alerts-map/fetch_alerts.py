@@ -1,14 +1,18 @@
 """
 Refreshes alerts_with_zones.json with whatever NWS alerts are currently
-active for OR/WA. Run this before build_map.py any time you want the map
-to reflect right-now conditions instead of a stale snapshot.
+active for OR/WA/ID. Run this before build_map.py any time you want the
+map to reflect right-now conditions instead of a stale snapshot.
 """
 import json
 import time
 import requests
 
 HEADERS = {"User-Agent": "(ingallswx.com, contact@ingallswx.com)"}
-AREA = "OR,WA"  # add more states here if you widen the map domain later
+# ID is needed even though no region is Idaho-centered -- columbia_basin's
+# extent dips into the Idaho panhandle (its roads_files include
+# idaho_roads_north.geojson), so without ID here that sliver would always
+# render alert-free regardless of what's actually active there.
+AREA = "OR,WA,ID"
 
 
 def fetch_active_alerts():

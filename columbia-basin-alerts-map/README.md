@@ -9,8 +9,8 @@ zoom level, using live NWS data plus a pre-built local basemap.
 ## Files
 
 - `fetch_alerts.py` — pulls current active alerts + zone geometries from
-  the NWS API for OR/WA and writes `alerts_with_zones.json`. Every region
-  currently defined pulls from this same OR/WA query, so one fetch serves
+  the NWS API for OR/WA/ID and writes `alerts_with_zones.json`. Every
+  region currently defined pulls from this same query, so one fetch serves
   all of them -- run this first, any time you want the map(s) to reflect
   right-now conditions.
 - `build_map.py` — `REGIONS` dict registry (extent, center point, city
@@ -129,7 +129,7 @@ python3 build_map.py --region portland
   Warning, etc.) are colored automatically without edits.
 - The legend/subtitle for a given region only reflect alert types with at
   least one zone actually inside *that region's* extent — NWS returns
-  every active alert for the whole OR/WA query, most of which sit outside
+  every active alert for the whole OR/WA/ID query, most of which sit outside
   whatever domain a given region is currently showing.
 - Duplicate NWS products covering the exact same zone (this happens
   sometimes) are deduped so they don't double-stack shading.

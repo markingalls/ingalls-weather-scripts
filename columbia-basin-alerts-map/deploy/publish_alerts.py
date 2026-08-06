@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Cron entry point for the droplet deployment. Fetches active NWS alerts
-once (both regions pull from the same OR/WA query -- no need to fetch
+once (both regions pull from the same OR/WA/ID query -- no need to fetch
 twice), then renders and atomically publishes each region in REGIONS.
 One region failing doesn't stop the others, same pattern as every other
 publish script in this repo.
