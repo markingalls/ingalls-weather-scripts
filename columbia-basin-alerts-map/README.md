@@ -62,10 +62,12 @@ point at render time.
 8 directions: `left`/`right`/`above`/`below` plus the four diagonals
 (`above-left`, `above-right`, `below-left`, `below-right`). Columbia
 Basin's cities are spread far enough apart that plain left/right never
-collided; Portland's much tighter cluster (Portland/Vancouver/Beaverton/
-Hillsboro/Gresham are all within a few miles of each other) needed the
-full 8-way set to stagger labels radially instead of two landing on the
-same latitude and running together.
+collided. Portland's immediate metro cluster is deliberately kept sparse
+(just Portland, Vancouver, Hillsboro) rather than leaning on the diagonals
+to fit more in -- an earlier version with Beaverton and Gresham also
+included needed the full 8-way set just to keep five tightly-packed
+labels from running together, and even then it read as busy. The 8-way
+system is still there in the code for whichever region needs it next.
 
 ## Shared basemap data
 

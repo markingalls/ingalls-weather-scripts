@@ -89,6 +89,17 @@ EDGE_OVERRIDE = {
 
 MAPS_DIR = "../maps"
 
+# How far a state boundary line can sit from the land layer before it's
+# treated as one of Natural Earth's offshore 3-nautical-mile maritime
+# boundary lines (a coastal state's state-waters extent, e.g. Oregon/
+# Washington) rather than a genuine land-touching state line -- same
+# constant/technique as western-us-noaa-outlooks/build_map.py's
+# load_state_lines(), ported here now that the Portland region's frame
+# reaches the coast (Columbia Basin's original extent never did, so this
+# artifact was never visible before there was a region that included any
+# coastline).
+OFFSHORE_LINE_DISTANCE_DEG = 0.02
+
 # ---------------------------------------------------------------------------
 # Region registry -- each entry is one map "product": its own extent, center
 # point (for the NearsidePerspective projection), city labels, roads files,
@@ -159,11 +170,9 @@ REGIONS = {
         roads_files=["washington_roads.geojson", "oregon_roads.geojson"],
         output="portland_alerts.png",
         cities=[
-            ("Portland", -122.6765, 45.5152, "below-right"),
+            ("Portland", -122.6765, 45.5152, "below"),
             ("Vancouver", -122.6615, 45.6387, "above"),
-            ("Beaverton", -122.8037, 45.4871, "below-left"),
             ("Hillsboro", -122.9898, 45.5229, "left"),
-            ("Gresham", -122.4302, 45.5001, "right"),
             ("Salem", -123.0351, 44.9429, "left"),
             ("Eugene", -123.0868, 44.0521, "left"),
             ("Corvallis", -123.2620, 44.5646, "left"),
@@ -171,6 +180,7 @@ REGIONS = {
             ("Newport", -124.0535, 44.6365, "left"),
             ("Lincoln City", -124.0179, 44.9582, "left"),
             ("Tillamook", -123.8429, 45.4554, "left"),
+            ("Aberdeen", -123.8157, 46.9754, "left"),
             ("Longview", -122.9382, 46.1382, "left"),
             ("Olympia", -122.9007, 47.0379, "left"),
             ("Tacoma", -122.4443, 47.2529, "right"),
@@ -287,6 +297,15 @@ def build_map(region_key, alerts_path, output_path):
     # that's the only source for them.
     admin1_lines = json.load(open(f"{MAPS_DIR}/admin1_boundary_lines.json"))
     s_geoms = [shape(f["geometry"]) for f in admin1_lines["features"]]
+    # Drop each coastal state's 3-nautical-mile offshore maritime boundary
+    # (its state-waters extent), which Natural Earth includes as an
+    # ordinary admin-1 boundary line running parallel to, but detached
+    # from, the actual coastline -- confirmed by distance from the land
+    # layer, same as western-us-noaa-outlooks: genuine land-touching state
+    # lines sit right on the coastline, offshore lines sit measurably away
+    # from it, with a clean margin either side of OFFSHORE_LINE_DISTANCE_DEG.
+    land_union = unary_union(geoms)
+    s_geoms = [g for g in s_geoms if g.distance(land_union) <= OFFSHORE_LINE_DISTANCE_DEG]
 
     states = json.load(open(f"{MAPS_DIR}/states_lakes_slim.json"))
     lake_geoms = []
@@ -483,7 +502,7 @@ def build_map(region_key, alerts_path, output_path):
     # ---------- title / subtitle ----------
     subtitle_y = top_y + 0.018
     title_y = subtitle_y + 0.035
-    fig.text(left_x, title_y, f"{cfg['title']} Active NWS Weather Alerts",
+    fig.text(left_x, title_y, "Active NWS Weather Alerts",
               fontproperties=f_bold, fontsize=22, color="#2b2a26")
     now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
     subtitle = f"Updated: {now_pt.strftime('%d %B %Y %H:%M')} PT"
