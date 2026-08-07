@@ -99,7 +99,15 @@ EDGE_OVERRIDE = {
 POLYGON_WARNING_EVENTS = {"Severe Thunderstorm Warning", "Tornado Warning", "Flash Flood Warning",
                            "Special Marine Warning"}
 
-MAPS_DIR = "../maps"
+# Absolute, derived from this file's own location -- not the process's cwd
+# at invocation time. A relative path here broke every cron run: the
+# 5-then-10-minute cron tick starts with cwd set to the crontab user's
+# home directory, not this project's directory, so "../maps" resolved to
+# somewhere that doesn't exist and every region failed with the same
+# FileNotFoundError. Manual runs after `cd`-ing into the project directory
+# never showed this, which is exactly why it went unnoticed until cron.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+MAPS_DIR = os.path.join(SCRIPT_DIR, "..", "maps")
 
 # How far a state boundary line can sit from the land layer before it's
 # treated as one of Natural Earth's offshore 3-nautical-mile maritime
@@ -642,7 +650,7 @@ def build_map(region_key, alerts_path, output_path):
     center_x = (map_pos.x0 + map_pos.x1) / 2
 
     # ---------- logo (bottom-right, ~8% of map width, ~22px inset) ----------
-    LOGO_PATH = "../assets/ingalls_weather_logo.png"
+    LOGO_PATH = os.path.join(SCRIPT_DIR, "..", "assets", "ingalls_weather_logo.png")
     if os.path.exists(LOGO_PATH):
         logo_img = plt.imread(LOGO_PATH)
         img_h, img_w = logo_img.shape[0], logo_img.shape[1]
