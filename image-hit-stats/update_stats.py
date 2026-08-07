@@ -20,7 +20,16 @@ with.
 
 No third-party dependencies -- sqlite3 and everything else used here is
 stdlib.
+
+An flock-based lock means an overlapping cron tick (e.g. a slow run still
+in progress when the next scheduled tick fires) skips instead of running a
+second pass concurrently -- same pattern as every other cron entry point
+in this repo (see e.g. columbia-basin-alerts-map/deploy/publish_alerts.py).
+This script's own work is cheap, but a slow/stuck nginx log read (network
+filesystem hiccup, huge unrotated log) shouldn't be allowed to stack up
+concurrent SQLite writers against the same database file.
 """
+import fcntl
 import json
 import os
 import re
@@ -32,6 +41,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_DIR = os.path.join(BASE_DIR, "state")
 CURSOR_FILE = os.path.join(STATE_DIR, "cursor.json")
 DB_FILE = os.path.join(STATE_DIR, "hits.sqlite3")
+LOCK_FILE = os.path.join(STATE_DIR, "run.lock")
 
 LOG_PATH = "/var/log/nginx/images-access.log"
 WEB_ROOT = "/var/www/images"
@@ -284,26 +294,37 @@ def main():
     os.makedirs(STATE_DIR, exist_ok=True)
     os.makedirs(STATS_DIR, exist_ok=True)
 
-    lines, inode, offset = read_new_lines()
-    conn = sqlite3.connect(DB_FILE)
-    init_db(conn)
+    lock_fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("Previous run still in progress -- skipping this tick.")
+        return 0
 
-    n_new = fold_lines(conn, lines) if lines else 0
-    if inode is not None:
-        save_cursor(inode, offset)
+    try:
+        lines, inode, offset = read_new_lines()
+        conn = sqlite3.connect(DB_FILE)
+        init_db(conn)
 
-    report = build_report(conn)
-    html = render_dashboard(report)
+        n_new = fold_lines(conn, lines) if lines else 0
+        if inode is not None:
+            save_cursor(inode, offset)
 
-    tmp_path = os.path.join(STATS_DIR, ".tmp_index.html")
-    final_path = os.path.join(STATS_DIR, "index.html")
-    with open(tmp_path, "w") as f:
-        f.write(html)
-    os.replace(tmp_path, final_path)
+        report = build_report(conn)
+        html = render_dashboard(report)
 
-    print(f"Folded {len(lines)} new log line(s) ({n_new} date/path pairs updated). "
-          f"Dashboard rendered to {final_path}. All-time total: {report['all']['total']:,} hits.")
-    conn.close()
+        tmp_path = os.path.join(STATS_DIR, ".tmp_index.html")
+        final_path = os.path.join(STATS_DIR, "index.html")
+        with open(tmp_path, "w") as f:
+            f.write(html)
+        os.replace(tmp_path, final_path)
+
+        print(f"Folded {len(lines)} new log line(s) ({n_new} date/path pairs updated). "
+              f"Dashboard rendered to {final_path}. All-time total: {report['all']['total']:,} hits.")
+        conn.close()
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
 
 
 if __name__ == "__main__":

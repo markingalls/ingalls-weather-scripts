@@ -58,3 +58,22 @@ workflows. Each project lives in its own directory with its own README.
 - [`maps/`](maps/) — reusable basemap data (coastlines, borders, counties,
   roads) shared across mapping scripts.
 - [`assets/`](assets/) — shared brand assets (logo, etc.).
+
+## Deployment conventions
+
+Every project's cron entry point (`deploy/publish_*.py`, `deploy/
+build_and_publish.py`, or equivalent) should take an `fcntl.flock`-based
+exclusive, non-blocking lock on a `state/run.lock` file around its whole
+run: try to acquire it, and if a previous invocation still holds it (still
+running when the next scheduled tick fires -- a slow upstream fetch, a
+larger-than-usual render, etc.), log that and exit cleanly instead of
+running a second pass concurrently. This is what keeps a slow tick from
+compounding into several overlapping runs competing for the same CPU.
+Every current cron entry point in this repo follows this pattern --
+`columbia-basin-alerts-map/deploy/publish_alerts.py` is a good short
+reference for the exact shape (open the lock file, try/except
+`BlockingIOError` around `fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)`,
+release in a `finally`). Apply the same pattern to any new project's
+cron entry point when it's built, even if the work itself seems too cheap
+to ever realistically overlap -- consistency here is cheap, and it means
+one less thing to remember to add later once it stops being cheap.
