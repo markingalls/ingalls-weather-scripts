@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
 Cron entry point for the droplet deployment. Fetches active NWS alerts
-once (both regions pull from the same OR/WA/ID query -- no need to fetch
-twice), then renders and atomically publishes each region in REGIONS.
-One region failing doesn't stop the others, same pattern as every other
-publish script in this repo.
+once (every region pulls from the same query -- no need to fetch twice),
+then renders and atomically publishes each region in REGIONS. One region
+failing doesn't stop the others, same pattern as every other publish
+script in this repo.
 
-Scheduled every 5 minutes (see deploy/crontab.example) -- alerts.weather.gov
+Scheduled every 10 minutes (see deploy/crontab.example) -- alerts.weather.gov
 data can change at any time (a warning can be issued at any minute), so
 unlike the scheduled-issuance products elsewhere in this repo, there's no
-"NOAA's own real issuance schedule" to align to here; every-5-minutes is
-just a reasonable polling interval matching the original plan for this
-product.
+"NOAA's own real issuance schedule" to align to here; every-10-minutes is
+just a reasonable polling interval.
 
 An flock-based lock means an overlapping cron tick (e.g. a slow run still
 in progress when the next scheduled tick fires) skips instead of running

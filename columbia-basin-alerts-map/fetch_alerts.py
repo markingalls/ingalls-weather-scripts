@@ -54,9 +54,9 @@ def save_zone_cache(zone_cache):
 def fetch_zone_geometries(alerts_geojson, zone_cache):
     # Zone boundaries are essentially static (NWS very rarely redraws a
     # forecast zone), so persisting this to disk across runs avoids
-    # re-fetching every zone's geometry on every single 5-minute cron tick
-    # -- AREA covering seven states now means a lot more zones to look up
-    # than when this was just OR/WA/ID.
+    # re-fetching every zone's geometry on every single cron tick -- AREA
+    # covering seven states now means a lot more zones to look up than
+    # when this was just OR/WA/ID.
     records = []
     for f in alerts_geojson["features"]:
         p = f["properties"]

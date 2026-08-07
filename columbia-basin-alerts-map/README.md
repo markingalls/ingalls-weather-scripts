@@ -6,20 +6,21 @@ Baker City, OR corridor) for Ingalls Weather's Instagram, now also
 deployed live on the site for a Portland Metro variant at the same true
 zoom level, plus a much wider Pacific Northwest + adjacent-states variant,
 using live NWS data plus a pre-built local basemap. All three regions
-publish on the same 5-minute cron cycle -- see `deploy/`.
+publish on the same 10-minute cron cycle -- see `deploy/`.
 
 ## Files
 
 - `fetch_alerts.py` — pulls current active alerts + zone geometries from
-  the NWS API for `AREA` (currently `OR,WA,ID,CA,NV,MT,UT` -- every state
-  any region's extent reaches into, however slightly) and writes
+  the NWS API for `AREA` (currently `OR,WA,ID,CA,NV,MT,UT,PZ` -- every
+  state any region's extent reaches into, however slightly, plus PZ for
+  Pacific coastal/offshore marine alerts) and writes
   `alerts_with_zones.json`. Every region currently defined pulls from this
   same query, so one fetch serves all of them -- run this first, any time
   you want the map(s) to reflect right-now conditions. Zone geometries are
   cached to disk (`state/zone_geometry_cache.json`, gitignored) across
   runs, since zone boundaries are effectively static and re-fetching all
-  of them fresh every 5-minute cron tick doesn't scale once `AREA` covers
-  seven states worth of zones -- a cold cache run takes a few minutes, a
+  of them fresh every cron tick doesn't scale once `AREA` covers seven
+  states plus a marine zone -- a cold cache run takes a few minutes, a
   warm one finishes in seconds.
 - `build_map.py` — `REGIONS` dict registry (extent, center point, city
   labels, roads files, title, output filename) plus `build_map(region_key,
