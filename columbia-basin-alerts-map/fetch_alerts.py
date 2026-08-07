@@ -1,18 +1,24 @@
 """
 Refreshes alerts_with_zones.json with whatever NWS alerts are currently
-active for OR/WA/ID. Run this before build_map.py any time you want the
+active for AREA below. Run this before build_map.py any time you want the
 map to reflect right-now conditions instead of a stale snapshot.
 """
 import json
+import os
 import time
 import requests
 
 HEADERS = {"User-Agent": "(ingallswx.com, contact@ingallswx.com)"}
-# ID is needed even though no region is Idaho-centered -- columbia_basin's
-# extent dips into the Idaho panhandle (its roads_files include
-# idaho_roads_north.geojson), so without ID here that sliver would always
-# render alert-free regardless of what's actually active there.
-AREA = "OR,WA,ID"
+# Every state any region's extent reaches into, even by a sliver, needs to
+# be listed here -- a region's frame doesn't limit what NWS data gets
+# fetched, only AREA does, so a state left out here always renders
+# alert-free in that region regardless of what's actually active there
+# (this bit columbia_basin's Idaho panhandle sliver earlier; pnw_wide's
+# much wider extent now reaches CA/NV/MT/UT the same way).
+AREA = "OR,WA,ID,CA,NV,MT,UT"
+
+STATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state")
+ZONE_CACHE_FILE = os.path.join(STATE_DIR, "zone_geometry_cache.json")
 
 
 def fetch_active_alerts():
@@ -22,8 +28,28 @@ def fetch_active_alerts():
     return r.json()
 
 
-def fetch_zone_geometries(alerts_geojson):
-    zone_cache = {}
+def load_zone_cache():
+    try:
+        with open(ZONE_CACHE_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def save_zone_cache(zone_cache):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    tmp_path = ZONE_CACHE_FILE + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(zone_cache, f)
+    os.replace(tmp_path, ZONE_CACHE_FILE)
+
+
+def fetch_zone_geometries(alerts_geojson, zone_cache):
+    # Zone boundaries are essentially static (NWS very rarely redraws a
+    # forecast zone), so persisting this to disk across runs avoids
+    # re-fetching every zone's geometry on every single 5-minute cron tick
+    # -- AREA covering seven states now means a lot more zones to look up
+    # than when this was just OR/WA/ID.
     records = []
     for f in alerts_geojson["features"]:
         p = f["properties"]
@@ -33,14 +59,14 @@ def fetch_zone_geometries(alerts_geojson):
             if z not in zone_cache:
                 r = requests.get(z, headers=HEADERS, timeout=20)
                 r.raise_for_status()
-                zone_cache[z] = r.json()
+                zj = r.json()
+                zone_cache[z] = {
+                    "zone_id": zj["properties"].get("id"),
+                    "name": zj["properties"].get("name"),
+                    "geometry": zj["geometry"],
+                }
                 time.sleep(0.2)  # be polite to the API
-            zj = zone_cache[z]
-            geoms.append({
-                "zone_id": zj["properties"].get("id"),
-                "name": zj["properties"].get("name"),
-                "geometry": zj["geometry"],
-            })
+            geoms.append(zone_cache[z])
         records.append({
             "event": p["event"],
             "severity": p.get("severity"),
@@ -55,8 +81,12 @@ def fetch_zone_geometries(alerts_geojson):
 if __name__ == "__main__":
     raw = fetch_active_alerts()
     print(f"Active alerts fetched: {len(raw['features'])}")
-    records = fetch_zone_geometries(raw)
+    zone_cache = load_zone_cache()
+    cache_size_before = len(zone_cache)
+    records = fetch_zone_geometries(raw, zone_cache)
+    save_zone_cache(zone_cache)
     json.dump(records, open("alerts_with_zones.json", "w"))
     for r in records:
         print(" -", r["event"], [z["name"] for z in r["zones"]])
+    print(f"Zone cache: {cache_size_before} cached, {len(zone_cache) - cache_size_before} newly fetched.")
     print("Saved alerts_with_zones.json")

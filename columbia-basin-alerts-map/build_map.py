@@ -88,6 +88,14 @@ EDGE_OVERRIDE = {
     "Fire Weather Watch": "#B8860B",
 }
 
+# NWS issues these as literal storm-tracking polygons, not tied to county/
+# zone boundaries like every other product here -- shading them the same
+# way as a zone-based hazard reads as if the whole zone is under threat,
+# when the real warning is just the polygon's boundary. Drawn as an
+# outlined boundary line instead of a fill; see the "polygon warnings"
+# section of build_map().
+POLYGON_WARNING_EVENTS = {"Severe Thunderstorm Warning", "Tornado Warning", "Flash Flood Warning"}
+
 MAPS_DIR = "../maps"
 
 # How far a state boundary line can sit from the land layer before it's
@@ -210,7 +218,7 @@ REGIONS = {
         legend_loc="upper right",
         roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads.geojson",
                      "nevada_roads_north.geojson", "montana_roads_west.geojson",
-                     "california_roads_north.geojson"],
+                     "california_roads_north.geojson", "utah_roads_northwest.geojson"],
         output="pnw_wide_alerts_PREVIEW.png",
         cities=[
             ("Seattle", -122.3321, 47.6062, "left"),
@@ -222,6 +230,7 @@ REGIONS = {
             ("Portland", -122.6765, 45.5152, "below-left"),
             ("Eugene", -123.0868, 44.0521, "left"),
             ("Medford", -122.8756, 42.3265, "left"),
+            ("Weed", -122.3861, 41.4227, "left"),
             ("Bend", -121.3153, 44.0582, "right"),
             ("Klamath Falls", -121.7817, 42.2249, "right"),
             ("John Day", -118.9490, 44.4165, "right"),
@@ -230,6 +239,7 @@ REGIONS = {
             ("Twin Falls", -114.4609, 42.5629, "right"),
             ("Lewiston", -117.0177, 46.4165, "right"),
             ("Missoula", -113.9940, 46.8721, "right"),
+            ("Salmon", -113.9032, 45.1758, "right"),
         ],
     ),
 }
@@ -502,12 +512,19 @@ def build_map(region_key, alerts_path, output_path):
     active_event_types = [event for event, geom in event_geoms.items()
                            if geom.intersects(extent_box)]
 
+    # Polygon-type warnings (see POLYGON_WARNING_EVENTS) are drawn as an
+    # outlined boundary line, not shaded -- pull them out before the
+    # shading/overlap-stripe partition logic below, which only makes sense
+    # for zone-based hazards.
+    outline_event_geoms = {e: g for e, g in event_geoms.items() if e in POLYGON_WARNING_EVENTS}
+    shaded_event_geoms = {e: g for e, g in event_geoms.items() if e not in POLYGON_WARNING_EVENTS}
+
     # Split the events into a partition of disjoint regions, each tagged with
     # the set of events covering it, so overlapping alerts (e.g. a Red Flag
     # Warning inside a Heat Advisory) can be drawn as their own region instead
     # of alpha-stacking into a color that matches neither alert.
     partition = []  # list of (geom, frozenset(events))
-    for event, geom in event_geoms.items():
+    for event, geom in shaded_event_geoms.items():
         next_partition = []
         remaining = geom
         for cell_geom, cell_events in partition:
@@ -560,6 +577,19 @@ def build_map(region_key, alerts_path, output_path):
         im.set_clip_path(clip_patch)
         ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
                            linewidth=1.2, alpha=1.0, zorder=4.6)
+
+    # Polygon-type warnings drawn last (highest zorder among alerts) so
+    # they're never buried under the zone-based shading -- a black outline
+    # behind the event's own color traces just the polygon boundary, no
+    # fill, per POLYGON_WARNING_EVENTS above.
+    for event, geom in outline_event_geoms.items():
+        if geom.is_empty or not geom.intersects(extent_box):
+            continue
+        color = NWS_COLORS.get(event, "#e8a33d")
+        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor="black",
+                           linewidth=2.6, zorder=4.7)
+        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=color,
+                           linewidth=1.4, zorder=4.8)
 
     # ---------- city labels ----------
     # 8-way (not just left/right) since Columbia Basin's original 2-way
@@ -640,8 +670,14 @@ def build_map(region_key, alerts_path, output_path):
     legend_handles = []
     for event in active_event_types:
         fill = NWS_COLORS.get(event, "#e8a33d")
-        edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
-        legend_handles.append(Patch(facecolor=fill, edgecolor=edge, alpha=0.85, label=event))
+        if event in POLYGON_WARNING_EVENTS:
+            # Matches the outlined-line treatment these get on the map
+            # instead of a shaded fill -- a solid Patch swatch here would
+            # misrepresent how the event actually looks.
+            legend_handles.append(Line2D([0], [0], color=fill, linewidth=2.5, label=event))
+        else:
+            edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
+            legend_handles.append(Patch(facecolor=fill, edgecolor=edge, alpha=0.85, label=event))
 
     # Legend corner defaults to lower-left (tuned so it sits over open ocean
     # on Columbia Basin/Portland) -- pnw_wide overrides to upper-right since
@@ -652,11 +688,24 @@ def build_map(region_key, alerts_path, output_path):
         legend_anchor = (right_x - 0.012, top_y - 0.012)
     else:
         legend_anchor = (left_x + 0.012, map_pos.y0 + 0.012)
+    # More than 5 active alert types stops fitting comfortably at the
+    # normal size -- halve the font/handle/spacing so a busy day's legend
+    # still fits without spilling off the map. legend()'s own `fontsize`
+    # kwarg is silently ignored whenever `prop` is also a FontProperties
+    # instance (matplotlib only falls back to fontsize when prop is None),
+    # so the size has to be set on a copy of the FontProperties itself.
+    many_events = len(active_event_types) > 5
+    legend_font = f_reg.copy()
+    legend_font.set_size(5 if many_events else 10)
     leg = fig.legend(handles=legend_handles, loc=legend_loc,
                       bbox_to_anchor=legend_anchor,
                       bbox_transform=fig.transFigure,
                       frameon=True, facecolor="white", edgecolor="#d8d5cc",
-                      framealpha=1.0, prop=f_reg, fontsize=10, borderpad=0.8)
+                      framealpha=1.0, prop=legend_font,
+                      borderpad=0.4 if many_events else 0.8,
+                      labelspacing=0.25 if many_events else 0.5,
+                      handlelength=1.0 if many_events else 2.0,
+                      handleheight=0.35 if many_events else 0.7)
     leg.get_frame().set_linewidth(0.8)
 
     # ---------- attribution ----------
