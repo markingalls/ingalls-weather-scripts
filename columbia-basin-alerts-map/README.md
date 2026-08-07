@@ -4,8 +4,9 @@ Generates a styled map of active NWS weather alerts for one of several
 regions -- originally built just for the Columbia Basin (North Bend, WA to
 Baker City, OR corridor) for Ingalls Weather's Instagram, now also
 deployed live on the site for a Portland Metro variant at the same true
-zoom level, plus a much wider Pacific Northwest + adjacent-states preview,
-using live NWS data plus a pre-built local basemap.
+zoom level, plus a much wider Pacific Northwest + adjacent-states variant,
+using live NWS data plus a pre-built local basemap. All three regions
+publish on the same 5-minute cron cycle -- see `deploy/`.
 
 ## Files
 
@@ -57,18 +58,16 @@ setup, not a variant of it.
   of on top of Newport/Lincoln City. About a quarter of the frame is open
   ocean at this zoom level given how close Portland sits to the coast --
   expected, not a bug.
-- **`pnw_wide`** — **PREVIEW, not deployed** (output is tagged
-  `_PREVIEW.png` and it isn't in any droplet crontab). Washington, Oregon,
-  and Idaho in full, plus slivers of northern California, northern
-  Nevada, western Montana, and the very NW corner of Utah wherever the
-  frame happens to reach. Center `(-119.3, 44.9)`, its own
-  `lon_span=13.0`/`lat_span=8.8`/`satellite_height=22_000_000`, legend
-  anchored `upper right` instead of the default `lower left` (its
-  lower-left corner covers real CA cities like Weed at this zoom, not
-  empty ocean the way Columbia Basin/Portland's does). Still settling --
-  center point, zoom, and city roster have all moved multiple times as
-  the map got iterated on; treat anything above as current-as-of-last-edit
-  rather than final.
+- **`pnw_wide`** — Washington, Oregon, and Idaho in full, plus slivers of
+  northern California, northern Nevada, western Montana, and the very NW
+  corner of Utah wherever the frame happens to reach. Center
+  `(-119.3, 44.9)`, its own `lon_span=13.0`/`lat_span=8.8`/
+  `satellite_height=22_000_000`, legend anchored `upper right` instead of
+  the default `lower left` (its lower-left corner covers real CA cities
+  like Weed at this zoom, not empty ocean the way Columbia Basin/
+  Portland's does). Center point, zoom, and city roster all moved several
+  times during development -- treat anything above as current-as-of-
+  last-edit, not permanent.
 
 ## City label placement
 
@@ -143,7 +142,7 @@ bash setup.sh                              # first time / fresh environment only
 python3 fetch_alerts.py                    # refresh live alerts (every region reads this)
 python3 build_map.py --region columbia_basin
 python3 build_map.py --region portland
-python3 build_map.py --region pnw_wide     # preview only, see Regions above
+python3 build_map.py --region pnw_wide
 ```
 
 ## Notes

@@ -210,10 +210,9 @@ REGIONS = {
             ("Redmond", -121.1739, 44.2726, "right"),
         ],
     ),
-    # PREVIEW ONLY -- lon_span/lat_span/satellite_height are overridden here
-    # since this region is a fundamentally different (much wider) zoom than
-    # Columbia Basin/Portland's shared true-zoom-level setup, not a variant
-    # of it.
+    # lon_span/lat_span/satellite_height are overridden here since this
+    # region is a fundamentally different (much wider) zoom than Columbia
+    # Basin/Portland's shared true-zoom-level setup, not a variant of it.
     "pnw_wide": dict(
         title="Pacific Northwest + Adjacent Areas",
         center_lon=-119.3, center_lat=44.9,
@@ -222,7 +221,7 @@ REGIONS = {
         roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads.geojson",
                      "nevada_roads_north.geojson", "montana_roads_west.geojson",
                      "california_roads_north.geojson", "utah_roads_northwest.geojson"],
-        output="pnw_wide_alerts_PREVIEW.png",
+        output="pnw_wide_alerts.png",
         cities=[
             ("Seattle", -122.3321, 47.6062, "left"),
             ("Bellingham", -122.4443, 48.7519, "left"),
