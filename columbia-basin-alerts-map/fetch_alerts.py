@@ -14,8 +14,15 @@ HEADERS = {"User-Agent": "(ingallswx.com, contact@ingallswx.com)"}
 # fetched, only AREA does, so a state left out here always renders
 # alert-free in that region regardless of what's actually active there
 # (this bit columbia_basin's Idaho panhandle sliver earlier; pnw_wide's
-# much wider extent now reaches CA/NV/MT/UT the same way).
-AREA = "OR,WA,ID,CA,NV,MT,UT"
+# much wider extent now reaches CA/NV/MT/UT the same way). Marine zones
+# (Small Craft Advisory, Gale Warning, Special Marine Warning, etc.) are a
+# separate case: NWS doesn't file them under a coastal state's own area
+# code at all, only under its own marine area code -- "PZ" covers coastal
+# and offshore Pacific waters from Point Arena, CA to the Canadian border,
+# which is the whole OR/WA coast plus the Strait of Juan de Fuca that
+# Portland's and pnw_wide's extents reach. Without PZ here, marine alerts
+# always render as "none active" regardless of what's actually posted.
+AREA = "OR,WA,ID,CA,NV,MT,UT,PZ"
 
 STATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state")
 ZONE_CACHE_FILE = os.path.join(STATE_DIR, "zone_geometry_cache.json")

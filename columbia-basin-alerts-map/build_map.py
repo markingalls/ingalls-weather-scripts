@@ -93,8 +93,11 @@ EDGE_OVERRIDE = {
 # way as a zone-based hazard reads as if the whole zone is under threat,
 # when the real warning is just the polygon's boundary. Drawn as an
 # outlined boundary line instead of a fill; see the "polygon warnings"
-# section of build_map().
-POLYGON_WARNING_EVENTS = {"Severe Thunderstorm Warning", "Tornado Warning", "Flash Flood Warning"}
+# section of build_map(). Special Marine Warning is the marine equivalent
+# of Severe Thunderstorm Warning -- same short-fused, forecaster-drawn
+# polygon product, just issued over water instead of land.
+POLYGON_WARNING_EVENTS = {"Severe Thunderstorm Warning", "Tornado Warning", "Flash Flood Warning",
+                           "Special Marine Warning"}
 
 MAPS_DIR = "../maps"
 
@@ -201,7 +204,7 @@ REGIONS = {
             ("Centralia", -122.9543, 46.7162, "left"),
             ("The Dalles", -121.1787, 45.5946, "right"),
             ("Hood River", -121.5215, 45.7054, "right"),
-            ("Government Camp", -121.7550, 45.3021, "below-right"),
+            ("Government Camp", -121.7550, 45.3021, "right"),
             ("Packwood", -121.6733, 46.6088, "right"),
             ("Bend", -121.3153, 44.0582, "right"),
             ("Redmond", -121.1739, 44.2726, "right"),
@@ -232,7 +235,8 @@ REGIONS = {
             ("Wenatchee", -120.3103, 47.4235, "right"),
             ("Yakima", -120.5059, 46.6021, "left"),
             ("Tri-Cities", -119.1372, 46.2112, "right"),
-            ("Portland", -122.6765, 45.5152, "below-left"),
+            ("Portland", -122.6765, 45.5152, "right"),
+            ("Astoria", -123.8313, 46.1879, "left"),
             ("Eugene", -123.0868, 44.0521, "left"),
             ("Medford", -122.8756, 42.3265, "left"),
             ("Weed", -122.3861, 41.4227, "left"),
