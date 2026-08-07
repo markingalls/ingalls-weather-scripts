@@ -223,7 +223,12 @@ REGIONS = {
         cities=[
             ("Seattle", -122.3321, 47.6062, "left"),
             ("Bellingham", -122.4443, 48.7519, "left"),
-            ("Spokane", -117.4260, 47.6588, "below-right"),
+            # "left" specifically (not "right"/"below-right") so this stays
+            # clear of the upper-right legend regardless of how many rows
+            # it currently has -- the legend's row count varies with how
+            # many alert types are active, so a position that only clears
+            # it at one particular row count isn't reliable.
+            ("Spokane", -117.4260, 47.6588, "left"),
             ("Wenatchee", -120.3103, 47.4235, "right"),
             ("Yakima", -120.5059, 46.6021, "left"),
             ("Tri-Cities", -119.1372, 46.2112, "right"),
