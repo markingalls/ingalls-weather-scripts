@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import matplotlib
 matplotlib.use("Agg")
@@ -198,40 +199,37 @@ REGIONS = {
             ("Redmond", -121.1739, 44.2726, "right"),
         ],
     ),
-    # PREVIEW ONLY -- California roads aren't pulled in yet (full-state CA
-    # OSM extract is ~1.3GB, so it's a real download-time decision, not a
-    # rendering one) -- city markers for Redding/Eureka are included with
-    # no road lines under them so the actual visible extent is easy to
-    # judge before deciding how far south into CA to go. lon_span/lat_span/
-    # satellite_height are overridden here since this region is a
-    # fundamentally different (much wider) zoom than Columbia Basin/
-    # Portland's shared true-zoom-level setup, not a variant of it.
+    # PREVIEW ONLY -- lon_span/lat_span/satellite_height are overridden here
+    # since this region is a fundamentally different (much wider) zoom than
+    # Columbia Basin/Portland's shared true-zoom-level setup, not a variant
+    # of it.
     "pnw_wide": dict(
         title="Pacific Northwest + Adjacent Areas",
-        center_lon=-119.3, center_lat=45.6,
+        center_lon=-119.3, center_lat=44.9,
         lon_span=13.0, lat_span=8.8, satellite_height=22_000_000,
         legend_loc="upper right",
         roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads.geojson",
-                     "nevada_roads_north.geojson", "montana_roads_west.geojson"],
+                     "nevada_roads_north.geojson", "montana_roads_west.geojson",
+                     "california_roads_north.geojson"],
         output="pnw_wide_alerts_PREVIEW.png",
-        # West-side (WA/OR coastal) cities trimmed to just the two anchors
-        # (Seattle, Portland) -- Columbia Basin/Portland already cover that
-        # cluster in detail, so this wider map doesn't need to repeat it.
         cities=[
             ("Seattle", -122.3321, 47.6062, "left"),
-            ("Spokane", -117.4260, 47.6588, "left"),
-            ("Yakima", -120.5059, 46.6021, "right"),
+            ("Bellingham", -122.4443, 48.7519, "left"),
+            ("Spokane", -117.4260, 47.6588, "below-right"),
             ("Wenatchee", -120.3103, 47.4235, "right"),
-            ("Walla Walla", -118.3430, 46.0646, "right"),
+            ("Yakima", -120.5059, 46.6021, "left"),
+            ("Tri-Cities", -119.1372, 46.2112, "right"),
             ("Portland", -122.6765, 45.5152, "below-left"),
+            ("Eugene", -123.0868, 44.0521, "left"),
+            ("Medford", -122.8756, 42.3265, "left"),
             ("Bend", -121.3153, 44.0582, "right"),
             ("Klamath Falls", -121.7817, 42.2249, "right"),
-            ("Pendleton", -118.7879, 45.6721, "right"),
+            ("John Day", -118.9490, 44.4165, "right"),
+            ("Burns", -119.0541, 43.5865, "right"),
             ("Boise", -116.2023, 43.6150, "right"),
-            ("Coeur d'Alene", -116.7805, 47.6777, "right"),
             ("Twin Falls", -114.4609, 42.5629, "right"),
+            ("Lewiston", -117.0177, 46.4165, "right"),
             ("Missoula", -113.9940, 46.8721, "right"),
-            ("Kalispell", -114.3129, 48.1958, "below-left"),
         ],
     ),
 }
@@ -271,6 +269,53 @@ def trim_offshore_segments(geom, land_union, threshold):
                 if len(run) >= 2:
                     kept.append(LineString(run))
                 run = []
+        if len(run) >= 2:
+            kept.append(LineString(run))
+    return kept
+
+
+# Longest legitimate segment length seen in admin1_boundary_lines.json's
+# TIGER-derived state lines is ~1.6 degrees; countries_slim.json's country
+# borders, by contrast, have several segments over-simplified down to a
+# single straight run of 3 to 27+ degrees (e.g. the entire WA-to-Minnesota
+# stretch of the 49th parallel collapsed to one 27.6-degree segment) --
+# those don't track the real border and show up as a stray straight line
+# cutting across more detailed layers once a region's extent is wide
+# enough to reach them. 3 degrees sits comfortably above any real
+# simplification grain seen in either file and well below the degenerate
+# ones.
+MAX_BORDER_SEGMENT_DEG = 3.0
+
+
+def drop_long_segments(geom, max_len):
+    """Split polygon/line boundary rings on any segment longer than
+    max_len, dropping it -- see MAX_BORDER_SEGMENT_DEG above. Safe for any
+    outline-only (facecolor="none") layer since there's no fill to
+    preserve, only the traced border."""
+    if geom.geom_type == "MultiPolygon":
+        rings = []
+        for poly in geom.geoms:
+            rings.append(poly.exterior)
+            rings.extend(poly.interiors)
+    elif geom.geom_type == "Polygon":
+        rings = [geom.exterior] + list(geom.interiors)
+    elif geom.geom_type == "MultiLineString":
+        rings = list(geom.geoms)
+    elif geom.geom_type == "LineString":
+        rings = [geom]
+    else:
+        return []
+    kept = []
+    for ring in rings:
+        run = []
+        for x, y in ring.coords:
+            if run:
+                px, py = run[-1]
+                if math.hypot(x - px, y - py) > max_len:
+                    if len(run) >= 2:
+                        kept.append(LineString(run))
+                    run = []
+            run.append((x, y))
         if len(run) >= 2:
             kept.append(LineString(run))
     return kept
@@ -349,7 +394,7 @@ def build_map(region_key, alerts_path, output_path):
         props = f["properties"]
         name = props.get("NAME") or props.get("ADMIN") or props.get("name")
         if name in target_names:
-            c_geoms.append(shape(f["geometry"]))
+            c_geoms.extend(drop_long_segments(shape(f["geometry"]), MAX_BORDER_SEGMENT_DEG))
     ax.add_geometries(c_geoms, crs=pc, facecolor="none", edgecolor="#9a978c",
                        linewidth=1.1, zorder=2)
 
