@@ -4,15 +4,22 @@ Generates a styled map of active NWS weather alerts for one of several
 regions -- originally built just for the Columbia Basin (North Bend, WA to
 Baker City, OR corridor) for Ingalls Weather's Instagram, now also
 deployed live on the site for a Portland Metro variant at the same true
-zoom level, using live NWS data plus a pre-built local basemap.
+zoom level, plus a much wider Pacific Northwest + adjacent-states preview,
+using live NWS data plus a pre-built local basemap.
 
 ## Files
 
 - `fetch_alerts.py` — pulls current active alerts + zone geometries from
-  the NWS API for OR/WA/ID and writes `alerts_with_zones.json`. Every
-  region currently defined pulls from this same query, so one fetch serves
-  all of them -- run this first, any time you want the map(s) to reflect
-  right-now conditions.
+  the NWS API for `AREA` (currently `OR,WA,ID,CA,NV,MT,UT` -- every state
+  any region's extent reaches into, however slightly) and writes
+  `alerts_with_zones.json`. Every region currently defined pulls from this
+  same query, so one fetch serves all of them -- run this first, any time
+  you want the map(s) to reflect right-now conditions. Zone geometries are
+  cached to disk (`state/zone_geometry_cache.json`, gitignored) across
+  runs, since zone boundaries are effectively static and re-fetching all
+  of them fresh every 5-minute cron tick doesn't scale once `AREA` covers
+  seven states worth of zones -- a cold cache run takes a few minutes, a
+  warm one finishes in seconds.
 - `build_map.py` — `REGIONS` dict registry (extent, center point, city
   labels, roads files, title, output filename) plus `build_map(region_key,
   alerts_path, output_path)`, which renders one region using
@@ -22,16 +29,22 @@ zoom level, using live NWS data plus a pre-built local basemap.
   atomically publishes every region in `REGIONS`. One region failing
   doesn't stop the others.
 - `requirements.txt` / `setup.sh` — Python + system dependencies
-  (cartopy needs GDAL, which only installs via apt, not pip).
+  (cartopy needs GDAL, which only installs via apt, not pip; osmium-tool
+  is also installed here for regenerating road data, see below).
 
 ## Regions
 
-Every region shares the same `LON_SPAN`/`LAT_SPAN` (degrees shown across
-the map) and `SATELLITE_HEIGHT` (the `NearsidePerspective` projection's
-actual zoom control) -- adding a region means picking a center point, not
-guessing a matching zoom level by eye. `region_extent()` derives each
-region's actual `[lon_min, lon_max, lat_min, lat_max]` from its center
-point at render time.
+Columbia Basin and Portland share the same `LON_SPAN`/`LAT_SPAN` (degrees
+shown across the map) and `SATELLITE_HEIGHT` (the `NearsidePerspective`
+projection's actual zoom control) -- adding one of *those* means picking a
+center point, not guessing a matching zoom level by eye. `region_extent()`
+derives each region's actual `[lon_min, lon_max, lat_min, lat_max]` from
+its center point at render time. A region can override `lon_span`/
+`lat_span`/`satellite_height` in its own `dict` entry (`build_map()` falls
+back to the shared globals when they're absent) for a fundamentally
+different zoom level -- `pnw_wide` does this since it's showing an area
+several times larger than Columbia Basin/Portland's shared true-zoom-level
+setup, not a variant of it.
 
 - **`columbia_basin`** — the original region. Center `(-119.75, 46.2)`,
   the same hand-tuned extent (`[-122.5, -117.0, 44.4, 48.0]`) this
@@ -44,19 +57,18 @@ point at render time.
   of on top of Newport/Lincoln City. About a quarter of the frame is open
   ocean at this zoom level given how close Portland sits to the coast --
   expected, not a bug.
-- **Planned, not built yet**: a wider "Washington + Oregon + adjacent
-  areas" region. It'll need its own city list tuned for a much larger
-  area, and likely more roads coverage than
-  `washington_roads.geojson`/`oregon_roads.geojson`/
-  `idaho_roads_north.geojson` currently provide -- southern OR below
-  ~44°N is clipped out of `oregon_roads.geojson`, and there's no CA/NV/BC
-  roads data at all yet, depending on how far "adjacent" ends up
-  reaching. (Checked while adding the Portland region: contrary to an
-  initial assumption, the *existing* road files are **not** clipped to
-  the Columbia Basin corridor -- they already cover their full home
-  states, e.g. `oregon_roads.geojson` already has dense Portland-area
-  coverage. The wide region's gap is specifically the area *outside*
-  WA/OR/north-ID, not anything within them.)
+- **`pnw_wide`** — **PREVIEW, not deployed** (output is tagged
+  `_PREVIEW.png` and it isn't in any droplet crontab). Washington, Oregon,
+  and Idaho in full, plus slivers of northern California, northern
+  Nevada, western Montana, and the very NW corner of Utah wherever the
+  frame happens to reach. Center `(-119.3, 44.9)`, its own
+  `lon_span=13.0`/`lat_span=8.8`/`satellite_height=22_000_000`, legend
+  anchored `upper right` instead of the default `lower left` (its
+  lower-left corner covers real CA cities like Weed at this zoom, not
+  empty ocean the way Columbia Basin/Portland's does). Still settling --
+  center point, zoom, and city roster have all moved multiple times as
+  the map got iterated on; treat anything above as current-as-of-last-edit
+  rather than final.
 
 ## City label placement
 
@@ -72,7 +84,12 @@ labels from running together, and even then it read as busy. The 8-way
 system is still there in the code for whichever region needs it next.
 Government Camp, added on the map's southeast corner near the Mt. Hood
 highway, uses `below-right` to stay clear of Hood River's label to its
-north.
+north. On `pnw_wide`, Spokane specifically uses `left` rather than
+anything on the right side -- it sits close enough to the upper-right
+legend that a position tuned to clear one particular legend row count
+(e.g. exactly 4 active alert types) gets clipped by a taller one (5+
+types, still under the size-halving threshold); `left` is robust to the
+legend's height varying with the day's alert count instead.
 
 ## Shared basemap data
 
@@ -88,22 +105,30 @@ Lives one level up in [`../maps/`](../maps/) so other scripts can reuse it:
 - `states_lakes_slim.json` — used only for its lake polygons here (the
   white-filled lakes); state outlines come from `admin1_boundary_lines.json`
   instead, see above.
-- `counties_wa_or_id.geojson` — county boundaries for WA/OR/ID.
-- `washington_roads.geojson`, `oregon_roads.geojson`,
-  `idaho_roads_north.geojson` — motorway/trunk/primary road geometry, full
-  home-state coverage for OR/WA (Idaho covers everything north of
-  McCall). Not region-specific -- `cfg["roads_files"]` picks which of
-  these each region actually loads (Portland skips Idaho's, since its
-  extent never reaches that far east). Regenerated from fresh Geofabrik
-  OR/WA/ID `.osm.pbf` extracts (`osmium tags-filter` on
-  `highway=motorway,motorway_link,trunk,trunk_link,primary,primary_link`,
-  then `osmium export` to GeoJSON) after discovering the original files
-  only ever had `motorway`/`trunk` tags -- `primary` didn't exist in the
-  data at all, so highways tagged that way in OSM (US-26 through
-  Government Camp, US-97 through Bend/Redmond, most of the Willamette
-  Valley's north-south highways) were structurally missing, not just
-  filtered out at render time. `build_map.py` draws `primary` in its own
-  color, one step duller than `trunk`.
+- `counties_wa_or_id.geojson` — county boundaries for WA/OR/ID only, not
+  used at all for the CA/NV/MT/UT slivers `pnw_wide` shows -- those areas
+  just have no county-line overlay, which is a cosmetic gap, not a bug
+  (alert zone shapes come from NWS directly, unaffected by this file).
+- `washington_roads.geojson`, `oregon_roads.geojson`, `idaho_roads.geojson`
+  (full state), `idaho_roads_north.geojson` (older north-of-McCall-only
+  clip, still used by `columbia_basin`/`portland`), `california_roads_
+  north.geojson` (north of Redding), `nevada_roads_north.geojson`,
+  `montana_roads_west.geojson`, `utah_roads_northwest.geojson` — all
+  motorway/trunk/primary road geometry (`_link` variants of each too),
+  generated the same way: a Geofabrik `<state>.osm.pbf` extract, `osmium
+  tags-filter` on `highway=motorway,motorway_link,trunk,trunk_link,
+  primary,primary_link`, then `osmium export` to GeoJSON, clipped down to
+  whatever sliver of a large adjacent state a region's extent actually
+  needs (full-state CA is ~1.3GB unclipped -- always filter by tag *and*
+  clip geographically before committing a new state's roads here). Not
+  region-specific -- `cfg["roads_files"]` picks which files each region
+  actually loads. The OR/WA/ID files were regenerated from the originals
+  after discovering they only ever had `motorway`/`trunk` tags --
+  `primary` didn't exist in the data at all, so highways tagged that way
+  in OSM (US-26 through Government Camp, US-97 through Bend/Redmond, most
+  of the Willamette Valley's north-south highways) were structurally
+  missing, not just filtered out at render time. `build_map.py` draws
+  `primary` in its own color, one step duller than `trunk`.
 
 The Ingalls Weather logo (placed bottom-right on the map) lives in
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
@@ -115,9 +140,10 @@ relative to it):
 
 ```bash
 bash setup.sh                              # first time / fresh environment only
-python3 fetch_alerts.py                    # refresh live alerts (both regions read this)
+python3 fetch_alerts.py                    # refresh live alerts (every region reads this)
 python3 build_map.py --region columbia_basin
 python3 build_map.py --region portland
+python3 build_map.py --region pnw_wide     # preview only, see Regions above
 ```
 
 ## Notes
@@ -129,7 +155,7 @@ python3 build_map.py --region portland
   Warning, etc.) are colored automatically without edits.
 - The legend/subtitle for a given region only reflect alert types with at
   least one zone actually inside *that region's* extent — NWS returns
-  every active alert for the whole OR/WA/ID query, most of which sit outside
+  every active alert for the whole `AREA` query, most of which sit outside
   whatever domain a given region is currently showing.
 - Duplicate NWS products covering the exact same zone (this happens
   sometimes) are deduped so they don't double-stack shading.
@@ -142,3 +168,31 @@ python3 build_map.py --region portland
   borders, so the whole feature's minimum distance from land is 0 and a
   whole-feature filter alone doesn't catch it -- `trim_offshore_segments()`
   splits on per-vertex distance instead, keeping only the near-land runs.
+- `countries_slim.json`'s own US/Canada/Mexico border lines have a
+  similar but distinct problem: several stretches are over-simplified
+  down to a single straight segment several degrees long (worst case: the
+  entire WA-to-Minnesota run of the 49th parallel collapsed to one
+  27.6-degree segment) that cuts straight across the much more detailed
+  `admin1_boundary_lines.json` line underneath once a region's extent is
+  wide enough to actually see it -- invisible at Columbia Basin/Portland's
+  zoom, glaring on `pnw_wide`. `drop_long_segments()` splits on segment
+  length (anything over `MAX_BORDER_SEGMENT_DEG` = 3 degrees, well above
+  any real simplification grain seen in either file) the same way
+  `trim_offshore_segments()` splits on distance -- both are safe on any
+  outline-only (`facecolor="none"`) layer since there's no fill to
+  preserve, only the traced line.
+- Severe Thunderstorm/Tornado/Flash Flood Warnings are NWS's polygon-type
+  products -- literal storm-tracking polygons, not tied to county/zone
+  boundaries the way every other product here is. `POLYGON_WARNING_EVENTS`
+  pulls them out of the normal shaded/candy-stripe-overlap treatment and
+  draws them instead as a colored line with a black outline, on top of
+  everything else, so a short-fused warning reads as "this exact path,"
+  not "this whole county." The legend shows a colored line for these
+  instead of a filled swatch to match.
+- More than 5 alert types active at once roughly halves the legend's
+  font/handle/spacing so it still fits without spilling off the map. If
+  editing this: `fig.legend(..., prop=X, fontsize=Y)` silently ignores
+  `fontsize` whenever `prop` is also a `FontProperties` instance --
+  matplotlib only falls back to `fontsize` when `prop` is `None` -- so the
+  size has to be set via `X.copy().set_size(Y)` on the `FontProperties`
+  itself instead.
