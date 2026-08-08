@@ -51,7 +51,9 @@ columbia-basin-temps/output/*.png
 850-700-temp-chart/wm6_ensemble_spread*.png
 
 # --- hrrr-smoke-chart ---
-# smoke.json is live data fetch_smoke.py regenerates every run, and the
-# rendered chart is an output too -- neither is source, so don't track them.
-hrrr-smoke-chart/smoke.json
+# smoke*.json (default smoke.json, plus any one-off --output like
+# smoke_walla_walla.json) is live data fetch_smoke.py regenerates every
+# run, and the rendered chart is an output too -- neither is source, so
+# don't track them.
+hrrr-smoke-chart/smoke*.json
 hrrr-smoke-chart/hrrr_*_smoke_*.png
