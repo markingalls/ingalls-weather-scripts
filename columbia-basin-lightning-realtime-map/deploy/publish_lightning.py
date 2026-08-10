@@ -9,7 +9,7 @@ others, same pattern as every other publish script in this repo.
 Scheduled every 5 minutes (see deploy/crontab.example) -- lightning has
 no fixed issuance schedule to align to, so like columbia-basin-alerts-map
 this is just a reasonable polling interval, not a cycle time. Tighter
-than the 24-hour companion project's 10-minute cadence since this is the
+than the 24-hour companion project's 15-minute cadence since this is the
 real-time product.
 
 An flock-based lock means an overlapping cron tick (e.g. a slow run still

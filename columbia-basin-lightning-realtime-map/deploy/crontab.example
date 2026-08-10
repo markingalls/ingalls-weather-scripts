@@ -4,7 +4,7 @@
 #
 # Every 5 minutes -- lightning has no fixed issuance schedule to align
 # to, so like columbia-basin-alerts-map this is a polling interval, not a
-# cycle time. Tighter than the 24-hour companion project's 10-minute
+# cycle time. Tighter than the 24-hour companion project's 15-minute
 # cadence since this is the real-time product.
 
 */5 * * * * /opt/ingalls-weather-scripts/columbia-basin-lightning-realtime-map/venv/bin/python3 /opt/ingalls-weather-scripts/columbia-basin-lightning-realtime-map/deploy/publish_lightning.py >> /opt/ingalls-weather-scripts/columbia-basin-lightning-realtime-map/state/cron.log 2>&1
