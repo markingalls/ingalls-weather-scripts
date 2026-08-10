@@ -1,0 +1,13 @@
+# Add this line to the droplet's existing crontab (crontab -e) alongside
+# everything else already there. No API key needed -- GOES-18 GLM data on
+# AWS Open Data is unauthenticated.
+#
+# Hourly, not "once right after midnight Pacific" -- publish_daily.py is
+# idempotent per Pacific calendar date (tracks the last date it rotated
+# for in state/last_rotation_date.txt), so running it hourly means
+# whichever tick is first to land after midnight PT does that day's
+# rotation+fetch+render, and every other tick that day is a fast no-op.
+# This sidesteps needing a DST-aware UTC cron time to stay "shortly after
+# midnight PT" year-round.
+
+15 * * * * /opt/ingalls-weather-scripts/columbia-basin-lightning-daily-map/venv/bin/python3 /opt/ingalls-weather-scripts/columbia-basin-lightning-daily-map/deploy/publish_daily.py >> /opt/ingalls-weather-scripts/columbia-basin-lightning-daily-map/state/cron.log 2>&1

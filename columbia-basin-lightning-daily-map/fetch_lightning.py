@@ -1,21 +1,16 @@
 """
-Pulls the last 2 hours of GOES-18 (GOES-West) GLM flash-level lightning
-detections over a domain spanning all four regions in build_map.py's
-REGIONS (Columbia Basin, Portland, Pacific NW, BC Interior) and writes
-lightning_last2h.json. Run this before build_map.py any time you want the
-map(s) to reflect right-now conditions instead of a stale snapshot -- this
-is the real-time companion to ../columbia-basin-lightning-map (24-hour
-lookback); see that project's fetch_lightning.py for the fuller write-up
-of the data source.
+Pulls a full Pacific-time calendar day of GOES-18 (GOES-West) GLM
+flash-level lightning detections over a domain spanning all four regions
+in build_map.py's REGIONS (Columbia Basin, Portland, Pacific NW, BC
+Interior) and writes lightning_daily.json. Defaults to yesterday (PT) --
+see deploy/publish_daily.py for how this fits into the 5-day rotating
+archive. Companion to ../columbia-basin-lightning-map (24h) and
+../columbia-basin-lightning-realtime-map (2h); see the 24h project's
+fetch_lightning.py for the fuller write-up of the GLM data source itself.
 
 Source: NOAA's public "noaa-goes18" bucket on AWS Open Data
 (GLM-L2-LCFA product), read anonymously -- no API key or AWS account
-needed. GLM-L2-LCFA files are produced every 20 seconds (~360 in a
-2-hour window); flash centroid lat/lon/energy are already provided in
-each file, so no satellite-projection math is needed. Widening the bbox
-to cover all four regions doesn't add fetch cost: file listing/download
-is purely a function of the time window (GOES covers the full disk in
-every file), not the bbox.
+needed.
 """
 import argparse
 import json
@@ -33,7 +28,6 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 
 BUCKET = "noaa-goes18"  # GOES-18 is the current operational GOES-West satellite
 PRODUCT = "GLM-L2-LCFA"
-LOOKBACK_HOURS = 2
 
 # Union of all four REGIONS extents in build_map.py (columbia_basin,
 # portland, pnw, bc_interior), padded a bit so flashes right at any
@@ -109,14 +103,18 @@ def extract_flashes(key, blob):
     return records
 
 
-def fetch_recent(end=None):
-    s3 = boto3.client("s3", config=Config(signature_version=UNSIGNED, max_pool_connections=32))
-    if end is None:
-        end = datetime.now(timezone.utc)
-    start = end - timedelta(hours=LOOKBACK_HOURS)
+def fetch_pt_day(pt_date):
+    """pt_date: a date object -- the Pacific-time calendar day to fetch,
+    midnight to midnight. Returns (records, start_utc, end_utc, pt_date)."""
+    start_pt = datetime.combine(pt_date, datetime.min.time(), tzinfo=PACIFIC)
+    end_pt = start_pt + timedelta(days=1)
+    start = start_pt.astimezone(timezone.utc)
+    end = end_pt.astimezone(timezone.utc)
 
+    s3 = boto3.client("s3", config=Config(signature_version=UNSIGNED, max_pool_connections=32))
     keys = list_keys_in_window(s3, start, end)
-    print(f"Found {len(keys)} GLM-L2-LCFA files between {start.isoformat()} and {end.isoformat()}")
+    print(f"Found {len(keys)} GLM-L2-LCFA files for {pt_date.isoformat()} PT "
+          f"({start.isoformat()} to {end.isoformat()} UTC)")
 
     with ThreadPoolExecutor(max_workers=24) as ex:
         blobs = list(ex.map(lambda k: download(s3, k), keys))
@@ -130,34 +128,27 @@ def fetch_recent(end=None):
     return records, start, end
 
 
-def parse_end_pt(value):
-    """Accepts 'HH:MM' (assumed to be today, Pacific time) or
-    'YYYY-MM-DD HH:MM' (Pacific time)."""
-    try:
-        naive = datetime.strptime(value, "%Y-%m-%d %H:%M")
-    except ValueError:
-        today_pt = datetime.now(PACIFIC).date()
-        naive = datetime.combine(today_pt, datetime.strptime(value, "%H:%M").time())
-    return naive.replace(tzinfo=PACIFIC)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--end-pt",
-                         help="End of the 2-hour lookback window, Pacific time -- "
-                              "'HH:MM' (today) or 'YYYY-MM-DD HH:MM'. Defaults to now "
-                              "(real-time use should just omit this).")
+    parser.add_argument("--pt-date",
+                         help="Pacific-time calendar day to fetch, YYYY-MM-DD. "
+                              "Defaults to yesterday (PT).")
     args = parser.parse_args()
 
-    end = parse_end_pt(args.end_pt).astimezone(timezone.utc) if args.end_pt else None
-    records, start, end = fetch_recent(end=end)
+    if args.pt_date:
+        pt_date = datetime.strptime(args.pt_date, "%Y-%m-%d").date()
+    else:
+        pt_date = (datetime.now(PACIFIC) - timedelta(days=1)).date()
+
+    records, start, end = fetch_pt_day(pt_date)
     print(f"Flashes within the combined domain: {len(records)}")
     out = {
+        "pt_date": pt_date.isoformat(),
         "window_start": start.isoformat(),
         "window_end": end.isoformat(),
         "satellite": "GOES-18 (GOES-West)",
         "product": PRODUCT,
         "flashes": records,
     }
-    json.dump(out, open("lightning_last2h.json", "w"))
-    print("Saved lightning_last2h.json")
+    json.dump(out, open("lightning_daily.json", "w"))
+    print("Saved lightning_daily.json")

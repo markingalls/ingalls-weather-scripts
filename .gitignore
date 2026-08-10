@@ -55,15 +55,28 @@ columbia-basin-temps/output/*.png
 
 # --- columbia-basin-lightning-map ---
 # lightning_last24h.json is live data fetch_lightning.py regenerates every
-# run, and the rendered map image is an output too -- neither is source, so
-# don't track them.
+# run, and the rendered map images (one per REGIONS entry: Columbia Basin,
+# Portland, Pacific NW, BC Interior) are outputs too -- neither is source,
+# so don't track them.
 columbia-basin-lightning-map/lightning_last24h.json
-columbia-basin-lightning-map/columbia_basin_lightning*.png
+columbia-basin-lightning-map/*_lightning.png
 
 # --- columbia-basin-lightning-realtime-map ---
 # same reasoning as columbia-basin-lightning-map above.
 columbia-basin-lightning-realtime-map/lightning_last2h.json
-columbia-basin-lightning-realtime-map/columbia_basin_lightning_realtime*.png
+columbia-basin-lightning-realtime-map/*_lightning_realtime.png
+
+# --- columbia-basin-lightning-daily-map ---
+# lightning_daily.json is live data fetch_lightning.py regenerates every
+# run. The published day1-5 images normally live on the droplet's
+# WEB_ROOT, not here, but a local test run writes them next to this repo
+# checkout -- neither is source, so don't track them. state/ is the
+# droplet-deploy guard's runtime state (lock file, logs, and the
+# last-rotation-date marker publish_daily.py's idempotency depends on) --
+# created on the server, not source.
+columbia-basin-lightning-daily-map/lightning_daily.json
+columbia-basin-lightning-daily-map/*_lightning_day*.png
+columbia-basin-lightning-daily-map/state/
 
 # --- dew-point-storm-map ---
 # build_map.py fetches its source grids live; output/ only holds saved

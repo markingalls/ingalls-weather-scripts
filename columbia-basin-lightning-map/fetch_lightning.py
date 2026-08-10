@@ -1,14 +1,21 @@
 """
 Pulls the last 24 hours of GOES-18 (GOES-West) GLM flash-level lightning
-detections over the Columbia Basin and writes lightning_last24h.json. Run
-this before build_map.py any time you want the map to reflect right-now
-conditions instead of a stale snapshot.
+detections over a domain spanning all four regions in build_map.py's
+REGIONS (Columbia Basin, Portland, Pacific NW, BC Interior) and writes
+lightning_last24h.json. Run this before build_map.py any time you want
+the map(s) to reflect right-now conditions instead of a stale snapshot.
+build_map.py filters down to each region's own (tighter) extent at render
+time, the same way columbia-basin-alerts-map's fetch_alerts.py does one
+shared fetch that every region then crops.
 
 Source: NOAA's public "noaa-goes18" bucket on AWS Open Data
 (GLM-L2-LCFA product), read anonymously -- no API key or AWS account
 needed. GLM-L2-LCFA files are produced every 20 seconds (~4,320/day);
 flash centroid lat/lon/energy are already provided in each file, so no
-satellite-projection math is needed.
+satellite-projection math is needed. Widening the bbox to cover all four
+regions doesn't add fetch cost: file listing/download is purely a
+function of the time window (GOES covers the full disk in every file),
+not the bbox -- only the cheap post-download numpy mask scales with area.
 """
 import argparse
 import json
@@ -28,11 +35,14 @@ BUCKET = "noaa-goes18"  # GOES-18 is the current operational GOES-West satellite
 PRODUCT = "GLM-L2-LCFA"
 LOOKBACK_HOURS = 24
 
-# Same domain as ../columbia-basin-alerts-map and ../columbia-basin-temps,
-# padded a bit so flashes right at the map edge aren't dropped pre-plot.
+# Union of all four REGIONS extents in build_map.py (columbia_basin,
+# portland, pnw, bc_interior), padded a bit so flashes right at any
+# region's map edge aren't dropped pre-plot. pnw is the widest and
+# dominates most of this box; bc_interior pushes the northern edge up
+# past what pnw alone would need.
 BBOX_PAD = 0.5
-LON_MIN, LON_MAX = -122.5 - BBOX_PAD, -117.0 + BBOX_PAD
-LAT_MIN, LAT_MAX = 44.4 - BBOX_PAD, 48.0 + BBOX_PAD
+LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -112.8 + BBOX_PAD
+LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 52.47 + BBOX_PAD
 
 
 def hour_prefixes(start, end):
@@ -141,7 +151,7 @@ if __name__ == "__main__":
 
     end = parse_end_pt(args.end_pt).astimezone(timezone.utc) if args.end_pt else None
     records, start, end = fetch_last_24h(end=end)
-    print(f"Flashes within the Columbia Basin domain: {len(records)}")
+    print(f"Flashes within the combined domain: {len(records)}")
     out = {
         "window_start": start.isoformat(),
         "window_end": end.isoformat(),

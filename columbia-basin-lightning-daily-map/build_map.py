@@ -19,23 +19,11 @@ f_bold = fm.FontProperties(fname=FONT_DIR + "Poppins-Bold.ttf")
 f_reg = fm.FontProperties(fname=FONT_DIR + "Poppins-Regular.ttf")
 f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
 
-# ---------- recency bands ----------
-# (max_age_hours, label, color) -- newest first. Colors follow the common
-# lightning-tracker convention: hot/bright for very recent, fading to pale
-# for older strikes, drawn oldest-first so recent strikes sit on top.
-AGE_BANDS = [
-    (1, "Last hour", "#FF1E56"),
-    (6, "1-6 hours ago", "#FF8C00"),
-    (24, "6-24 hours ago", "#FFD84D"),
-]
-
-
-def band_for_age(age_hours):
-    for max_age, label, color in AGE_BANDS:
-        if age_hours <= max_age:
-            return label, color
-    return AGE_BANDS[-1][1], AGE_BANDS[-1][2]
-
+# A full archived day has no meaningful "how recent" axis the way the 2h/
+# 24h maps do (every flash on the map is equally "that day"), so this is
+# a single style, not age bands like the other two lightning projects.
+FLASH_COLOR = "#8B2FC9"
+FLASH_LABEL = "Lightning flash"
 
 MAPS_DIR = "../maps"
 
@@ -129,7 +117,7 @@ REGIONS = {
     "columbia_basin": dict(
         center_lon=-119.75, center_lat=46.2,
         roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"],
-        output="columbia_basin_lightning.png",
+        output_base="columbia_basin_lightning",
         cities=[
             ("Spokane", -117.4260, 47.6588, "left"),
             ("Seattle", -122.3321, 47.6062, "right"),
@@ -160,7 +148,7 @@ REGIONS = {
         # and columbia-basin-alerts-map use for Portland.
         center_lon=-122.60917, center_lat=45.59578,
         roads_files=["washington_roads.geojson", "oregon_roads.geojson"],
-        output="portland_lightning.png",
+        output_base="portland_lightning",
         cities=[
             ("Portland", -122.6765, 45.5152, "right"),
             ("Vancouver", -122.6615, 45.6387, "right"),
@@ -197,7 +185,7 @@ REGIONS = {
         roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads.geojson",
                      "nevada_roads_north.geojson", "montana_roads_west.geojson",
                      "california_roads_north.geojson", "utah_roads_northwest.geojson"],
-        output="pnw_lightning.png",
+        output_base="pnw_lightning",
         cities=[
             ("Seattle", -122.3321, 47.6062, "left"),
             ("Bellingham", -122.4443, 48.7519, "left"),
@@ -228,7 +216,7 @@ REGIONS = {
     "bc_interior": dict(
         center_lon=-120.3273, center_lat=50.6745,
         roads_files=["british_columbia_roads.geojson"],
-        output="bc_interior_lightning.png",
+        output_base="bc_interior_lightning",
         cities=[
             ("Kamloops", -120.3273, 50.6745, "below"),
             ("Kelowna", -119.4960, 49.8880, "right"),
@@ -336,35 +324,24 @@ def build_map(region_key, lightning_path, output_path):
     # ---------- lightning flashes ----------
     data = json.load(open(lightning_path))
     flashes = data["flashes"]
-    window_end = datetime.fromisoformat(data["window_end"])
+    pt_date = data["pt_date"]
     extent_box_lons = (extent[0], extent[1])
     extent_box_lats = (extent[2], extent[3])
 
-    # Bucket by age band, then plot oldest band first so more recent
-    # strikes (drawn last) sit visually on top of older ones where they
-    # overlap. Flashes are filtered to this region's own extent here --
-    # the fetch step pulls one shared domain-spanning box, and individual
-    # regions crop tighter than that shared box.
-    buckets = {label: {"lons": [], "lats": []} for _, label, _ in AGE_BANDS}
+    # No age bands here (see FLASH_COLOR above) -- just filter to this
+    # region's own extent. The fetch step pulls one shared domain-spanning
+    # box, and individual regions crop tighter than that shared box.
+    lons, lats = [], []
     for flash in flashes:
         lon, lat = flash["lon"], flash["lat"]
-        if not (extent_box_lons[0] <= lon <= extent_box_lons[1] and
+        if (extent_box_lons[0] <= lon <= extent_box_lons[1] and
                 extent_box_lats[0] <= lat <= extent_box_lats[1]):
-            continue
-        flash_time = datetime.fromisoformat(flash["time"])
-        age_hours = (window_end - flash_time).total_seconds() / 3600.0
-        label, _ = band_for_age(age_hours)
-        buckets[label]["lons"].append(lon)
-        buckets[label]["lats"].append(lat)
+            lons.append(lon)
+            lats.append(lat)
 
-    total_in_region = sum(len(b["lons"]) for b in buckets.values())
-
-    for max_age, label, color in reversed(AGE_BANDS):
-        lons = buckets[label]["lons"]
-        lats = buckets[label]["lats"]
-        if not lons:
-            continue
-        ax.scatter(lons, lats, transform=pc, s=10, color=color, alpha=0.65,
+    total_in_region = len(lons)
+    if lons:
+        ax.scatter(lons, lats, transform=pc, s=10, color=FLASH_COLOR, alpha=0.55,
                    edgecolor="none", linewidths=0, zorder=7)
 
     # ---------- city labels ----------
@@ -425,17 +402,16 @@ def build_map(region_key, lightning_path, output_path):
     # ---------- title / subtitle ----------
     subtitle_y = top_y + 0.018
     title_y = subtitle_y + 0.035
-    fig.text(left_x, title_y, "Lightning (Last 24 Hours)",
+    pt_date_label = datetime.strptime(pt_date, "%Y-%m-%d").strftime("%B %-d, %Y")
+    fig.text(left_x, title_y, f"Lightning — {pt_date_label}",
               fontproperties=f_bold, fontsize=22, color="#2b2a26")
-    subtitle = (f"{total_in_region:,} flashes detected — GOES-18 GLM, "
-                f"{window_end.strftime('%b %d %H:%M UTC')} lookback")
+    subtitle = f"{total_in_region:,} flashes detected — GOES-18 GLM, full day (Pacific time)"
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 
     # ---------- legend ----------
     legend_handles = [
-        Line2D([0], [0], marker="o", color="none", markerfacecolor=color,
-               markeredgecolor="none", markersize=9, alpha=0.85, label=label)
-        for _, label, color in AGE_BANDS
+        Line2D([0], [0], marker="o", color="none", markerfacecolor=FLASH_COLOR,
+               markeredgecolor="none", markersize=9, alpha=0.85, label=FLASH_LABEL),
     ]
     legend_loc = cfg.get("legend_loc", "lower left")
     if legend_loc == "upper right":
@@ -460,10 +436,15 @@ def build_map(region_key, lightning_path, output_path):
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="Render a lightning (last 24 hours) map for one region.")
+    ap = argparse.ArgumentParser(
+        description="Render a lightning (full Pacific-time day) map for one region. "
+                     "Normally called by deploy/publish_daily.py, which manages the "
+                     "5-day rotation and picks the output filename -- this direct CLI "
+                     "form defaults to the day1 (yesterday) slot for manual testing.")
     ap.add_argument("--region", choices=sorted(REGIONS), default="columbia_basin")
-    ap.add_argument("--lightning", default="lightning_last24h.json")
+    ap.add_argument("--lightning", default="lightning_daily.json")
     ap.add_argument("--output", default=None,
-                     help="Output PNG path (default: REGIONS[region]['output'])")
+                     help="Output PNG path (default: REGIONS[region]['output_base'] + '_day1.png')")
     args = ap.parse_args()
-    build_map(args.region, args.lightning, args.output or REGIONS[args.region]["output"])
+    build_map(args.region, args.lightning,
+              args.output or f"{REGIONS[args.region]['output_base']}_day1.png")
