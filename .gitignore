@@ -57,14 +57,17 @@ columbia-basin-temps/output/*.png
 # lightning_last24h.json is live data fetch_lightning.py regenerates every
 # run, and the rendered map images (one per REGIONS entry: Columbia Basin,
 # Portland, Pacific NW, BC Interior) are outputs too -- neither is source,
-# so don't track them.
+# so don't track them. state/ is the droplet-deploy guard's runtime state
+# (lock file, logs) -- created on the server, not source.
 columbia-basin-lightning-map/lightning_last24h.json
 columbia-basin-lightning-map/*_lightning.png
+columbia-basin-lightning-map/state/
 
 # --- columbia-basin-lightning-realtime-map ---
 # same reasoning as columbia-basin-lightning-map above.
 columbia-basin-lightning-realtime-map/lightning_last2h.json
 columbia-basin-lightning-realtime-map/*_lightning_realtime.png
+columbia-basin-lightning-realtime-map/state/
 
 # --- columbia-basin-lightning-daily-map ---
 # lightning_daily.json is live data fetch_lightning.py regenerates every

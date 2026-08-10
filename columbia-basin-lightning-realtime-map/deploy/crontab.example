@@ -1,0 +1,10 @@
+# Add this line to the droplet's existing crontab (crontab -e) alongside
+# everything else already there. No API key needed -- GOES-18 GLM data on
+# AWS Open Data is unauthenticated.
+#
+# Every 5 minutes -- lightning has no fixed issuance schedule to align
+# to, so like columbia-basin-alerts-map this is a polling interval, not a
+# cycle time. Tighter than the 24-hour companion project's 10-minute
+# cadence since this is the real-time product.
+
+*/5 * * * * /opt/ingalls-weather-scripts/columbia-basin-lightning-realtime-map/venv/bin/python3 /opt/ingalls-weather-scripts/columbia-basin-lightning-realtime-map/deploy/publish_lightning.py >> /opt/ingalls-weather-scripts/columbia-basin-lightning-realtime-map/state/cron.log 2>&1

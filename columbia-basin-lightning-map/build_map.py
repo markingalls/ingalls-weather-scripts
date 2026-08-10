@@ -37,7 +37,15 @@ def band_for_age(age_hours):
     return AGE_BANDS[-1][1], AGE_BANDS[-1][2]
 
 
-MAPS_DIR = "../maps"
+# Absolute, derived from this file's own location -- not the process's
+# cwd at invocation time. A relative path here breaks under cron (which
+# starts with cwd set to the crontab user's home directory, not this
+# project's directory) even though it works fine for a manual run after
+# `cd`-ing into the project directory -- see columbia-basin-alerts-map/
+# build_map.py, where this was first found and fixed, for the full
+# writeup.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+MAPS_DIR = os.path.join(SCRIPT_DIR, "..", "maps")
 
 # Degrees shown across each map -- same for every "true zoom" region, so
 # adding one means picking a center point, not guessing a matching zoom
@@ -399,7 +407,7 @@ def build_map(region_key, lightning_path, output_path):
     center_x = (map_pos.x0 + map_pos.x1) / 2
 
     # ---------- logo (bottom-right, ~8% of map width, ~22px inset) ----------
-    LOGO_PATH = "../assets/ingalls_weather_logo.png"
+    LOGO_PATH = os.path.join(SCRIPT_DIR, "..", "assets", "ingalls_weather_logo.png")
     if os.path.exists(LOGO_PATH):
         logo_img = plt.imread(LOGO_PATH)
         img_h, img_w = logo_img.shape[0], logo_img.shape[1]
