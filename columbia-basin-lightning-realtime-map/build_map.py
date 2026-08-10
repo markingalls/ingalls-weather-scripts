@@ -298,6 +298,14 @@ def build_map(region_key, lightning_path, output_path):
     ax = fig.add_axes([0.04, 0.045, 0.92, 0.80], projection=proj)
     ax.set_facecolor("white")
     ax.set_extent(extent, crs=pc)
+    # cartopy expands the requested extent to match this fixed-aspect axes
+    # box when the two aspect ratios don't line up exactly (true for every
+    # region here, not just the custom-span ones) -- e.g. bc_interior's
+    # nominal 8.87-degree lon_span actually renders as ~9.95 degrees, about
+    # 0.54 degrees wider on each side. Flashes need to be filtered against
+    # this *actual* displayed box, not the nominal one, or real data within
+    # the visible frame gets silently dropped right at the edges.
+    actual_extent = ax.get_extent(crs=pc)
 
     # ---------- land ----------
     land = json.load(open(f"{MAPS_DIR}/land_slim.json"))
@@ -376,8 +384,8 @@ def build_map(region_key, lightning_path, output_path):
     data = json.load(open(lightning_path))
     flashes = data["flashes"]
     window_end = datetime.fromisoformat(data["window_end"])
-    extent_box_lons = (extent[0], extent[1])
-    extent_box_lats = (extent[2], extent[3])
+    extent_box_lons = (actual_extent[0], actual_extent[1])
+    extent_box_lats = (actual_extent[2], actual_extent[3])
 
     # Bucket by age band, then plot oldest band first so more recent
     # strikes (drawn last) sit visually on top of older ones where they

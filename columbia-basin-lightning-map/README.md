@@ -129,6 +129,20 @@ python3 build_map.py --region bc_interior
   `columbia-basin-alerts-map/fetch_alerts.py` -- so the fetched area and
   the rendered area are two different things by design, and the fetch is
   allowed to be the bigger of the two.
+- **Filter flashes to the *actual* displayed extent, not the nominal
+  one**: cartopy silently expands `ax.set_extent()`'s requested box to
+  match this fixed-aspect axes' pixel shape whenever the two aspect
+  ratios don't line up exactly -- true for every region here, not just
+  the custom-span ones (`bc_interior`'s nominal 8.87-degree `lon_span`
+  actually renders as ~9.95 degrees, about 0.54 degrees wider on each
+  side). `build_map.py` calls `ax.get_extent(crs=pc)` right after
+  `ax.set_extent()` and filters flashes against *that* box. Filtering
+  against the nominal `region_extent()` box instead (the original
+  approach) silently drops real, already-fetched flashes right at the
+  edges of the visible frame -- this was the actual cause of a "gap"
+  reported east of Nordegg that fine-grained data binning couldn't
+  explain, since the data was never missing, just wrongly excluded from
+  the plot.
 - **Satellite choice**: GOES-18 is the current operational GOES-West
   satellite and the one with a clean view of the Pacific Northwest;
   GOES-East (GOES-19) views this domain at a much more oblique angle.
