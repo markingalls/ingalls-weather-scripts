@@ -173,6 +173,14 @@ along.
   table are both defined near the top -- edit directly to adjust.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
   needs GDAL, which only installs via apt, not pip).
+- `basemap_cache/` -- not committed, gitignored, and needs no manual setup
+  -- caches two rasters (the land fill drawn beneath the TPW field, and
+  the country/state/admin0 line overlay drawn above it) so a normal run
+  doesn't re-render either from vector data every time. Self-invalidating;
+  see `../columbia-basin-temps/README.md`'s "Basemap raster caching" Notes
+  entry for the technique -- this project needs two cached layers instead
+  of one since, unlike that project, it has static content on *both*
+  sides of the live data (land fill below, borders above).
 
 Shared basemap data lives one level up in [`../maps/`](../maps/):
 `countries_slim.json` (full US/Canada/Mexico country polygons -- used
