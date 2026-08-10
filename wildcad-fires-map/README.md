@@ -27,6 +27,15 @@ always shown regardless of size or staleness.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
   needs GDAL, apt-only). `setup.sh` also installs the Poppins font used
   for map labels, since it isn't packaged for apt.
+- `basemap_cache/` -- not committed, gitignored, and needs no manual setup
+  -- caches the land/state-line/country-line layer as a single raster PNG
+  so a normal run doesn't re-render it from vector data every time.
+  Self-invalidating; see
+  `../columbia-basin-lightning-map/README.md`'s "Basemap raster caching"
+  Notes entry for the full write-up -- same mechanism here, just a single
+  fixed extent (no REGIONS dict) so there's one cache entry, and captured
+  transparent (rather than opaque) so the ocean-colored `ax.patch` still
+  shows through at sea, same as the live vector-drawn version did.
 
 Shared basemap data lives one level up in [`../maps/`](../maps/):
 `land_slim.json`, `states_lakes_slim.json`, `admin0_boundary_lines.json`.

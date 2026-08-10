@@ -110,9 +110,13 @@ dew-point-storm-map/basemap_cache/
 # --- wildcad-fires-map ---
 # build_map.py fetches live fire data; output/ only holds saved snapshots
 # for a --file override (testing / avoiding re-fetching), and the rendered
-# PNGs are outputs -- neither is source, so don't track them.
+# PNGs are outputs -- neither is source, so don't track them. basemap_cache/
+# holds the cached basemap raster build_map.py rebuilds automatically
+# (self-invalidating, see _basemap_cache_key) -- regenerable build output,
+# not source.
 wildcad-fires-map/output/*.json
 wildcad-fires-map/output/*.png
+wildcad-fires-map/basemap_cache/
 
 # --- hrrr-smoke-chart ---
 # smoke.json is live data fetch_smoke.py regenerates every run, and the
