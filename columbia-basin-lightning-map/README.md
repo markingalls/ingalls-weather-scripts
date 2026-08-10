@@ -159,6 +159,14 @@ python3 build_map.py --region bc_interior
   time-offset field within it, which is precise enough for hour-scale
   recency buckets. Bands are drawn oldest-first so more recent strikes
   render on top where tracks overlap.
+- **Subtitle time zone label**: the subtitle shows each region's local
+  time as `HH:MM PT` or `HH:MM PDT`/`PST`. `bc_interior` always labels
+  itself `PDT` -- hardcoded, not computed from its zone, since BC no
+  longer observes standard time and zoneinfo's `America/Vancouver` rules
+  still assume a DST fallback that won't happen. Every other region sits
+  on the US side (`America/Los_Angeles`, which still observes standard
+  time) and gets a real `PDT`/`PST` computed from that zone, so it'll
+  correctly flip to `PST` once winter arrives.
 - **Two fixes ported from `columbia-basin-alerts-map/build_map.py`**,
   needed once `pnw`'s much wider extent came into play (invisible at
   Columbia Basin/Portland's tighter zoom):

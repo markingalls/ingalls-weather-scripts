@@ -475,13 +475,15 @@ def build_map(region_key, lightning_path, output_path):
     title_y = subtitle_y + 0.035
     fig.text(left_x, title_y, "Lightning (Last 2 Hours)",
               fontproperties=f_bold, fontsize=22, color="#2b2a26")
-    # bc_interior is the only region with an explicit "timezone" override
-    # (America/Vancouver) -- it gets a precise PDT/PST label computed from
-    # that zone; every other region uses the shared "PT" convention rather
-    # than computing PST/PDT itself.
+    # BC no longer observes standard time, so bc_interior (the only region
+    # with an explicit "timezone" override) always labels itself "PDT" --
+    # not computed from the zone, since zoneinfo's America/Vancouver rules
+    # still assume a DST fallback that no longer happens. Every other
+    # region sits on the US side (America/Los_Angeles, still observes
+    # standard time) and gets a real PDT/PST label computed from that zone.
     region_tz = ZoneInfo(cfg.get("timezone", "America/Los_Angeles"))
     local_time = window_end.astimezone(region_tz)
-    tz_label = local_time.strftime("%Z") if "timezone" in cfg else "PT"
+    tz_label = "PDT" if "timezone" in cfg else local_time.strftime("%Z")
     subtitle = (f"{total_in_region:,} flashes detected — GOES-18 GLM "
                 f"{local_time.strftime('%H:%M')} {tz_label}")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
