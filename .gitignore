@@ -58,10 +58,14 @@ columbia-basin-temps/output/*.png
 # run, and the rendered map images (one per REGIONS entry: Columbia Basin,
 # Portland, Pacific NW, BC Interior) are outputs too -- neither is source,
 # so don't track them. state/ is the droplet-deploy guard's runtime state
-# (lock file, logs) -- created on the server, not source.
+# (lock file, logs) -- created on the server, not source. basemap_cache/
+# holds the cached basemap rasters build_map.py rebuilds automatically
+# (self-invalidating, see _basemap_cache_key) -- regenerable build output,
+# same as the rendered PNGs, not source.
 columbia-basin-lightning-map/lightning_last24h.json
 columbia-basin-lightning-map/*_lightning.png
 columbia-basin-lightning-map/state/
+columbia-basin-lightning-map/basemap_cache/
 
 # --- columbia-basin-lightning-realtime-map ---
 # same reasoning as columbia-basin-lightning-map above.

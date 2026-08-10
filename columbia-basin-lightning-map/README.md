@@ -29,6 +29,8 @@ companion: [`../columbia-basin-lightning-realtime-map/`](../columbia-basin-light
   this is a polling interval, not a cycle time.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies
   (cartopy needs GDAL, which only installs via apt, not pip).
+- `basemap_cache/` -- not committed, gitignored, and needs no manual setup
+  -- see "Basemap raster caching" under Notes below.
 
 ## Regions
 
@@ -183,3 +185,27 @@ python3 build_map.py --region bc_interior
   cwd set to the crontab user's home directory) even though it worked
   fine for a manual run after `cd`-ing into the project directory. Same
   bug, same fix, as `columbia-basin-alerts-map/build_map.py`.
+- **Basemap raster caching**: land/countries/states/counties/roads are
+  the same on every run -- only the flash scatter, city labels, and
+  title/subtitle text actually change. Redrawing those static vector
+  layers from scratch (tens of thousands of road segments alone) was
+  measured at ~45-60s of a ~50-65s total render, so `build_map.py` now
+  renders them once per region into a flat PNG raster under
+  `basemap_cache/` and `ax.imshow()`s it back on every subsequent run --
+  a warm run is ~2.5-3.3s instead of ~45-65s cold. The cache key
+  (`_basemap_cache_key()`) hashes the region's own extent/center/roads
+  params plus the `(mtime, size)` of every static `../maps/` file the
+  static layers read from, so editing a `REGIONS` entry or regenerating
+  a shared `maps/` file self-invalidates the cache automatically on the
+  next run -- nothing to remember to clear by hand. Deleting
+  `basemap_cache/` entirely is always safe; it just costs one slow
+  rebuild per region on the next run. Not committed to git, same as the
+  rendered output PNGs -- it's regenerable build output, not source.
+  One subtlety if touching this code: `GeoAxes` shrinks its own
+  displayed pixel box (not just the data extent) to hold `aspect=1`
+  between projected data scale and display size, so the cache-build
+  figure's raw canvas buffer has that shrink baked in as a blank pixel
+  margin -- `_get_basemap_raster()` crops to the cache axes' actual
+  post-shrink `get_position()` box before saving, or the saved raster
+  carries a double-counted margin when replayed into the real (already
+  shrunk) render axes.
