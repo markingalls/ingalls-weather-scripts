@@ -63,10 +63,13 @@ a region overrides them for a different zoom level.
   expected, not a bug. What *is* a bug is the data pull itself falling
   short of the render extent, which is a separate concern:
   `fetch_lightning.py`'s shared bbox is re-verified after every domain
-  change to confirm it still fully contains all four regions' extents
-  (currently bounded by `pnw`'s own wider extent in longitude and by
-  `bc_interior`'s own north edge in latitude, with plenty of margin to
-  spare on `bc_interior`'s east edge). Uses `America/Vancouver` (not
+  change to confirm it still fully contains all four regions' extents. Its
+  east edge is deliberately pulled well past what any region currently
+  renders (out to roughly Alberta's eastern border) rather than trimmed
+  tight to `bc_interior`'s own -114.68 render edge -- storms east of the
+  frame are common, fetch cost doesn't scale with bbox area, and it's
+  fine for the pull to cover ground no map currently displays. Uses
+  `America/Vancouver` (not
   `America/Los_Angeles`) for its day/time labels -- numerically identical
   to Pacific time for any date since 2007, so this is a correctness/clarity
   fix rather than a behavior change. Roads come from
@@ -107,12 +110,16 @@ python3 build_map.py --region bc_interior
   sequentially -- the underlying HDF5/netCDF4 library isn't thread-safe,
   so parsing concurrently intermittently corrupts memory.
 - **One shared fetch, four regions**: `fetch_lightning.py`'s bounding box
-  is the union of all four `REGIONS` extents (padded 0.5 degrees), not
-  just Columbia Basin's -- widening it doesn't add fetch cost, since GLM
-  file listing/download is purely a function of the time window (GOES
-  covers the full disk in every file), not the bbox. `build_map.py`
-  filters down to each region's own tighter extent at render time, same
-  pattern as `columbia-basin-alerts-map/fetch_alerts.py`.
+  covers at least the union of all four `REGIONS` extents (padded 0.5
+  degrees), not just Columbia Basin's, and its east edge intentionally
+  goes further still (see `bc_interior`'s Notes entry below) -- widening
+  it doesn't add fetch cost, since GLM file listing/download is purely a
+  function of the time window (GOES covers the full disk in every file),
+  not the bbox. `build_map.py` filters down to each region's own tighter
+  extent at render time, same pattern as
+  `columbia-basin-alerts-map/fetch_alerts.py` -- so the fetched area and
+  the rendered area are two different things by design, and the fetch is
+  allowed to be the bigger of the two.
 - **Satellite choice**: GOES-18 is the current operational GOES-West
   satellite and the one with a clean view of the Pacific Northwest;
   GOES-East (GOES-19) views this domain at a much more oblique angle.

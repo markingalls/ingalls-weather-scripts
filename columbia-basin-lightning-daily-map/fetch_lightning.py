@@ -34,7 +34,7 @@ PRODUCT = "GLM-L2-LCFA"
 # region's map edge aren't dropped pre-plot. See ../columbia-basin-
 # lightning-map/fetch_lightning.py for how these bounds were derived.
 BBOX_PAD = 0.5
-LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -112.8 + BBOX_PAD
+LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -110.0 + BBOX_PAD
 LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 54.31 + BBOX_PAD
 
 
