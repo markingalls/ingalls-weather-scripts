@@ -51,15 +51,24 @@ a region overrides them for a different zoom level.
   across both products. Reaches the WA/OR coast and the US/Canada border
   widely enough to need the same two fixes as that project (see Notes).
 - **`bc_interior`** -- new, no prior product on this domain. Wider than
-  true-zoom (`lon_span=7.5`, `lat_span=5.2`, `satellite_height=6_500_000`)
-  to cover both the Southern Interior (Kamloops/Kelowna/Vernon/Penticton)
-  and Prince George, ~4.4 degrees north of Penticton; center is the
-  midpoint of that span, not any single city. Uses `America/Vancouver`
-  (not `America/Los_Angeles`) for its day/time labels -- numerically
-  identical to Pacific time for any date since 2007, so this is a
-  correctness/clarity fix rather than a behavior change. Roads come from
-  `../maps/british_columbia_roads.geojson` (Geofabrik BC extract,
-  filtered to motorway/trunk/primary, clipped to this domain).
+  true-zoom (`lon_span=10.0`, `lat_span=5.2`, `satellite_height=9_000_000`)
+  to cover the Southern Interior (Kamloops/Kelowna/Vernon/Penticton),
+  Prince George (~4.4 degrees north of Penticton), and the Yellowhead
+  Pass area just across the Alberta border (Jasper); center is the
+  midpoint of that span, not any single city. The east edge was
+  originally `lon_span=7.5` (edge at -116.72), which cut off real storm
+  activity mid-frame with a visible hard edge well short of Jasper --
+  `lon_span=10.0` (edge at -114.25) fixed that without losing the western
+  cities; the shared fetch bbox in `fetch_lightning.py` already reached
+  farther east than this (bounded by `pnw`'s own wider extent), so no
+  fetch change was needed, only the render extent. Uses
+  `America/Vancouver` (not `America/Los_Angeles`) for its day/time labels
+  -- numerically identical to Pacific time for any date since 2007, so
+  this is a correctness/clarity fix rather than a behavior change. Roads
+  come from `../maps/british_columbia_roads.geojson` (Geofabrik BC
+  extract) plus `../maps/alberta_roads_west.geojson` (Geofabrik Alberta
+  extract, clipped to just the Jasper/Yellowhead area) -- both filtered
+  to motorway/trunk/primary.
 
 ## Usage
 

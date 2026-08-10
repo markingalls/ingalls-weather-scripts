@@ -219,26 +219,30 @@ REGIONS = {
         ],
     ),
     # Wider than the true-zoom span (not as wide as "pnw") -- covers the
-    # Southern Interior (Kamloops/Kelowna/Vernon/Penticton) AND Prince
-    # George, which the original Kamloops-centered true-zoom view (lat
-    # span 3.6) fell well short of (Prince George sits at 53.9N, ~4.4
-    # degrees north of Penticton at 49.5N). Center is the midpoint of
-    # that Penticton-to-Prince-George span, not any single city.
-    # `timezone` (America/Vancouver, not America/Los_Angeles) is used for
-    # this region's day/time labels -- numerically identical to Pacific
-    # Time for any date since 2007 (Canada's DST rules matched the US
-    # that year), so this is a correctness/clarity fix, not a behavior
-    # change today.
+    # Southern Interior (Kamloops/Kelowna/Vernon/Penticton), Prince
+    # George, and now the Yellowhead Pass area just across the Alberta
+    # border (Jasper). The original lon_span=7.5 east edge (-116.72) cut
+    # off storm activity mid-frame with a visible hard edge; lon_span=10.0
+    # pushes that edge to -114.25, well past Jasper, without losing the
+    # western cities. Center is still the midpoint of the region's own
+    # extent, not any single city. `timezone` (America/Vancouver, not
+    # America/Los_Angeles) is used for this region's day/time labels --
+    # numerically identical to Pacific Time for any date since 2007
+    # (Canada's DST rules matched the US that year), so this is a
+    # correctness/clarity fix, not a behavior change today.
     "bc_interior": dict(
-        center_lon=-120.47, center_lat=51.71,
-        lon_span=7.5, lat_span=5.2, satellite_height=6_500_000,
+        center_lon=-119.25, center_lat=51.71,
+        lon_span=10.0, lat_span=5.2, satellite_height=9_000_000,
         timezone="America/Vancouver",
-        roads_files=["british_columbia_roads.geojson"],
+        roads_files=["british_columbia_roads.geojson", "alberta_roads_west.geojson"],
         output_base="bc_interior_lightning",
         cities=[
             ("Prince George", -122.7497, 53.9171, "left"),
+            ("Quesnel", -122.4930, 53.0027, "left"),
+            ("Wells", -121.5670, 53.1073, "right"),
             ("Williams Lake", -122.1417, 52.1417, "left"),
             ("100 Mile House", -121.2980, 51.6410, "left"),
+            ("Cache Creek", -121.3200, 50.8085, "left"),
             ("Kamloops", -120.3273, 50.6745, "below"),
             ("Kelowna", -119.4960, 49.8880, "right"),
             ("Vernon", -119.2720, 50.2670, "right"),
@@ -246,6 +250,8 @@ REGIONS = {
             ("Merritt", -120.7862, 50.1163, "left"),
             ("Salmon Arm", -119.2838, 50.7001, "right"),
             ("Revelstoke", -118.1957, 50.9981, "right"),
+            ("Blue River", -119.2907, 52.1319, "right"),
+            ("Jasper", -118.0708, 52.8734, "left"),
         ],
     ),
 }
