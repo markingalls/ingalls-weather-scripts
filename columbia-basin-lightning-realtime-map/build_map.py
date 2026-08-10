@@ -24,9 +24,9 @@ f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
 # lightning-tracker convention: hot/bright for very recent, fading to pale
 # for older strikes, drawn oldest-first so recent strikes sit on top.
 AGE_BANDS = [
-    (0.5, "0-30 min ago", "#FF1E56"),
-    (1.0, "30-60 min ago", "#FF8C00"),
-    (2.0, "60-120 min ago", "#FFD84D"),
+    (0.5, "0-30 min ago", "#8B2FC9"),
+    (1.0, "30-60 min ago", "#FF1E56"),
+    (2.0, "60-120 min ago", "#FF8C00"),
 ]
 
 
@@ -229,15 +229,27 @@ REGIONS = {
             ("Salmon", -113.9032, 45.1758, "right"),
         ],
     ),
-    # NEW -- no existing product on this domain to match. Center is
-    # Kamloops, the geographic anchor of the BC Interior; roads/cities
-    # roster is a first pass, not yet visually verified against a live
-    # render.
+    # Wider than the true-zoom span (not as wide as "pnw") -- covers the
+    # Southern Interior (Kamloops/Kelowna/Vernon/Penticton) AND Prince
+    # George, which the original Kamloops-centered true-zoom view (lat
+    # span 3.6) fell well short of (Prince George sits at 53.9N, ~4.4
+    # degrees north of Penticton at 49.5N). Center is the midpoint of
+    # that Penticton-to-Prince-George span, not any single city.
+    # `timezone` (America/Vancouver, not America/Los_Angeles) is used for
+    # this region's day/time labels -- numerically identical to Pacific
+    # Time for any date since 2007 (Canada's DST rules matched the US
+    # that year), so this is a correctness/clarity fix, not a behavior
+    # change today.
     "bc_interior": dict(
-        center_lon=-120.3273, center_lat=50.6745,
+        center_lon=-120.47, center_lat=51.71,
+        lon_span=7.5, lat_span=5.2, satellite_height=6_500_000,
+        timezone="America/Vancouver",
         roads_files=["british_columbia_roads.geojson"],
         output="bc_interior_lightning_realtime.png",
         cities=[
+            ("Prince George", -122.7497, 53.9171, "left"),
+            ("Williams Lake", -122.1417, 52.1417, "left"),
+            ("100 Mile House", -121.2980, 51.6410, "left"),
             ("Kamloops", -120.3273, 50.6745, "below"),
             ("Kelowna", -119.4960, 49.8880, "right"),
             ("Vernon", -119.2720, 50.2670, "right"),
@@ -245,8 +257,6 @@ REGIONS = {
             ("Merritt", -120.7862, 50.1163, "left"),
             ("Salmon Arm", -119.2838, 50.7001, "right"),
             ("Revelstoke", -118.1957, 50.9981, "right"),
-            ("Williams Lake", -122.1417, 52.1417, "left"),
-            ("100 Mile House", -121.2980, 51.6410, "left"),
         ],
     ),
 }

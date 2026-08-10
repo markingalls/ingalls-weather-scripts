@@ -33,7 +33,13 @@ dropped.
   logic (see below). No age bands: a full archived day has no
   meaningful "how recent" axis the way the 2h/24h maps do, so every
   flash is plotted in a single color (`FLASH_COLOR`). Title shows the
-  actual Pacific calendar date the data covers.
+  calendar date the data covers, converted from `window_start` (a UTC
+  instant) into each region's own `timezone` (default
+  `America/Los_Angeles`; `bc_interior` uses `America/Vancouver`) --
+  numerically identical to Pacific time for any date since 2007, so this
+  doesn't change the rendered label today, but it's the correct source of
+  truth per region going forward. The fetch window itself stays one
+  shared UTC range across all four regions (see `fetch_lightning.py`).
 - `deploy/publish_daily.py` -- cron entry point; owns the whole rotate
   -> fetch -> render -> publish sequence. See "Rotation" below for the
   mechanism and why it's safe on a first run with no prior images.

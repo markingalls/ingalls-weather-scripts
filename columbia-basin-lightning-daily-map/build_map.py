@@ -12,6 +12,7 @@ import cartopy.crs as ccrs
 from shapely.geometry import shape, LineString, Point
 from shapely.ops import unary_union
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -217,15 +218,27 @@ REGIONS = {
             ("Salmon", -113.9032, 45.1758, "right"),
         ],
     ),
-    # NEW -- no existing product on this domain to match. Center is
-    # Kamloops, the geographic anchor of the BC Interior; roads/cities
-    # roster is a first pass, not yet visually verified against a live
-    # render.
+    # Wider than the true-zoom span (not as wide as "pnw") -- covers the
+    # Southern Interior (Kamloops/Kelowna/Vernon/Penticton) AND Prince
+    # George, which the original Kamloops-centered true-zoom view (lat
+    # span 3.6) fell well short of (Prince George sits at 53.9N, ~4.4
+    # degrees north of Penticton at 49.5N). Center is the midpoint of
+    # that Penticton-to-Prince-George span, not any single city.
+    # `timezone` (America/Vancouver, not America/Los_Angeles) is used for
+    # this region's day/time labels -- numerically identical to Pacific
+    # Time for any date since 2007 (Canada's DST rules matched the US
+    # that year), so this is a correctness/clarity fix, not a behavior
+    # change today.
     "bc_interior": dict(
-        center_lon=-120.3273, center_lat=50.6745,
+        center_lon=-120.47, center_lat=51.71,
+        lon_span=7.5, lat_span=5.2, satellite_height=6_500_000,
+        timezone="America/Vancouver",
         roads_files=["british_columbia_roads.geojson"],
         output_base="bc_interior_lightning",
         cities=[
+            ("Prince George", -122.7497, 53.9171, "left"),
+            ("Williams Lake", -122.1417, 52.1417, "left"),
+            ("100 Mile House", -121.2980, 51.6410, "left"),
             ("Kamloops", -120.3273, 50.6745, "below"),
             ("Kelowna", -119.4960, 49.8880, "right"),
             ("Vernon", -119.2720, 50.2670, "right"),
@@ -233,8 +246,6 @@ REGIONS = {
             ("Merritt", -120.7862, 50.1163, "left"),
             ("Salmon Arm", -119.2838, 50.7001, "right"),
             ("Revelstoke", -118.1957, 50.9981, "right"),
-            ("Williams Lake", -122.1417, 52.1417, "left"),
-            ("100 Mile House", -121.2980, 51.6410, "left"),
         ],
     ),
 }
@@ -332,7 +343,7 @@ def build_map(region_key, lightning_path, output_path):
     # ---------- lightning flashes ----------
     data = json.load(open(lightning_path))
     flashes = data["flashes"]
-    pt_date = data["pt_date"]
+    window_start = datetime.fromisoformat(data["window_start"])
     extent_box_lons = (extent[0], extent[1])
     extent_box_lats = (extent[2], extent[3])
 
@@ -410,7 +421,17 @@ def build_map(region_key, lightning_path, output_path):
     # ---------- title / subtitle ----------
     subtitle_y = top_y + 0.018
     title_y = subtitle_y + 0.035
-    pt_date_label = datetime.strptime(pt_date, "%Y-%m-%d").strftime("%B %-d, %Y")
+    # Derived from window_start (a UTC instant) converted to this region's
+    # own timezone, not the shared pt_date string baked in at fetch time
+    # -- the fetch window itself is shared across all four regions (see
+    # fetch_lightning.py), but the calendar-date LABEL shown per region
+    # should reflect that region's own zone. bc_interior uses America/
+    # Vancouver; every other region defaults to America/Los_Angeles.
+    # These are numerically identical for any date since 2007, so this
+    # doesn't change today's rendered label, but it's the correct source
+    # of truth per region going forward.
+    region_tz = ZoneInfo(cfg.get("timezone", "America/Los_Angeles"))
+    pt_date_label = window_start.astimezone(region_tz).strftime("%B %-d, %Y")
     fig.text(left_x, title_y, f"Lightning — {pt_date_label}",
               fontproperties=f_bold, fontsize=22, color="#2b2a26")
     subtitle = f"{total_in_region:,} flashes detected — GOES-18 GLM, full day (Pacific time)"

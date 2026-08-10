@@ -25,7 +25,7 @@ day's worth of activity.
 - `deploy/publish_lightning.py` -- cron entry point, same
   `fcntl.flock`-locked pattern as the 24-hour project's.
 - `deploy/crontab.example` -- every 5 minutes, tighter than the 24-hour
-  companion's 10-minute cadence since this is the real-time product.
+  companion's 15-minute cadence since this is the real-time product.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies
   (cartopy needs GDAL, which only installs via apt, not pip).
 
@@ -60,9 +60,10 @@ usage should just omit it.
 
 ## Notes
 
-- **Recency bands**: 0-30 min ago (bright pink/red), 30-60 min ago
-  (orange), 60-120 min ago (pale yellow) -- the same palette as the
-  24-hour map's hour-scale bands, just compressed onto a 2-hour window
+- **Recency bands**: 0-30 min ago (purple, matching the daily-archive
+  map's single flash color), 30-60 min ago (bright pink/red), 60-120 min
+  ago (orange) -- the same palette as the 24-hour map's hour-scale bands,
+  just compressed onto a 2-hour window
   so a genuinely real-time view can still show gradient/movement within
   the last half hour instead of everything being "last hour." Age is
   derived from each source file's scan-start timestamp (20-second

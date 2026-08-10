@@ -24,7 +24,7 @@ companion: [`../columbia-basin-lightning-realtime-map/`](../columbia-basin-light
   and atomically publishes every region in `REGIONS`. One region failing
   doesn't stop the others. `fcntl.flock`-locked so an overlapping cron
   tick skips instead of running a second pass concurrently.
-- `deploy/crontab.example` -- every 10 minutes; lightning has no fixed
+- `deploy/crontab.example` -- every 15 minutes; lightning has no fixed
   issuance schedule to align to, so like `../columbia-basin-alerts-map/`
   this is a polling interval, not a cycle time.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies
@@ -50,8 +50,14 @@ a region overrides them for a different zoom level.
   `satellite_height=22_000_000`), so the same named domain looks the same
   across both products. Reaches the WA/OR coast and the US/Canada border
   widely enough to need the same two fixes as that project (see Notes).
-- **`bc_interior`** -- new, no prior product on this domain. Center is
-  Kamloops (`-120.3273, 50.6745`), true-zoom span. Roads come from
+- **`bc_interior`** -- new, no prior product on this domain. Wider than
+  true-zoom (`lon_span=7.5`, `lat_span=5.2`, `satellite_height=6_500_000`)
+  to cover both the Southern Interior (Kamloops/Kelowna/Vernon/Penticton)
+  and Prince George, ~4.4 degrees north of Penticton; center is the
+  midpoint of that span, not any single city. Uses `America/Vancouver`
+  (not `America/Los_Angeles`) for its day/time labels -- numerically
+  identical to Pacific time for any date since 2007, so this is a
+  correctness/clarity fix rather than a behavior change. Roads come from
   `../maps/british_columbia_roads.geojson` (Geofabrik BC extract,
   filtered to motorway/trunk/primary, clipped to this domain).
 
@@ -100,9 +106,9 @@ python3 build_map.py --region bc_interior
   filtered) -- GLM's flash product only reports validated detections, and
   the flag mostly marks minor processing caveats (e.g. constituent event
   count/duration exceeding a threshold), not false positives.
-- **Recency bands**: flashes are colored by age -- last hour (bright
-  pink/red), 1-6 hours ago (orange), 6-24 hours ago (pale yellow) -- a
-  common lightning-tracker convention. Age is derived from each source
+- **Recency bands**: flashes are colored by age -- last hour (purple,
+  matching the daily-archive map's single flash color), 1-6 hours ago
+  (bright pink/red), 6-24 hours ago (orange). Age is derived from each source
   file's scan-start timestamp (20-second resolution), not the per-flash
   time-offset field within it, which is precise enough for hour-scale
   recency buckets. Bands are drawn oldest-first so more recent strikes

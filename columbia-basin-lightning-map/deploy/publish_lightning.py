@@ -6,7 +6,7 @@ fetch -- no need to fetch twice), then renders and atomically publishes
 each region in build_map.REGIONS. One region failing doesn't stop the
 others, same pattern as every other publish script in this repo.
 
-Scheduled every 10 minutes (see deploy/crontab.example) -- lightning has
+Scheduled every 15 minutes (see deploy/crontab.example) -- lightning has
 no fixed issuance schedule to align to, so like columbia-basin-alerts-map
 this is just a reasonable polling interval, not a cycle time.
 

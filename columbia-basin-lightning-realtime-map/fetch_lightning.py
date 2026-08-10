@@ -41,7 +41,7 @@ LOOKBACK_HOURS = 2
 # lightning-map/fetch_lightning.py for how these bounds were derived.
 BBOX_PAD = 0.5
 LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -112.8 + BBOX_PAD
-LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 52.47 + BBOX_PAD
+LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 54.31 + BBOX_PAD
 
 
 def hour_prefixes(start, end):
