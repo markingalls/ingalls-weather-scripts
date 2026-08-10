@@ -43,14 +43,14 @@ LOOKBACK_HOURS = 24
 # rather than assuming it still does.
 #
 # The east edge is intentionally pulled well past what any region
-# currently renders (-110.0, roughly Alberta's eastern border) rather
-# than trimmed to bc_interior's own -114.68 render edge: storms east of
-# bc_interior's frame are common and there's no meaningful fetch-cost
-# reason not to grab that data too (file listing/download is a function
-# of the time window, not the bbox), so it's fine to pull more than any
-# map currently displays.
+# currently renders rather than trimmed to bc_interior's own render edge:
+# storms east of bc_interior's frame are common and there's no meaningful
+# fetch-cost reason not to grab that data too (file listing/download is a
+# function of the time window, not the bbox), so it's fine to pull more
+# than any map currently displays. -108.0 is comfortably past Calgary
+# (-114.07), not just "roughly Alberta's eastern border".
 BBOX_PAD = 0.5
-LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -110.0 + BBOX_PAD
+LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -108.0 + BBOX_PAD
 LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 54.31 + BBOX_PAD
 
 
