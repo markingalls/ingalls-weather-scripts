@@ -19,6 +19,14 @@ fetched live via Herbie.
   needs GDAL; cfgrib/eccodes need libeccodes; both apt-only). `setup.sh`
   also installs the Poppins font used for map labels, since it isn't
   packaged for apt.
+- `basemap_cache/` — not committed, gitignored, and needs no manual setup
+  — caches the land-outline/state-province/international-border overlay
+  as a single transparent raster PNG so a normal run doesn't re-render it
+  from vector data every time. Self-invalidating; see
+  `../columbia-basin-temps/README.md`'s "Basemap raster caching" Notes
+  entry for the full write-up of this technique — same mechanism here
+  (single fixed extent, transparent overlay drawn on top of the live
+  shading), just without a roads layer, so the saving here is more modest.
 
 Shared basemap data lives one level up in [`../maps/`](../maps/):
 `land_slim.json`, `states_lakes_slim.json`, `admin1_boundary_lines.json`,

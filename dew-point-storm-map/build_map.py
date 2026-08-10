@@ -46,6 +46,7 @@ Logo is read from /assets/ingalls_weather_logo.png at repo root.
 """
 
 import argparse
+import hashlib
 import sys
 import warnings
 from datetime import datetime, timedelta, timezone
@@ -85,6 +86,20 @@ LAND_FILE = MAPS_DIR / "land_slim.json"
 STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
+
+# Land outline + state/province lines + international border are
+# identical from one run to the next -- only the dew-point-depression
+# shading and thunderstorm outline underneath actually change -- but
+# drawing them was measured at several seconds of this project's total
+# render. Rendered once into a cached *transparent* RGBA raster and
+# imshow-ed back on top of the live shading on every subsequent run,
+# instead of re-adding the vector geometries each time -- see
+# _get_basemap_overlay(). Single fixed extent (like columbia-basin-temps,
+# unlike the REGIONS-dict projects), so there's just one cache entry.
+# Not committed to git (regenerable build output, like the rendered
+# PNGs); see _basemap_cache_key() for the self-healing invalidation
+# story.
+BASEMAP_CACHE_DIR = THIS_DIR / "basemap_cache"
 
 TARGET_COUNTRIES = {"United States of America", "Canada"}
 
@@ -327,6 +342,83 @@ def load_boundary_lines(path):
     return [shape(feat["geometry"]) for feat in data["features"]]
 
 
+def _basemap_cache_key():
+    """Hash of everything that affects the cached overlay raster's pixel
+    content: the fixed map geometry/extent constants, plus the mtime+size
+    (cheap os.stat, not a full re-read) of every source file the overlay
+    is drawn from. Regenerating a shared maps/ file changes this hash
+    automatically -- the cache self-invalidates and rebuilds on the next
+    run, no manual "remember to rebuild" step to forget."""
+    parts = [CENTER_LON, CENTER_LAT, LON_MIN, LON_MAX, LAT_MIN, LAT_MAX,
+             FIG_WIDTH_IN, FIG_HEIGHT_IN, FIG_DPI, tuple(AXES_RECT)]
+    for path in [LAND_FILE, STATES_LAKES_FILE, ADMIN0_LINES_FILE]:
+        st = path.stat()
+        parts.append((str(path), st.st_mtime_ns, st.st_size))
+    return hashlib.sha256(repr(parts).encode()).hexdigest()[:16]
+
+
+def _get_basemap_overlay(proj, pc):
+    """Returns (rgba_array, native_extent) for the cached land-outline +
+    state/province + international-border overlay, rebuilding it first if
+    the cache is missing or stale (see _basemap_cache_key). Captured with
+    a fully transparent background (fig/axes patch alpha 0) since it's
+    imshow-ed back *on top* of the live dew-point-depression shading, not
+    underneath it -- everywhere no line was drawn stays transparent and
+    the shading underneath shows through unchanged. native_extent is in
+    the axes' own projected coordinates (ax.get_extent(crs=proj)), not
+    lon/lat -- imshow-ing the raster back with transform=proj and this
+    extent is a direct pixel placement, not a re-projection, which is
+    what makes reusing it fast."""
+    BASEMAP_CACHE_DIR.mkdir(exist_ok=True)
+    key = _basemap_cache_key()
+    png_path = BASEMAP_CACHE_DIR / "overlay.png"
+    meta_path = BASEMAP_CACHE_DIR / "overlay.json"
+
+    if png_path.exists() and meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        if meta.get("key") == key:
+            return plt.imread(png_path), tuple(meta["native_extent"])
+
+    land_geoms = load_land()
+    state_geoms = load_states()
+    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
+
+    cache_fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
+    cache_fig.patch.set_alpha(0.0)
+    cache_ax = cache_fig.add_axes([0, 0, 1, 1], projection=proj)
+    cache_ax.patch.set_alpha(0.0)
+    cache_ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
+    cache_ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
+    cache_ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
+    cache_ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+    cache_fig.canvas.draw()
+    native_extent = cache_ax.get_extent(crs=proj)
+
+    # GeoAxes keeps aspect=1 (equal) between its data extent and its own
+    # display box -- when the box's shape (from its [x0,y0,w,h] fraction)
+    # doesn't already match the data's true aspect ratio, cartopy shrinks
+    # the axes' rendered box within its allocated space rather than
+    # distorting the projection (see columbia-basin-lightning-map's
+    # _get_basemap_raster for the full writeup -- same mechanism here,
+    # though PlateCarree at this domain's tuned AXES_RECT may shrink very
+    # little or not at all). Crop to the axes' actual post-shrink pixel
+    # box so the saved raster is pure content, with zero built-in margin,
+    # matching what native_extent actually spans.
+    pos = cache_ax.get_position()
+    fig_w_px, fig_h_px = (cache_fig.get_size_inches() * cache_fig.dpi).astype(int)
+    x0, x1 = int(round(pos.x0 * fig_w_px)), int(round(pos.x1 * fig_w_px))
+    y0, y1 = int(round((1 - pos.y1) * fig_h_px)), int(round((1 - pos.y0) * fig_h_px))
+    buf = np.asarray(cache_fig.canvas.buffer_rgba())[y0:y1, x0:x1, :]
+
+    # imsave (not fig.savefig) writes exactly this pixel buffer, no
+    # further DPI/bbox reinterpretation -- what's captured is what gets
+    # replayed. imsave preserves the alpha channel for an (H, W, 4) array.
+    plt.imsave(png_path, buf)
+    plt.close(cache_fig)
+    meta_path.write_text(json.dumps({"key": key, "native_extent": list(native_extent)}))
+    return plt.imread(png_path), native_extent
+
+
 def build_map(date, output_path, override_path=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
@@ -354,11 +446,6 @@ def build_map(date, output_path, override_path=None):
                      round(lon_frac0 * RESAMPLE_NX):round(lon_frac1 * RESAMPLE_NX)]
     print(f"Max dew point depression range: {visible.min():.0f}F - {visible.max():.0f}F")
     print(f"Thunderstorm-signal grid cells: {(storm_mask_f >= 0.5).sum()} of {storm_mask_f.size}")
-
-    print("Loading basemap layers...")
-    land_geoms = load_land()
-    state_geoms = load_states()
-    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
     # PlateCarree (not NearsidePerspective, used by the other scripts in
     # this repo) -- NearsidePerspective fits the axes to a rectangle
@@ -419,9 +506,14 @@ def build_map(date, output_path, override_path=None):
         ax.pcolormesh(reg_lon, reg_lat, outside_storm, transform=pc, cmap=ListedColormap(["#8a8a8a"]),
                       vmin=0, vmax=1, shading="auto", alpha=0.55, zorder=1.3)
 
-    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
-    ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
-    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+    # Land outline + state/province lines + international border --
+    # cached transparent raster, not redrawn from vector data every run --
+    # see _get_basemap_overlay's docstring. zorder=1.6 keeps it above the
+    # DPD shading (1) and thunderstorm gray wash (1.3), below the storm
+    # contour (3+) and city labels (100+).
+    overlay_img, overlay_native_extent = _get_basemap_overlay(proj, pc)
+    ax.imshow(overlay_img, origin="upper", extent=overlay_native_extent,
+              transform=proj, zorder=1.6)
 
     if storm_smooth.max() >= 0.5:
         storm_dashes = (0, (6, 4))
