@@ -54,6 +54,15 @@ testing, or if a source is temporarily down), pass `--file path/to/thing.kml`
   new source), and a style function.
 - `requirements.txt` / `setup.sh` — Python + system dependencies (cartopy
   needs GDAL, which only installs via apt, not pip).
+- `basemap_cache/` — not committed, gitignored, and needs no manual setup
+  — caches the land/state-line/lake/country-line layer as a single raster
+  PNG so a normal run doesn't re-load and re-render it from vector data
+  every time (this is the same static layer no matter which `--product`
+  you render). Self-invalidating; see
+  `../columbia-basin-lightning-map/README.md`'s "Basemap raster caching"
+  Notes entry for the full write-up — same mechanism here (opaque raster
+  drawn first, below every outlook/hazard layer), just a single fixed
+  extent instead of one cache entry per region.
 
 Shared basemap data lives one level up in [`../maps/`](../maps/):
 

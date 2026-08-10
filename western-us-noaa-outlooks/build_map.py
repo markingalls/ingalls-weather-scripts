@@ -52,6 +52,7 @@ Logo is read from /assets/ingalls_weather_logo.png at repo root.
 """
 
 import argparse
+import hashlib
 import io
 import json
 import re
@@ -95,6 +96,22 @@ STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
 ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
+
+# Land + state lines + lakes + country lines are identical from one run
+# to the next -- only the outlook polygons overlaid above them actually
+# change -- but loading and simplifying/segmentizing/deduping those
+# geometries and drawing them was measured at several seconds of this
+# project's total render. Rendered once into a cached opaque raster (this
+# layer sits at the very bottom, zorder 1-2.5, below everything else --
+# unlike columbia-basin-temps/dew-point-storm-map/tpw-wm6-ensemble-map,
+# which have static content *above* their live data and need a
+# transparent raster instead) and imshow-ed back on every subsequent run,
+# instead of re-loading and re-adding the vector geometries each time --
+# see _get_basemap_raster(). Single fixed extent (no REGIONS dict), so
+# there's one cache entry. Not committed to git (regenerable build
+# output, like the rendered PNGs); see _basemap_cache_key() for the
+# self-healing invalidation story.
+BASEMAP_CACHE_DIR = THIS_DIR / "basemap_cache"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
@@ -1157,6 +1174,79 @@ def load_country_lines():
     )
 
 
+def _basemap_cache_key():
+    """Hash of everything that affects the cached basemap raster's pixel
+    content: the fixed map geometry/extent constants, plus the mtime+size
+    (cheap os.stat, not a full re-read) of every source file the static
+    layers are drawn from. Regenerating a shared maps/ file changes this
+    hash automatically -- the cache self-invalidates and rebuilds on the
+    next run, no manual "remember to rebuild" step to forget."""
+    parts = [CENTER_LON, CENTER_LAT, LON_MIN, LON_MAX, LAT_MIN, LAT_MAX,
+             FIG_WIDTH_IN, FIG_HEIGHT_IN, FIG_DPI, tuple(AXES_RECT)]
+    for path in [LAND_FILE, STATES_LAKES_FILE, ADMIN1_LINES_FILE, ADMIN0_LINES_FILE]:
+        st = path.stat()
+        parts.append((str(path), st.st_mtime_ns, st.st_size))
+    return hashlib.sha256(repr(parts).encode()).hexdigest()[:16]
+
+
+def _get_basemap_raster(proj, pc):
+    """Returns (rgba_array, native_extent) for the cached basemap raster
+    (land + state lines + lakes + country lines), rebuilding it first if
+    the cache is missing or stale (see _basemap_cache_key). native_extent
+    is in the axes' own projected coordinates (ax.get_extent(crs=proj)),
+    not lon/lat -- imshow-ing the raster back with transform=proj and
+    this extent is a direct pixel placement, not a re-projection, which
+    is what makes reusing it fast."""
+    BASEMAP_CACHE_DIR.mkdir(exist_ok=True)
+    key = _basemap_cache_key()
+    png_path = BASEMAP_CACHE_DIR / "basemap.png"
+    meta_path = BASEMAP_CACHE_DIR / "basemap.json"
+
+    if png_path.exists() and meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        if meta.get("key") == key:
+            return plt.imread(png_path), tuple(meta["native_extent"])
+
+    land_geoms = load_land()
+    lake_geoms = load_lakes()
+    country_lines = load_country_lines()
+    state_lines = load_state_lines(country_lines)
+
+    cache_fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
+    cache_ax = cache_fig.add_axes([0, 0, 1, 1], projection=proj)
+    cache_ax.set_facecolor("white")
+    cache_ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
+    cache_ax.add_geometries(land_geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", linewidth=0, zorder=1)
+    cache_ax.add_geometries(state_lines, crs=pc, facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=2)
+    cache_ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac", linewidth=0.7, zorder=2.2)
+    cache_ax.add_geometries(country_lines, crs=pc, facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=2.5)
+    cache_fig.canvas.draw()
+    native_extent = cache_ax.get_extent(crs=proj)
+
+    # GeoAxes keeps aspect=1 (equal) between its data extent and its own
+    # display box -- when the box's shape (from its [x0,y0,w,h] fraction)
+    # doesn't already match the data's true aspect ratio, cartopy shrinks
+    # the axes' rendered box within its allocated space rather than
+    # distorting the projection (see columbia-basin-lightning-map's
+    # _get_basemap_raster for the full writeup -- same mechanism here).
+    # Crop to the axes' actual post-shrink pixel box so the saved raster
+    # is pure content, with zero built-in margin, matching what
+    # native_extent actually spans.
+    pos = cache_ax.get_position()
+    fig_w_px, fig_h_px = (cache_fig.get_size_inches() * cache_fig.dpi).astype(int)
+    x0, x1 = int(round(pos.x0 * fig_w_px)), int(round(pos.x1 * fig_w_px))
+    y0, y1 = int(round((1 - pos.y1) * fig_h_px)), int(round((1 - pos.y0) * fig_h_px))
+    buf = np.asarray(cache_fig.canvas.buffer_rgba())[y0:y1, x0:x1, :]
+
+    # imsave (not fig.savefig) writes exactly this pixel buffer, no
+    # further DPI/bbox reinterpretation -- what's captured is what gets
+    # replayed.
+    plt.imsave(png_path, buf)
+    plt.close(cache_fig)
+    meta_path.write_text(json.dumps({"key": key, "native_extent": list(native_extent)}))
+    return plt.imread(png_path), native_extent
+
+
 def build_map(product_key, output_path, override_path=None):
     cfg = PRODUCTS[product_key]
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
@@ -1215,12 +1305,6 @@ def build_map(product_key, output_path, override_path=None):
     date_str = cfg["date"](placemarks, fetched_at)
     print(f"Parsed {len(styled)} shaded areas across {len(set(d['label'] for d in styled))} categories. {date_str}")
 
-    print("Loading basemap layers...")
-    land_geoms = load_land()
-    lake_geoms = load_lakes()
-    country_lines = load_country_lines()
-    state_lines = load_state_lines(country_lines)
-
     proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
                                      satellite_height=4_000_000)
     pc = ccrs.PlateCarree()
@@ -1238,10 +1322,13 @@ def build_map(product_key, output_path, override_path=None):
     ax_bbox = ax.get_window_extent()
     ax_w_px, ax_h_px = int(ax_bbox.width), int(ax_bbox.height)
 
-    ax.add_geometries(land_geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", linewidth=0, zorder=1)
-    ax.add_geometries(state_lines, crs=pc, facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=2)
-    ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac", linewidth=0.7, zorder=2.2)
-    ax.add_geometries(country_lines, crs=pc, facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=2.5)
+    # Cached raster, not redrawn from vector data every run -- see
+    # _get_basemap_raster's docstring. zorder=2.6 keeps it below the
+    # hazard layers (3+) and city labels (100+), above the white axes
+    # facecolor.
+    basemap_img, basemap_native_extent = _get_basemap_raster(proj, pc)
+    ax.imshow(basemap_img, origin="upper", extent=basemap_native_extent,
+              transform=proj, zorder=2.6)
 
     # Outlook polygons, partitioned so overlapping same-axis categories
     # render as one solid color (most severe wins) and cross-axis overlaps

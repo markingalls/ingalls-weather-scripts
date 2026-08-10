@@ -35,8 +35,11 @@ western-us-noaa-outlooks/data/*.kml
 western-us-noaa-outlooks/data/*.kmz
 western-us-noaa-outlooks/output/*.png
 # state/ is the droplet-deploy guard's runtime state (lock file, logs) --
-# created on the server, not source.
+# created on the server, not source. basemap_cache/ holds the cached
+# basemap raster build_map.py rebuilds automatically (self-invalidating,
+# see _basemap_cache_key) -- regenerable build output, not source.
 western-us-noaa-outlooks/state/
+western-us-noaa-outlooks/basemap_cache/
 
 # --- columbia-basin-temps ---
 # build_map.py fetches its source grids live; data/ only holds saved
