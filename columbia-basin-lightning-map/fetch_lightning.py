@@ -37,13 +37,13 @@ LOOKBACK_HOURS = 24
 
 # Union of all four REGIONS extents in build_map.py (columbia_basin,
 # portland, pnw, bc_interior), padded a bit so flashes right at any
-# region's map edge aren't dropped pre-plot. pnw is the widest in
-# latitude; bc_interior pushes the northern edge up past what pnw alone
-# would need, and (after repeated eastward widenings to stop cutting off
-# real storm activity mid-frame) now also pushes the eastern edge past
-# pnw's own.
+# region's map edge aren't dropped pre-plot. pnw is the widest in both
+# latitude and (barely) longitude; bc_interior pushes the northern edge
+# up past what pnw alone would need. Re-verify this union whenever any
+# region's extent changes -- e.g. re-check it covers bc_interior's own
+# edges after a resize -- rather than assuming it still does.
 BBOX_PAD = 0.5
-LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -112.68 + BBOX_PAD
+LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -112.8 + BBOX_PAD
 LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 54.31 + BBOX_PAD
 
 
