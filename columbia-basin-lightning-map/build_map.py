@@ -485,7 +485,8 @@ def build_map(region_key, lightning_path, output_path):
     region_tz = ZoneInfo(cfg.get("timezone", "America/Los_Angeles"))
     local_time = window_end.astimezone(region_tz)
     tz_label = "PDT" if "timezone" in cfg else local_time.strftime("%Z")
-    subtitle = (f"{total_in_region:,} flashes detected — GOES-18 GLM "
+    flash_word = "flash" if total_in_region == 1 else "flashes"
+    subtitle = (f"{total_in_region:,} {flash_word} detected — GOES-18 GLM "
                 f"{local_time.strftime('%H:%M')} {tz_label}")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 

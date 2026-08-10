@@ -463,7 +463,8 @@ def build_map(region_key, lightning_path, output_path):
     pt_date_label = window_start.astimezone(region_tz).strftime("%B %-d, %Y")
     fig.text(left_x, title_y, f"Lightning — {pt_date_label}",
               fontproperties=f_bold, fontsize=22, color="#2b2a26")
-    subtitle = f"{total_in_region:,} flashes detected — GOES-18 GLM, full day (Pacific time)"
+    flash_word = "flash" if total_in_region == 1 else "flashes"
+    subtitle = f"{total_in_region:,} {flash_word} detected — GOES-18 GLM"
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 
     # ---------- legend ----------
