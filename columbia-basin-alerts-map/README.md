@@ -33,6 +33,13 @@ publish on the same 10-minute cron cycle -- see `deploy/`.
 - `requirements.txt` / `setup.sh` — Python + system dependencies
   (cartopy needs GDAL, which only installs via apt, not pip; osmium-tool
   is also installed here for regenerating road data, see below).
+- `basemap_cache/` — not committed, gitignored, and needs no manual setup
+  — caches the static land/countries/states/counties/roads layer per
+  region as a raster PNG so a normal run doesn't re-render it from vector
+  data every time (a ~45-60s cost otherwise). Self-invalidating; see
+  "Basemap raster caching" under
+  `../columbia-basin-lightning-map/README.md` Notes for the full
+  write-up — identical mechanism here.
 
 ## Regions
 

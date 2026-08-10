@@ -140,10 +140,13 @@ tpw-wm6-ensemble-map/output/*.png
 # fetch_alerts.py fetches its source live every run, and the rendered PNGs
 # are outputs -- neither is source, so don't track them. state/ is the
 # droplet-deploy guard's runtime state (lock file, logs) -- created on the
-# server, not source.
+# server, not source. basemap_cache/ holds the cached basemap rasters
+# build_map.py rebuilds automatically (self-invalidating, see
+# _basemap_cache_key) -- regenerable build output, not source.
 columbia-basin-alerts-map/alerts_with_zones.json
 columbia-basin-alerts-map/*.png
 columbia-basin-alerts-map/state/
+columbia-basin-alerts-map/basemap_cache/
 
 # --- image-hit-stats ---
 # hits.sqlite3/cursor.json are runtime state built up on the server from

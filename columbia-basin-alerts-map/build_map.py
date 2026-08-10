@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -108,6 +109,20 @@ POLYGON_WARNING_EVENTS = {"Severe Thunderstorm Warning", "Tornado Warning", "Fla
 # never showed this, which is exactly why it went unnoticed until cron.
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MAPS_DIR = os.path.join(SCRIPT_DIR, "..", "maps")
+
+# Rendering land/countries/states/counties/roads is the overwhelming cost
+# of a render (~45-60s of a ~50-65s total, measured directly in
+# columbia-basin-lightning-map -- tens of thousands of road line segments
+# alone) even though none of it depends on the alerts data and is
+# identical from one run to the next. Cached per region as a flat raster
+# + its native-projection extent, so a normal run just imshow()s that
+# raster (a cheap pixel blit) instead of re-adding thousands of vector
+# geometries. Not committed to git (regenerable build output, like the
+# rendered PNGs); see _basemap_cache_key() for the self-healing
+# invalidation story.
+BASEMAP_CACHE_DIR = os.path.join(SCRIPT_DIR, "basemap_cache")
+STATIC_MAP_FILES = ["land_slim.json", "countries_slim.json", "admin1_boundary_lines.json",
+                     "states_lakes_slim.json", "counties_wa_or_id.geojson"]
 
 # How far a state boundary line can sit from the land layer before it's
 # treated as one of Natural Earth's offshore 3-nautical-mile maritime
@@ -385,28 +400,27 @@ def make_stripe_image(colors, width_px, height_px, stripe_px=20):
     return img
 
 
-def build_map(region_key, alerts_path, output_path):
-    cfg = REGIONS[region_key]
-    extent = region_extent(cfg["center_lon"], cfg["center_lat"],
-                            cfg.get("lon_span", LON_SPAN), cfg.get("lat_span", LAT_SPAN))
+def _basemap_cache_key(cfg):
+    """Hash of everything that affects the cached basemap raster's pixel
+    content: the region's own geometry/extent params, plus the mtime+size
+    (cheap os.stat, not a full re-read) of every source file the static
+    layers are drawn from. Editing a REGIONS entry or regenerating a
+    shared maps/ file changes this hash automatically -- the cache
+    self-invalidates and rebuilds on the next run, no manual "remember to
+    rebuild" step to forget."""
+    parts = [
+        cfg["center_lon"], cfg["center_lat"],
+        cfg.get("lon_span", LON_SPAN), cfg.get("lat_span", LAT_SPAN),
+        cfg.get("satellite_height", SATELLITE_HEIGHT),
+        tuple(cfg["roads_files"]),
+    ]
+    for fname in STATIC_MAP_FILES + list(cfg["roads_files"]):
+        st = os.stat(os.path.join(MAPS_DIR, fname))
+        parts.append((fname, st.st_mtime_ns, st.st_size))
+    return hashlib.sha256(repr(parts).encode()).hexdigest()[:16]
 
-    proj = ccrs.NearsidePerspective(central_longitude=cfg["center_lon"],
-                                     central_latitude=cfg["center_lat"],
-                                     satellite_height=cfg.get("satellite_height", SATELLITE_HEIGHT))
-    pc = ccrs.PlateCarree()
 
-    fig = plt.figure(figsize=(12, 8.3), dpi=200)
-    fig.patch.set_facecolor("#f7f6f2")
-    ax = fig.add_axes([0.04, 0.045, 0.92, 0.80], projection=proj)
-    ax.set_facecolor("white")
-    ax.set_extent(extent, crs=pc)
-
-    # Pixel size of the map's plotted area, used later to render candy-stripe
-    # fills at a consistent on-screen stripe width regardless of map extent.
-    fig.canvas.draw()
-    ax_bbox = ax.get_window_extent()
-    ax_w_px, ax_h_px = int(ax_bbox.width), int(ax_bbox.height)
-
+def _draw_static_layers(ax, pc, cfg):
     # ---------- land ----------
     land = json.load(open(f"{MAPS_DIR}/land_slim.json"))
     geoms = [shape(f["geometry"]) for f in land["features"]]
@@ -501,6 +515,93 @@ def build_map(region_key, alerts_path, output_path):
                        linewidth=1.1, zorder=5)
     ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR,
                        linewidth=1.3, zorder=6)
+
+
+def _get_basemap_raster(region_key, cfg, proj, pc, extent):
+    """Returns (rgba_array, native_extent) for this region's cached
+    basemap, rebuilding it first if the cache is missing or stale (see
+    _basemap_cache_key). native_extent is in the axes' own projected
+    coordinates (ax.get_extent(crs=proj)), not lon/lat -- imshow-ing the
+    raster back with transform=proj and this extent is a direct pixel
+    placement, not a re-projection, which is what makes reusing it fast."""
+    os.makedirs(BASEMAP_CACHE_DIR, exist_ok=True)
+    key = _basemap_cache_key(cfg)
+    png_path = os.path.join(BASEMAP_CACHE_DIR, f"{region_key}.png")
+    meta_path = os.path.join(BASEMAP_CACHE_DIR, f"{region_key}.json")
+
+    if os.path.exists(png_path) and os.path.exists(meta_path):
+        meta = json.load(open(meta_path))
+        if meta.get("key") == key:
+            return plt.imread(png_path), tuple(meta["native_extent"])
+
+    cache_fig = plt.figure(figsize=(12, 8.3), dpi=200)
+    cache_ax = cache_fig.add_axes([0, 0, 1, 1], projection=proj)
+    cache_ax.set_facecolor("white")
+    cache_ax.set_extent(extent, crs=pc)
+    _draw_static_layers(cache_ax, pc, cfg)
+    cache_fig.canvas.draw()
+    native_extent = cache_ax.get_extent(crs=proj)
+
+    # GeoAxes keeps aspect=1 (equal) between its data extent and its own
+    # display box -- when the box's shape (from its [x0,y0,w,h] fraction)
+    # doesn't already match the data's true aspect ratio, cartopy shrinks
+    # the axes' rendered box within its allocated space (visible via
+    # ax.get_position() changing after a draw) rather than distorting the
+    # projection. This happens for EVERY axes here, including the real
+    # build_map() one -- normally invisible because downstream code reads
+    # back the post-shrink ax.get_position() to place the title/legend/
+    # etc, and bbox_inches="tight" crops away the unused margin. But it
+    # means the raw canvas buffer captured here has that same shrink
+    # baked in as blank pixel margin around the actual content -- left
+    # uncropped, imshow-ing this bordered image back into a real axes
+    # (whose own box has *already* shrunk to the true content bounds, no
+    # margin left to absorb) doubles the gap. Crop to the axes' actual
+    # post-shrink pixel box so the saved raster is pure content, with
+    # zero built-in margin, matching what native_extent actually spans.
+    pos = cache_ax.get_position()
+    fig_w_px, fig_h_px = (cache_fig.get_size_inches() * cache_fig.dpi).astype(int)
+    x0, x1 = int(round(pos.x0 * fig_w_px)), int(round(pos.x1 * fig_w_px))
+    y0, y1 = int(round((1 - pos.y1) * fig_h_px)), int(round((1 - pos.y0) * fig_h_px))
+    buf = np.asarray(cache_fig.canvas.buffer_rgba())[y0:y1, x0:x1, :]
+
+    # imsave (not fig.savefig) writes exactly this pixel buffer, no
+    # further DPI/bbox reinterpretation -- what's captured is what gets
+    # replayed.
+    plt.imsave(png_path, buf)
+    plt.close(cache_fig)
+    json.dump({"key": key, "native_extent": list(native_extent)}, open(meta_path, "w"))
+    return plt.imread(png_path), native_extent
+
+
+def build_map(region_key, alerts_path, output_path):
+    cfg = REGIONS[region_key]
+    extent = region_extent(cfg["center_lon"], cfg["center_lat"],
+                            cfg.get("lon_span", LON_SPAN), cfg.get("lat_span", LAT_SPAN))
+
+    proj = ccrs.NearsidePerspective(central_longitude=cfg["center_lon"],
+                                     central_latitude=cfg["center_lat"],
+                                     satellite_height=cfg.get("satellite_height", SATELLITE_HEIGHT))
+    pc = ccrs.PlateCarree()
+
+    fig = plt.figure(figsize=(12, 8.3), dpi=200)
+    fig.patch.set_facecolor("#f7f6f2")
+    ax = fig.add_axes([0.04, 0.045, 0.92, 0.80], projection=proj)
+    ax.set_facecolor("white")
+    ax.set_extent(extent, crs=pc)
+
+    # Pixel size of the map's plotted area, used later to render candy-stripe
+    # fills at a consistent on-screen stripe width regardless of map extent.
+    fig.canvas.draw()
+    ax_bbox = ax.get_window_extent()
+    ax_w_px, ax_h_px = int(ax_bbox.width), int(ax_bbox.height)
+
+    # ---------- static basemap (land/countries/states/counties/roads) ----------
+    # Cached raster, not redrawn from vector data every run -- see
+    # _get_basemap_raster's docstring. zorder=0.9 keeps it below every live
+    # layer added below (lake fill used to be the lowest of these at 3).
+    basemap_img, basemap_native_extent = _get_basemap_raster(region_key, cfg, proj, pc, extent)
+    ax.imshow(basemap_img, origin="upper", extent=basemap_native_extent,
+              transform=proj, zorder=0.9)
 
     # ---------- alerts ----------
     alerts = json.load(open(alerts_path))
