@@ -12,6 +12,7 @@ import cartopy.crs as ccrs
 from shapely.geometry import shape, LineString, Point
 from shapely.ops import unary_union
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -276,7 +277,7 @@ REGIONS = {
             ("Jasper", -118.0708, 52.8734, "left"),
             ("Hope", -121.4416, 49.3821, "right"),
             ("Whistler", -122.9574, 50.1163, "right"),
-            ("Banff", -115.5708, 51.1784, "right"),
+            ("Banff", -115.5708, 51.1784, "left"),
             ("Nordegg", -116.0500, 52.4667, "right"),
         ],
     ),
@@ -474,8 +475,15 @@ def build_map(region_key, lightning_path, output_path):
     title_y = subtitle_y + 0.035
     fig.text(left_x, title_y, "Lightning (Last 2 Hours)",
               fontproperties=f_bold, fontsize=22, color="#2b2a26")
-    subtitle = (f"{total_in_region:,} flashes detected — GOES-18 GLM, "
-                f"{window_end.strftime('%b %d %H:%M UTC')} lookback")
+    # bc_interior is the only region with an explicit "timezone" override
+    # (America/Vancouver) -- it gets a precise PDT/PST label computed from
+    # that zone; every other region uses the shared "PT" convention rather
+    # than computing PST/PDT itself.
+    region_tz = ZoneInfo(cfg.get("timezone", "America/Los_Angeles"))
+    local_time = window_end.astimezone(region_tz)
+    tz_label = local_time.strftime("%Z") if "timezone" in cfg else "PT"
+    subtitle = (f"{total_in_region:,} flashes detected — GOES-18 GLM "
+                f"{local_time.strftime('%H:%M')} {tz_label}")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 
     # ---------- legend ----------
