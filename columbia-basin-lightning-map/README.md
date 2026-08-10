@@ -51,24 +51,33 @@ a region overrides them for a different zoom level.
   across both products. Reaches the WA/OR coast and the US/Canada border
   widely enough to need the same two fixes as that project (see Notes).
 - **`bc_interior`** -- new, no prior product on this domain. Wider than
-  true-zoom (`lon_span=10.0`, `lat_span=5.2`, `satellite_height=9_000_000`),
+  true-zoom (`lon_span=8.87`, `lat_span=5.2`, `satellite_height=9_000_000`),
   center `-119.68, 51.71` -- covers the Southern Interior
   (Kamloops/Kelowna/Vernon/Penticton), Prince George, the southwest
   corridor toward the coast (Hope, Whistler), and the Yellowhead Pass area
-  just across the Alberta border (Jasper, Nordegg, Banff). This
-  extent/center/zoom is a deliberate choice, not auto-tuned to whatever a
-  given storm happens to be doing -- a bounded regional map will always
-  have *some* edge, and real weather extending past it (tapering off
-  outside the frame rather than being visibly truncated inside it) is
-  expected, not a bug. What *is* a bug is the data pull itself falling
-  short of the render extent, which is a separate concern:
-  `fetch_lightning.py`'s shared bbox is re-verified after every domain
-  change to confirm it still fully contains all four regions' extents. Its
-  east edge is deliberately pulled well past what any region currently
-  renders (out to roughly Alberta's eastern border) rather than trimmed
-  tight to `bc_interior`'s own -114.68 render edge -- storms east of the
-  frame are common, fetch cost doesn't scale with bbox area, and it's
-  fine for the pull to cover ground no map currently displays. Uses
+  just across the Alberta border (Jasper, Nordegg, Banff). `lat_span` and
+  `satellite_height` are independent choices (5.2 for Prince George's
+  latitude, 9,000,000 so that span doesn't clip at the frame edges) and
+  aren't tied to any particular storm's shape -- a bounded regional map
+  will always have *some* edge, and real weather extending past it
+  (tapering off outside the frame rather than being visibly truncated
+  inside it) is expected, not a bug. `lon_span`, however, is *not* picked
+  independently: it's `lat_span` converted to real ground km (`5.2 *
+  111.32`) times Columbia Basin's true-zoom width:height ratio in km
+  (`(5.5 * cos(46.2deg)) / 3.6`), converted back to degrees at this
+  region's own latitude (dividing by `111.32 * cos(51.71deg)`) --
+  `8.87`. Picking `lon_span` by eye in raw degrees, as earlier revisions
+  of this region did, produces a box whose real-world aspect ratio
+  doesn't match the other true-zoom regions, since a degree of longitude
+  covers less ground the farther north you go; that mismatch (not the
+  zoom level or the fetch) was the actual source of earlier "hard
+  cutoff" complaints about this region. `fetch_lightning.py`'s shared
+  bbox is still re-verified after every domain change to confirm it
+  fully contains all four regions' extents, and its east edge is
+  deliberately pulled well past what any region currently renders (out
+  to roughly Alberta's eastern border) since storms east of the frame
+  are common and fetch cost doesn't scale with bbox area -- it's fine
+  for the pull to cover ground no map currently displays. Uses
   `America/Vancouver` (not
   `America/Los_Angeles`) for its day/time labels -- numerically identical
   to Pacific time for any date since 2007, so this is a correctness/clarity

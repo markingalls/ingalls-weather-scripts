@@ -233,21 +233,28 @@ REGIONS = {
     # Southern Interior (Kamloops/Kelowna/Vernon/Penticton), Prince
     # George, the southwest corridor (Hope, Whistler), and the Yellowhead
     # Pass area just across the Alberta border (Jasper, Banff, Nordegg).
-    # Map size/extent is deliberately NOT auto-widened just because a
-    # storm cell extends past the frame edge -- that's an expected
-    # property of any bounded regional map, not a bug. The shared fetch
-    # bbox in fetch_lightning.py is re-verified after every domain change
-    # to make sure it fully covers whatever this extent actually is, but
-    # fetch coverage and render extent are two separate concerns; only
-    # change this extent on an explicit request to resize/reposition it.
-    # `timezone` (America/Vancouver, not America/Los_Angeles) is used for
-    # this region's day/time labels -- numerically identical to Pacific
-    # Time for any date since 2007 (Canada's DST rules matched the US
-    # that year), so this is a correctness/clarity fix, not a behavior
-    # change today.
+    # lat_span=5.2 and satellite_height=9_000_000 are chosen independently
+    # (5.2 for Prince George's latitude, 9_000_000 so that span doesn't
+    # clip at the frame edges) and are NOT to be changed just because a
+    # storm extends past the frame -- that's expected for any bounded
+    # regional map, not a bug. lon_span=8.87 is NOT an independent choice
+    # picked by eye, though -- it's lat_span converted to real ground km
+    # (5.2 * 111.32) times Columbia Basin's true-zoom width:height ratio
+    # in km ((5.5 * cos(46.2deg)) / 3.6), converted back to degrees at
+    # this region's own latitude (dividing by 111.32 * cos(51.71deg)).
+    # Picking lon_span by eye in raw degrees (as earlier revisions of this
+    # region did) produces a box whose real-world aspect ratio doesn't
+    # match the other true-zoom regions, since a degree of longitude
+    # covers less ground the farther north you go -- that mismatch, not
+    # the zoom level or the fetch, was the actual source of the
+    # "hard cutoff" complaints. `timezone` (America/Vancouver, not
+    # America/Los_Angeles) is used for this region's day/time labels --
+    # numerically identical to Pacific Time for any date since 2007
+    # (Canada's DST rules matched the US that year), so this is a
+    # correctness/clarity fix, not a behavior change today.
     "bc_interior": dict(
         center_lon=-119.68, center_lat=51.71,
-        lon_span=10.0, lat_span=5.2, satellite_height=9_000_000,
+        lon_span=8.87, lat_span=5.2, satellite_height=9_000_000,
         timezone="America/Vancouver",
         roads_files=["british_columbia_roads.geojson", "alberta_roads_west.geojson"],
         output="bc_interior_lightning_realtime.png",
@@ -267,7 +274,7 @@ REGIONS = {
             ("Revelstoke", -118.1957, 50.9981, "right"),
             ("Blue River", -119.2907, 52.1319, "right"),
             ("Jasper", -118.0708, 52.8734, "left"),
-            ("Hope", -121.4416, 49.3821, "left"),
+            ("Hope", -121.4416, 49.3821, "right"),
             ("Whistler", -122.9574, 50.1163, "right"),
             ("Banff", -115.5708, 51.1784, "right"),
             ("Nordegg", -116.0500, 52.4667, "right"),
