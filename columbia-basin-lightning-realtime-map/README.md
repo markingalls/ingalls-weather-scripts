@@ -28,6 +28,12 @@ day's worth of activity.
   companion's 15-minute cadence since this is the real-time product.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies
   (cartopy needs GDAL, which only installs via apt, not pip).
+- `basemap_cache/` -- not committed, gitignored, and needs no manual setup
+  -- caches the static land/countries/states/counties/roads layer per
+  region as a raster PNG so a normal run doesn't re-render it from vector
+  data every time (a ~45-60s cost otherwise). Self-invalidating; see
+  "Basemap raster caching" under `../columbia-basin-lightning-map/README.md`
+  Notes for the full write-up -- identical mechanism here.
 
 Shared basemap data lives one level up in [`../maps/`](../maps/) -- see
 `../columbia-basin-alerts-map/README.md` for what each file is. The

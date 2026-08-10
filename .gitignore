@@ -72,6 +72,7 @@ columbia-basin-lightning-map/basemap_cache/
 columbia-basin-lightning-realtime-map/lightning_last2h.json
 columbia-basin-lightning-realtime-map/*_lightning_realtime.png
 columbia-basin-lightning-realtime-map/state/
+columbia-basin-lightning-realtime-map/basemap_cache/
 
 # --- columbia-basin-lightning-daily-map ---
 # lightning_daily.json is live data fetch_lightning.py regenerates every
@@ -80,10 +81,13 @@ columbia-basin-lightning-realtime-map/state/
 # checkout -- neither is source, so don't track them. state/ is the
 # droplet-deploy guard's runtime state (lock file, logs, and the
 # last-rotation-date marker publish_daily.py's idempotency depends on) --
-# created on the server, not source.
+# created on the server, not source. basemap_cache/ holds the cached
+# basemap rasters build_map.py rebuilds automatically (self-invalidating,
+# see _basemap_cache_key) -- regenerable build output, not source.
 columbia-basin-lightning-daily-map/lightning_daily.json
 columbia-basin-lightning-daily-map/*_lightning_day*.png
 columbia-basin-lightning-daily-map/state/
+columbia-basin-lightning-daily-map/basemap_cache/
 
 # --- dew-point-storm-map ---
 # build_map.py fetches its source grids live; output/ only holds saved
