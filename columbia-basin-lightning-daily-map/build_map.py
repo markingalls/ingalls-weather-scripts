@@ -220,18 +220,17 @@ REGIONS = {
     ),
     # Wider than the true-zoom span (not as wide as "pnw") -- covers the
     # Southern Interior (Kamloops/Kelowna/Vernon/Penticton), Prince
-    # George, and now the Yellowhead Pass area just across the Alberta
-    # border (Jasper). The original lon_span=7.5 east edge (-116.72) cut
-    # off storm activity mid-frame with a visible hard edge; lon_span=10.0
-    # pushes that edge to -114.25, well past Jasper, without losing the
-    # western cities. Center is still the midpoint of the region's own
-    # extent, not any single city. `timezone` (America/Vancouver, not
-    # America/Los_Angeles) is used for this region's day/time labels --
-    # numerically identical to Pacific Time for any date since 2007
-    # (Canada's DST rules matched the US that year), so this is a
-    # correctness/clarity fix, not a behavior change today.
+    # George, and the Yellowhead Pass area just across the Alberta border
+    # (Jasper). Shifted ~30km (0.435 degrees at this latitude) west of the
+    # originally-centered -119.25 to better balance the Southern Interior
+    # cities within the frame; extent is now -124.68 to -114.68 in
+    # longitude. `timezone` (America/Vancouver, not America/Los_Angeles)
+    # is used for this region's day/time labels -- numerically identical
+    # to Pacific Time for any date since 2007 (Canada's DST rules matched
+    # the US that year), so this is a correctness/clarity fix, not a
+    # behavior change today.
     "bc_interior": dict(
-        center_lon=-119.25, center_lat=51.71,
+        center_lon=-119.68, center_lat=51.71,
         lon_span=10.0, lat_span=5.2, satellite_height=9_000_000,
         timezone="America/Vancouver",
         roads_files=["british_columbia_roads.geojson", "alberta_roads_west.geojson"],

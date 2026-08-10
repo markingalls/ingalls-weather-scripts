@@ -55,20 +55,27 @@ a region overrides them for a different zoom level.
   to cover the Southern Interior (Kamloops/Kelowna/Vernon/Penticton),
   Prince George (~4.4 degrees north of Penticton), and the Yellowhead
   Pass area just across the Alberta border (Jasper); center is the
-  midpoint of that span, not any single city. The east edge was
-  originally `lon_span=7.5` (edge at -116.72), which cut off real storm
-  activity mid-frame with a visible hard edge well short of Jasper --
-  `lon_span=10.0` (edge at -114.25) fixed that without losing the western
-  cities; the shared fetch bbox in `fetch_lightning.py` already reached
-  farther east than this (bounded by `pnw`'s own wider extent), so no
-  fetch change was needed, only the render extent. Uses
+  midpoint of that span, not any single city, currently `-119.68,
+  51.71` -- shifted ~30km (0.435 degrees at this latitude) west of an
+  earlier `-119.25` center to better balance the Southern Interior cities
+  in the frame. The east edge was originally `lon_span=7.5`
+  (edge at -116.72), which cut off real storm activity mid-frame with a
+  visible hard edge well short of Jasper -- `lon_span=10.0` (edge now at
+  -114.68) fixed that without losing the western cities; the shared fetch
+  bbox in `fetch_lightning.py` already reached farther east than this
+  (bounded by `pnw`'s own wider extent), so no fetch change was needed,
+  only the render extent -- verified the shared bbox still fully contains
+  all four regions' extents after this shift too. Uses
   `America/Vancouver` (not `America/Los_Angeles`) for its day/time labels
   -- numerically identical to Pacific time for any date since 2007, so
   this is a correctness/clarity fix rather than a behavior change. Roads
   come from `../maps/british_columbia_roads.geojson` (Geofabrik BC
-  extract) plus `../maps/alberta_roads_west.geojson` (Geofabrik Alberta
-  extract, clipped to just the Jasper/Yellowhead area) -- both filtered
-  to motorway/trunk/primary.
+  extract, clipped to LON -125.5 to -113.5 / LAT 48.5 to 55.0 -- widened
+  from an earlier -116.0 eastern clip that was silently losing highways
+  in southeastern BC, e.g. around Cranbrook/Fernie, well before the
+  render's own edge) plus `../maps/alberta_roads_west.geojson` (Geofabrik
+  Alberta extract, clipped to just the Jasper/Yellowhead area) -- both
+  filtered to motorway/trunk/primary.
 
 ## Usage
 
