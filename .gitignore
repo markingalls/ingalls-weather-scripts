@@ -42,8 +42,12 @@ western-us-noaa-outlooks/state/
 # build_map.py fetches its source grids live; data/ only holds saved
 # snapshots for a --file override (testing / avoiding re-fetching), and the
 # rendered PNGs are outputs -- neither is source, so don't track them.
+# basemap_cache/ holds the cached overlay raster build_map.py rebuilds
+# automatically (self-invalidating, see _basemap_cache_key) -- regenerable
+# build output, not source.
 columbia-basin-temps/data/*.npz
 columbia-basin-temps/output/*.png
+columbia-basin-temps/basemap_cache/
 
 # --- 850-700-temp-chart ---
 # forecast.json/climatology.json are live data fetch_forecast.py and

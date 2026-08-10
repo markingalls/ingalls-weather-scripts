@@ -65,6 +65,7 @@ Logo is read from /assets/ingalls_weather_logo.png at repo root.
 """
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -106,6 +107,20 @@ MAPS_DIR = REPO_ROOT / "maps"
 ASSETS_DIR = REPO_ROOT / "assets"
 THIS_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = THIS_DIR / "output"
+
+# Land outline + admin lines + roads are identical from one run to the
+# next -- only the temperature raster underneath actually changes -- but
+# drawing them (motorway/trunk alone: ~30,000 road line segments) was
+# measured at ~18s of this project's ~22s render. Rendered once into a
+# cached *transparent* RGBA raster and imshow-ed back on top of the live
+# temperature layer on every subsequent run, instead of re-adding
+# thousands of vector geometries -- see _get_basemap_overlay(). This
+# project has a single fixed region/extent (unlike the REGIONS-dict
+# projects that also use this technique), so there's just one cache
+# entry, not one per region. Not committed to git (regenerable build
+# output, like the rendered PNGs); see _basemap_cache_key() for the
+# self-healing invalidation story.
+BASEMAP_CACHE_DIR = THIS_DIR / "basemap_cache"
 
 ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
@@ -594,6 +609,86 @@ def load_roads():
     return motorway_geoms, trunk_geoms
 
 
+def _basemap_cache_key():
+    """Hash of everything that affects the cached overlay raster's pixel
+    content: the fixed map geometry/extent constants, plus the mtime+size
+    (cheap os.stat, not a full re-read) of every source file the overlay
+    is drawn from. Regenerating a shared maps/ file changes this hash
+    automatically -- the cache self-invalidates and rebuilds on the next
+    run, no manual "remember to rebuild" step to forget."""
+    parts = [CENTER_LON, CENTER_LAT, LON_MIN, LON_MAX, LAT_MIN, LAT_MAX,
+             FIG_WIDTH_IN, FIG_HEIGHT_IN, FIG_DPI, tuple(AXES_RECT), tuple(ROAD_FILES)]
+    for path in [ADMIN1_LINES_FILE, ADMIN0_LINES_FILE, LAND_FILE] + [MAPS_DIR / f for f in ROAD_FILES]:
+        st = path.stat()
+        parts.append((str(path), st.st_mtime_ns, st.st_size))
+    return hashlib.sha256(repr(parts).encode()).hexdigest()[:16]
+
+
+def _get_basemap_overlay(proj, pc):
+    """Returns (rgba_array, native_extent) for the cached land-outline +
+    admin-line + roads overlay, rebuilding it first if the cache is
+    missing or stale (see _basemap_cache_key). Unlike the opaque
+    basemap-raster caches used in the REGIONS-dict map projects, this one
+    is captured with a fully transparent background (fig/axes patch alpha
+    0) since it's imshow-ed back *on top* of the live temperature raster,
+    not underneath it -- everywhere no line was drawn stays transparent
+    and the temperature color underneath shows through unchanged.
+    native_extent is in the axes' own projected coordinates
+    (ax.get_extent(crs=proj)), not lon/lat -- imshow-ing the raster back
+    with transform=proj and this extent is a direct pixel placement, not
+    a re-projection, which is what makes reusing it fast."""
+    BASEMAP_CACHE_DIR.mkdir(exist_ok=True)
+    key = _basemap_cache_key()
+    png_path = BASEMAP_CACHE_DIR / "overlay.png"
+    meta_path = BASEMAP_CACHE_DIR / "overlay.json"
+
+    if png_path.exists() and meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        if meta.get("key") == key:
+            return plt.imread(png_path), tuple(meta["native_extent"])
+
+    admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
+    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
+    land_geoms = load_land()
+    motorway_geoms, trunk_geoms = load_roads()
+
+    cache_fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
+    cache_fig.patch.set_alpha(0.0)
+    cache_ax = cache_fig.add_axes([0, 0, 1, 1], projection=proj)
+    cache_ax.patch.set_alpha(0.0)
+    cache_ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
+    cache_ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
+    cache_ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
+    cache_ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+    cache_ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR, linewidth=1.1, zorder=2.6)
+    cache_ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR, linewidth=1.3, zorder=2.7)
+    cache_fig.canvas.draw()
+    native_extent = cache_ax.get_extent(crs=proj)
+
+    # GeoAxes keeps aspect=1 (equal) between its data extent and its own
+    # display box -- when the box's shape (from its [x0,y0,w,h] fraction)
+    # doesn't already match the data's true aspect ratio, cartopy shrinks
+    # the axes' rendered box within its allocated space rather than
+    # distorting the projection (see columbia-basin-lightning-map's
+    # _get_basemap_raster for the full writeup -- same mechanism here).
+    # Crop to the axes' actual post-shrink pixel box so the saved raster
+    # is pure content, with zero built-in margin, matching what
+    # native_extent actually spans.
+    pos = cache_ax.get_position()
+    fig_w_px, fig_h_px = (cache_fig.get_size_inches() * cache_fig.dpi).astype(int)
+    x0, x1 = int(round(pos.x0 * fig_w_px)), int(round(pos.x1 * fig_w_px))
+    y0, y1 = int(round((1 - pos.y1) * fig_h_px)), int(round((1 - pos.y0) * fig_h_px))
+    buf = np.asarray(cache_fig.canvas.buffer_rgba())[y0:y1, x0:x1, :]
+
+    # imsave (not fig.savefig) writes exactly this pixel buffer, no
+    # further DPI/bbox reinterpretation -- what's captured is what gets
+    # replayed. imsave preserves the alpha channel for an (H, W, 4) array.
+    plt.imsave(png_path, buf)
+    plt.close(cache_fig)
+    meta_path.write_text(json.dumps({"key": key, "native_extent": list(native_extent)}))
+    return plt.imread(png_path), native_extent
+
+
 def metric_title(metric, hour):
     if metric == "high":
         return "High Temperatures"
@@ -635,12 +730,6 @@ def build_map(source, metric, hour, date, output_path, override_path=None):
                       round(lon_frac0 * RESAMPLE_NX):round(lon_frac1 * RESAMPLE_NX)]
     print(f"{metric.capitalize()} range: {visible.min():.0f}F - {visible.max():.0f}F")
 
-    print("Loading basemap layers...")
-    admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
-    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
-    land_geoms = load_land()
-    motorway_geoms, trunk_geoms = load_roads()
-
     proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
                                      satellite_height=4_000_000)
     pc = ccrs.PlateCarree()
@@ -663,15 +752,14 @@ def build_map(source, metric, hour, date, output_path, override_path=None):
     ax.imshow(temp_k, transform=pc, cmap=temp_cmap, norm=temp_norm, origin="lower",
               extent=[RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX], zorder=1)
 
-    # Coastline -- outline only (no fill) so the temperature color still
-    # shows over water; this is what traces the Puget Sound's shape.
-    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
-
-    ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
-    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
-
-    ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR, linewidth=1.1, zorder=2.6)
-    ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR, linewidth=1.3, zorder=2.7)
+    # Coastline (outline only, so the temperature color still shows over
+    # water -- this is what traces the Puget Sound's shape) + admin lines
+    # + roads -- cached transparent raster, not redrawn from vector data
+    # every run -- see _get_basemap_overlay's docstring. zorder=1.6 keeps
+    # it above the temperature raster (1) and below the city labels (100).
+    overlay_img, overlay_native_extent = _get_basemap_overlay(proj, pc)
+    ax.imshow(overlay_img, origin="upper", extent=overlay_native_extent,
+              transform=proj, zorder=1.6)
 
     # City labels -- name plus that spot's forecast value, sampled from the
     # resampled regular grid. Text always sits left or right of its dot;

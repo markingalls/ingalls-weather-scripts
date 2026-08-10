@@ -73,6 +73,10 @@ snapshot only holds the grid, not the labels.
 - `requirements.txt` / `setup.sh` — Python + system dependencies (cartopy
   needs GDAL, and cfgrib/eccodes -- GRIB2 decoding for hrrr/ecmwf-ifs/
   ecmwf-aifs -- needs libeccodes, both only installing via apt, not pip).
+- `basemap_cache/` — not committed, gitignored, and needs no manual setup
+  — caches the coastline/admin-line/roads overlay as a single transparent
+  raster PNG so a normal run doesn't re-render it from vector data every
+  time. See "Basemap raster caching" below.
 
 Shared basemap data lives one level up in [`../maps/`](../maps/):
 `admin1_boundary_lines.json` / `admin0_boundary_lines.json` (state/province
@@ -111,6 +115,28 @@ Notes. The Ingalls Weather logo lives in
   far smaller than TIGER's raw ~1m vertices. International (admin0) and
   Canadian provincial lines are still Natural Earth 10m, since TIGER only
   covers the US.
+- **Basemap raster caching**: the coastline/admin-line/roads overlay is
+  the same on every run -- only the temperature raster underneath
+  actually changes. Redrawing it from vector data (motorway + trunk
+  roads alone: ~30,000 line segments) was measured at ~18-21s of this
+  project's ~22-27s total render, so `build_map.py` now renders it once
+  into a cached raster under `basemap_cache/` and `ax.imshow()`s it back
+  on every subsequent run -- a warm run is ~5-6s instead of ~22-27s.
+  Unlike the REGIONS-dict map projects (`columbia-basin-lightning-map`
+  etc.), this project has one fixed extent, so there's a single cache
+  entry (`overlay.png`), not one per region -- and unlike those
+  projects' *opaque* basemap raster (drawn first, everything else on
+  top), this one is captured with a **transparent** background and
+  drawn *on top* of the live temperature `imshow()` layer, since that's
+  where the coastline/roads sit in this map (see `_get_basemap_overlay()`
+  for the "outline only, over the color" design and how the transparency
+  is captured/preserved). The cache key
+  (`_basemap_cache_key()`) hashes the map's own extent/figure params
+  plus the `(mtime, size)` of every static `../maps/` file the overlay
+  reads from, so regenerating a shared `maps/` file self-invalidates the
+  cache automatically on the next run. Deleting `basemap_cache/` entirely
+  is always safe; it just costs one slow rebuild on the next run. Not
+  committed to git, same as the rendered output PNGs.
 - The coastline (`land_slim.json`, the same layer `columbia-basin-alerts-map`
   uses for its land fill) is drawn outline-only here, with no fill, so it
   traces the Puget Sound without covering up the temperature color over
