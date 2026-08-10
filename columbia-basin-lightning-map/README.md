@@ -50,32 +50,29 @@ a region overrides them for a different zoom level.
   `satellite_height=22_000_000`), so the same named domain looks the same
   across both products. Reaches the WA/OR coast and the US/Canada border
   widely enough to need the same two fixes as that project (see Notes).
-- **`bc_interior`** -- new, no prior product on this domain. Wider than
-  true-zoom (`lon_span=10.0`, `lat_span=5.2`, `satellite_height=9_000_000`)
-  to cover the Southern Interior (Kamloops/Kelowna/Vernon/Penticton),
-  Prince George (~4.4 degrees north of Penticton), and the Yellowhead
-  Pass area just across the Alberta border (Jasper); center is the
-  midpoint of that span, not any single city, currently `-119.68,
-  51.71` -- shifted ~30km (0.435 degrees at this latitude) west of an
-  earlier `-119.25` center to better balance the Southern Interior cities
-  in the frame. The east edge was originally `lon_span=7.5`
-  (edge at -116.72), which cut off real storm activity mid-frame with a
-  visible hard edge well short of Jasper -- `lon_span=10.0` (edge now at
-  -114.68) fixed that without losing the western cities; the shared fetch
-  bbox in `fetch_lightning.py` already reached farther east than this
-  (bounded by `pnw`'s own wider extent), so no fetch change was needed,
-  only the render extent -- verified the shared bbox still fully contains
-  all four regions' extents after this shift too. Uses
-  `America/Vancouver` (not `America/Los_Angeles`) for its day/time labels
-  -- numerically identical to Pacific time for any date since 2007, so
-  this is a correctness/clarity fix rather than a behavior change. Roads
-  come from `../maps/british_columbia_roads.geojson` (Geofabrik BC
-  extract, clipped to LON -125.5 to -113.5 / LAT 48.5 to 55.0 -- widened
-  from an earlier -116.0 eastern clip that was silently losing highways
-  in southeastern BC, e.g. around Cranbrook/Fernie, well before the
-  render's own edge) plus `../maps/alberta_roads_west.geojson` (Geofabrik
-  Alberta extract, clipped to just the Jasper/Yellowhead area) -- both
-  filtered to motorway/trunk/primary.
+- **`bc_interior`** -- new, no prior product on this domain. Much wider
+  than true-zoom (`lon_span=12.0`, `lat_span=5.2`,
+  `satellite_height=11_000_000`), center `-118.68, 51.71` -- covers the
+  Southern Interior (Kamloops/Kelowna/Vernon/Penticton), Prince George,
+  the southwest corridor toward the coast (Hope, Whistler), and well into
+  Alberta via the Yellowhead Pass and Icefields Parkway (Jasper, Nordegg,
+  Banff). This extent grew in several rounds, each time because a real
+  storm cell was getting cut off mid-frame with a visible hard edge
+  rather than tapering off naturally -- most recently the east edge moved
+  from -114.68 to -112.68. `fetch_lightning.py`'s shared bbox has been
+  re-verified to fully contain all four regions' extents after every
+  change; it's currently bounded by `bc_interior`'s own east edge (not
+  `pnw`'s, which is narrower there) and by `bc_interior`'s north edge
+  (Prince George). Uses `America/Vancouver` (not `America/Los_Angeles`)
+  for its day/time labels -- numerically identical to Pacific time for
+  any date since 2007, so this is a correctness/clarity fix rather than a
+  behavior change. Roads come from `../maps/british_columbia_roads.geojson`
+  (Geofabrik BC extract, clipped to LON -125.5 to -113.5 / LAT 48.5 to
+  55.0 -- widened east after an earlier -116.0 clip was silently losing
+  highways in southeastern BC, e.g. around Cranbrook/Fernie) plus
+  `../maps/alberta_roads_west.geojson` (Geofabrik Alberta extract,
+  clipped to LON -120.0 to -111.0 / LAT 48.5 to 55.0) -- both filtered to
+  motorway/trunk/primary.
 
 ## Usage
 

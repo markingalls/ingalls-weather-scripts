@@ -231,18 +231,20 @@ REGIONS = {
     ),
     # Wider than the true-zoom span (not as wide as "pnw") -- covers the
     # Southern Interior (Kamloops/Kelowna/Vernon/Penticton), Prince
-    # George, and the Yellowhead Pass area just across the Alberta border
-    # (Jasper). Shifted ~30km (0.435 degrees at this latitude) west of the
-    # originally-centered -119.25 to better balance the Southern Interior
-    # cities within the frame; extent is now -124.68 to -114.68 in
-    # longitude. `timezone` (America/Vancouver, not America/Los_Angeles)
-    # is used for this region's day/time labels -- numerically identical
-    # to Pacific Time for any date since 2007 (Canada's DST rules matched
-    # the US that year), so this is a correctness/clarity fix, not a
-    # behavior change today.
+    # George, and now well into Alberta (Jasper, Banff, Nordegg) via the
+    # Yellowhead Pass and Icefields Parkway corridors. The east edge was
+    # still visibly cutting off real storm activity after the first
+    # widening (-114.68), so it moved out again to -112.68 (lon_span
+    # 10.0 -> 12.0, center shifted east from -119.68 to -118.68); west
+    # edge stays -124.68, unchanged from the 30km shift. `timezone`
+    # (America/Vancouver, not America/Los_Angeles) is used for this
+    # region's day/time labels -- numerically identical to Pacific Time
+    # for any date since 2007 (Canada's DST rules matched the US that
+    # year), so this is a correctness/clarity fix, not a behavior change
+    # today.
     "bc_interior": dict(
-        center_lon=-119.68, center_lat=51.71,
-        lon_span=10.0, lat_span=5.2, satellite_height=9_000_000,
+        center_lon=-118.68, center_lat=51.71,
+        lon_span=12.0, lat_span=5.2, satellite_height=11_000_000,
         timezone="America/Vancouver",
         roads_files=["british_columbia_roads.geojson", "alberta_roads_west.geojson"],
         output="bc_interior_lightning_realtime.png",
@@ -262,6 +264,10 @@ REGIONS = {
             ("Revelstoke", -118.1957, 50.9981, "right"),
             ("Blue River", -119.2907, 52.1319, "right"),
             ("Jasper", -118.0708, 52.8734, "left"),
+            ("Hope", -121.4416, 49.3821, "left"),
+            ("Whistler", -122.9574, 50.1163, "right"),
+            ("Banff", -115.5708, 51.1784, "right"),
+            ("Nordegg", -116.0500, 52.4667, "right"),
         ],
     ),
 }
