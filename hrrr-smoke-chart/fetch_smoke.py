@@ -38,6 +38,14 @@ DEFAULT_LOCATIONS = [
     {"label": "Hermiston, OR", "lat": 45.8404, "lon": -119.2895},
 ]
 
+# Herbie's default source list still tries Utah CHPC's Pando archive
+# (pando-rgw01/02.chpc.utah.edu), which its own maintainers say is "being
+# reduced" now that NOAA publishes HRRR directly on AWS Open Data --
+# confirmed dead (connection reset on both hosts). Pinning the priority
+# list to the sources NOAA/Utah both point people at now skips Pando
+# entirely instead of hanging on it before falling through.
+HRRR_SOURCE_PRIORITY = ["aws", "nomads", "google"]
+
 
 def select_latest_48h_run():
     """Most recent HRRR init at a synoptic hour (00/06/12/18z) that has
@@ -47,7 +55,7 @@ def select_latest_48h_run():
     for lookback_cycles in range(20):
         candidate = now - timedelta(hours=6 * lookback_cycles)
         H = Herbie(candidate.replace(tzinfo=None), model="hrrr", product="sfc",
-                   fxx=MAX_FORECAST_HOUR, verbose=False)
+                   fxx=MAX_FORECAST_HOUR, priority=HRRR_SOURCE_PRIORITY, verbose=False)
         if H.grib is not None:
             return candidate
     sys.exit("Could not find a complete HRRR 00/06/12/18z run (through F48) on NOAA's servers.")
@@ -71,7 +79,7 @@ def fetch(locations, run_init):
         for search, (var_key, units, scale) in FIELDS.items():
             print(f"Fetching HRRR {run_init:%Y-%m-%d %H}z F{fxx:02d} -- {var_key} ...")
             ds = Herbie(run_init.replace(tzinfo=None), model="hrrr", product="sfc",
-                        fxx=fxx, verbose=False).xarray(search)
+                        fxx=fxx, priority=HRRR_SOURCE_PRIORITY, verbose=False).xarray(search)
 
             if indices is None:
                 lat_grid = ds.latitude.values

@@ -30,6 +30,14 @@ DEFAULT_LON = -119.1189
 MAX_FORECAST_HOUR = 48
 KG_PER_M2_TO_MG_PER_M2 = 1_000_000
 
+# Herbie's default source list still tries Utah CHPC's Pando archive
+# (pando-rgw01/02.chpc.utah.edu), which its own maintainers say is "being
+# reduced" now that NOAA publishes HRRR directly on AWS Open Data --
+# confirmed dead from here too (connection reset on both hosts). Pinning
+# the priority list to the sources NOAA/Utah both point people at now
+# skips Pando entirely instead of hanging on it before falling through.
+HRRR_SOURCE_PRIORITY = ["aws", "nomads", "google"]
+
 
 def select_hrrr_run():
     """Most recent synoptic-hour HRRR init (00/06/12/18z UTC) with its full
@@ -45,7 +53,7 @@ def select_hrrr_run():
     for lookback_cycles in range(12):
         candidate = now - timedelta(hours=6 * lookback_cycles)
         if Herbie(candidate.replace(tzinfo=None), model="hrrr", product="sfc",
-                  fxx=MAX_FORECAST_HOUR, verbose=False).grib is not None:
+                  fxx=MAX_FORECAST_HOUR, priority=HRRR_SOURCE_PRIORITY, verbose=False).grib is not None:
             return candidate
     sys.exit("Could not find a recent synoptic-hour HRRR run on NOAA's servers.")
 
@@ -64,7 +72,7 @@ def fetch(lat, lon):
     hourly = []
     for fxx in range(1, MAX_FORECAST_HOUR + 1):
         ds = Herbie(run_init.replace(tzinfo=None), model="hrrr", product="sfc",
-                    fxx=fxx, verbose=False).xarray(":COLMD:entire atmosphere")
+                    fxx=fxx, priority=HRRR_SOURCE_PRIORITY, verbose=False).xarray(":COLMD:entire atmosphere")
         vis_kg_m2 = nearest_point_value(ds, lat, lon)
         valid_time = run_init + timedelta(hours=fxx)
         hourly.append({

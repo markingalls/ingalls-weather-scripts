@@ -95,10 +95,24 @@ def build_location(loc, env):
     subprocess.run([PYTHON, "fetch_ecmwf_ensemble_forecast.py", "--lat", str(lat), "--lon", str(lon)],
                     cwd=BASE_DIR, check=True, env=env)
 
+    # HRRR smoke is a decorative overlay (build_graphic.py already renders
+    # fine without it -- see its `if os.path.exists(args.hrrr_smoke_forecast)`
+    # check), not a hard prerequisite like the four sources above, so its
+    # failure shouldn't take down the whole graphic the way theirs would.
     month = datetime.now(timezone.utc).month
     if 5 <= month <= 10:
-        subprocess.run([PYTHON, "fetch_hrrr_smoke_forecast.py", "--lat", str(lat), "--lon", str(lon)],
-                        cwd=BASE_DIR, check=True, env=env)
+        smoke_path = os.path.join(BASE_DIR, "hrrr_smoke_forecast.json")
+        try:
+            subprocess.run([PYTHON, "fetch_hrrr_smoke_forecast.py", "--lat", str(lat), "--lon", str(lon)],
+                            cwd=BASE_DIR, check=True, env=env)
+        except subprocess.CalledProcessError as e:
+            log(f"{loc['label']}: HRRR smoke fetch FAILED ({e}) -- rendering without a smoke overlay.")
+            # The fetch script writes its output only on success, so a
+            # failure here can only mean this file (if present at all) is
+            # left over from a previous successful run -- remove it rather
+            # than silently reusing a possibly days-stale smoke forecast.
+            if os.path.exists(smoke_path):
+                os.remove(smoke_path)
     else:
         log(f"{loc['label']}: outside smoke season (May-Oct), skipping HRRR smoke fetch.")
 

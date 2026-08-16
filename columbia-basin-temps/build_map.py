@@ -444,6 +444,18 @@ def fetch_wm6_3km(date, metric, hour, api_key):
 # directly from each model's own free distribution via Herbie (byte-range
 # subsetting, so only the temperature_2m record is pulled from each file).
 # ---------------------------------------------------------------------------
+
+# Herbie's default source list still tries Utah CHPC's Pando archive
+# (pando-rgw01/02.chpc.utah.edu) for HRRR, which its own maintainers say is
+# "being reduced" now that NOAA publishes HRRR directly on AWS Open Data --
+# confirmed dead (connection reset on both hosts). Pinning the priority
+# list to the sources NOAA/Utah both point people at now skips Pando
+# entirely instead of hanging on it before falling through. ECMWF (ifs/
+# aifs) isn't affected -- that comes from ECMWF's own Open Data
+# distribution, not Pando -- so this only applies to the HRRR calls below.
+HRRR_SOURCE_PRIORITY = ["aws", "nomads", "google"]
+
+
 def select_hrrr_run(valid_times):
     """Most recent HRRR init (UTC, on the hour) whose forecast horizon
     covers every valid_time -- synoptic-hour cycles (00/06/12/18z) run out
@@ -457,7 +469,8 @@ def select_hrrr_run(valid_times):
         horizon = 48 if candidate.hour % 6 == 0 else 18
         if max(fxxs) > horizon:
             continue
-        if Herbie(candidate.replace(tzinfo=None), model="hrrr", product="sfc", fxx=min(fxxs), verbose=False).grib is not None:
+        if Herbie(candidate.replace(tzinfo=None), model="hrrr", product="sfc", fxx=min(fxxs),
+                  priority=HRRR_SOURCE_PRIORITY, verbose=False).grib is not None:
             return candidate
     sys.exit("Could not find an HRRR run covering the requested date/window on NOAA's servers.")
 
@@ -503,7 +516,8 @@ def fetch_hrrr(date, metric, hour):
     r0 = r1 = c0 = c1 = None
     for fxx in fxxs:
         print(f"Fetching HRRR {run_init:%Y-%m-%d %H}z F{fxx:02d} ...")
-        ds = Herbie(run_init.replace(tzinfo=None), model="hrrr", product="sfc", fxx=fxx, verbose=False).xarray("TMP:2 m above ground")
+        ds = Herbie(run_init.replace(tzinfo=None), model="hrrr", product="sfc", fxx=fxx,
+                    priority=HRRR_SOURCE_PRIORITY, verbose=False).xarray("TMP:2 m above ground")
         if lat is None:
             lat_full = ds.latitude.values
             lon_full = np.where(ds.longitude.values > 180, ds.longitude.values - 360, ds.longitude.values)
