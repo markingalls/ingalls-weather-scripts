@@ -1,15 +1,13 @@
 name: Tri-Cities 7-Day Forecast
 
-# Runs after each ECMWF cycle finishes so the graphic reflects fresh data
-# off all sources: 07:15, 12:30, 19:15, 00:30 UTC. NOTE: GitHub only fires
-# `schedule` triggers off the workflow file on the repo's default branch --
-# this needs to be merged there before any of these actually run.
+# This was the original proof-of-concept publish path, before the droplet
+# deployment (see ../../tri-cities-7day-forecast/deploy/) took over
+# publishing tri_cities_7day_forecast.png to images.ingallswx.com on this
+# same 07:15/12:30/19:15/00:30 UTC cadence. The droplet is now the sole
+# live publisher, so the schedule here is disabled -- kept as
+# workflow_dispatch-only in case a manual GitHub-side build is ever useful
+# again.
 on:
-  schedule:
-    - cron: "15 7 * * *"
-    - cron: "30 12 * * *"
-    - cron: "15 19 * * *"
-    - cron: "30 0 * * *"
   workflow_dispatch: {}
 
 env:
