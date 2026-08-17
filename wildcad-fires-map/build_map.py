@@ -763,7 +763,19 @@ def _get_basemap_raster(proj, pc):
     return plt.imread(png_path), native_extent
 
 
-def build_map(fires, fetched_at, output_path):
+def build_map(fires, fetched_at, output_path, new_only=False):
+    """new_only=True renders only fires first reported within the last
+    NEW_FIRE_HOURS, for the companion "what's new" product -- same
+    fire_color() rule as the standard map (containment still wins over
+    age), so a new fire already reported contained still draws gray, not
+    red. "Existing" (orange) structurally can't appear in this filtered
+    set -- every fire left has age_hours <= NEW_FIRE_HOURS by
+    construction, so fire_color()'s age check always matches before ever
+    falling through to the orange branch -- so that legend entry is
+    dropped rather than shown for a color nothing on the map ever uses."""
+    if new_only:
+        fires = [f for f in fires if f["age_hours"] is not None and f["age_hours"] <= NEW_FIRE_HOURS]
+
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
 
@@ -850,11 +862,17 @@ def build_map(fires, fetched_at, output_path):
     age_handles = [
         Line2D([0], [0], marker="o", linestyle="none", color=NEW_COLOR, markeredgecolor=NEW_EDGE,
                markeredgewidth=0.7, alpha=0.85, markersize=7, label=f"New (<{NEW_FIRE_HOURS:.0f}h)"),
-        Line2D([0], [0], marker="o", linestyle="none", color=EXISTING_COLOR, markeredgecolor=EXISTING_EDGE,
-               markeredgewidth=0.7, alpha=0.85, markersize=7, label="Existing"),
-        Line2D([0], [0], marker="o", linestyle="none", color=CONTAINED_COLOR, markeredgecolor=CONTAINED_EDGE,
-               markeredgewidth=0.7, alpha=0.85, markersize=7, label="Contained (Being Held+)"),
     ]
+    if not new_only:
+        # "Existing" (orange) can't appear in the new_only-filtered set --
+        # see build_map()'s docstring -- so it's only meaningful to show
+        # on the standard map.
+        age_handles.append(
+            Line2D([0], [0], marker="o", linestyle="none", color=EXISTING_COLOR, markeredgecolor=EXISTING_EDGE,
+                   markeredgewidth=0.7, alpha=0.85, markersize=7, label="Existing"))
+    age_handles.append(
+        Line2D([0], [0], marker="o", linestyle="none", color=CONTAINED_COLOR, markeredgecolor=CONTAINED_EDGE,
+               markeredgewidth=0.7, alpha=0.85, markersize=7, label="Contained (Being Held+)"))
     age_leg = fig.legend(handles=age_handles, loc="center", frameon=False, fontsize=8.75,
                           prop=poppins_reg, ncol=len(age_handles), handletextpad=0.6, columnspacing=1.4,
                           bbox_to_anchor=(frame_center, 0.121))
@@ -888,9 +906,11 @@ def build_map(fires, fetched_at, output_path):
 
     # Title & subtitle above the map
     now_local = fetched_at.astimezone(LOCAL_TZ)
-    fig.text(0.03, 0.977, f"{now_local.strftime('%A')} Active Wildfires", fontsize=19,
+    title = f"New Wildfires (Last {NEW_FIRE_HOURS:.0f}h)" if new_only else f"{now_local.strftime('%A')} Active Wildfires"
+    count_label = f"{len(fires)} new fires" if new_only else f"{len(fires)} fires"
+    fig.text(0.03, 0.977, title, fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.940, f"{len(fires)} fires • WildCAD-E (US) + CAL FIRE + BC Wildfire Service + Alberta Wildfire",
+    fig.text(0.03, 0.940, f"{count_label} • WildCAD-E (US) + CAL FIRE + BC Wildfire Service + Alberta Wildfire",
               fontsize=11.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
     fig.text(0.03, 0.909, f"Fetched {now_local.strftime('%Y-%m-%d %H:%M')} Pacific",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
@@ -942,8 +962,13 @@ if __name__ == "__main__":
                               "see it.")
     parser.add_argument("--file", type=Path, default=None,
                          help="Render from a local saved snapshot (.json) instead of fetching live.")
+    parser.add_argument("--new-only", action="store_true",
+                         help="Render only fires first reported within the last NEW_FIRE_HOURS "
+                              "(24h), for the companion 'what's new' map -- see build_map()'s "
+                              "docstring.")
     parser.add_argument("--out", type=Path, default=None,
-                         help="Output PNG path (default: output/wildcad_fires_<date>.png).")
+                         help="Output PNG path (default: output/wildcad_fires_<date>.png, or "
+                              "output/wildcad_new_fires_<date>.png with --new-only).")
     args = parser.parse_args()
 
     if args.file and not args.file.exists():
@@ -960,5 +985,7 @@ if __name__ == "__main__":
         snapshot_path = OUTPUT_DIR / f"snapshot_{fetched_at.strftime('%Y-%m-%dT%H%M%SZ')}.json"
         snapshot_path.write_text(json.dumps({"fires": fires, "fetched_at": fetched_at.isoformat()}))
 
-    out_path = args.out or (OUTPUT_DIR / f"wildcad_fires_{fetched_at.strftime('%Y-%m-%d')}.png")
-    build_map(fires, fetched_at, out_path)
+    default_name = f"wildcad_new_fires_{fetched_at.strftime('%Y-%m-%d')}.png" if args.new_only \
+        else f"wildcad_fires_{fetched_at.strftime('%Y-%m-%d')}.png"
+    out_path = args.out or (OUTPUT_DIR / default_name)
+    build_map(fires, fetched_at, out_path, new_only=args.new_only)

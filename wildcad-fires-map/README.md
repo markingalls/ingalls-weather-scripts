@@ -16,14 +16,32 @@ fire stale 60+ days regardless of size, are dropped after merging to
 cut clutter -- see "Decluttering" below -- except new fires, which are
 always shown regardless of size or staleness.
 
+A second product, `--new-only`, renders from the same fetch but keeps
+only fires first reported within the last 24 hours (`NEW_FIRE_HOURS` in
+`build_map.py`) -- "what's new" rather than "everything active." A new
+fire already reported contained still draws gray, not red (containment
+still wins over age in `fire_color()`), so that legend entry stays; the
+"Existing" (orange) entry is dropped since it structurally can't appear
+in a set already filtered to age <= 24h.
+
 ## Files
 
 - `build_map.py` -- queries every WildCAD-E dispatch center whose area
   overlaps the map domain plus the CAL FIRE/WFIGS, BC, and Alberta
   wildfire feature services, filters each to active wildfires, merges and
-  dedups them, and renders the map. Also saves a `.json` snapshot of the
+  dedups them, and renders the map -- `build_map(fires, fetched_at,
+  output_path, new_only=False)`. Also saves a `.json` snapshot of the
   fetched/filtered fire list to `output/` each run, so `--file` can
-  re-render without re-fetching.
+  re-render without re-fetching. `--new-only` renders the "what's new"
+  companion product instead of the standard map (see above).
+- `deploy/publish_wildfires.py` -- cron entry point. Fetches once,
+  renders and atomically publishes both products (`wildcad_fires.png`,
+  `wildcad_new_fires.png`) from that single fetch. One product failing
+  doesn't stop the other, same pattern as every other publish script in
+  this repo.
+- `deploy/crontab.example` -- every 3 hours at :59 (02:59, 05:59, 08:59,
+  ... 23:59 UTC) -- both products share this cadence so they're never
+  showing two different fetches side by side.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
   needs GDAL, apt-only). `setup.sh` also installs the Poppins font used
   for map labels, since it isn't packaged for apt.
@@ -48,8 +66,10 @@ The Ingalls Weather logo (bottom-left on the map) lives in
 ```bash
 bash setup.sh                                    # first time / fresh environment only
 python3 build_map.py                             # current active wildfires
+python3 build_map.py --new-only                  # fires first reported in the last 24h only
 python3 build_map.py --lookback-days 120         # widen the WildCAD-E query window
 python3 build_map.py --file output/snapshot_....json  # re-render, no fetch
+python3 build_map.py --file output/snapshot_....json --new-only  # same, new-only product
 ```
 
 ## Data sources and methodology

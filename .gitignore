@@ -113,10 +113,12 @@ dew-point-storm-map/basemap_cache/
 # PNGs are outputs -- neither is source, so don't track them. basemap_cache/
 # holds the cached basemap raster build_map.py rebuilds automatically
 # (self-invalidating, see _basemap_cache_key) -- regenerable build output,
-# not source.
+# not source. state/ is the droplet-deploy guard's runtime state (lock
+# file, logs) -- created on the server, not source.
 wildcad-fires-map/output/*.json
 wildcad-fires-map/output/*.png
 wildcad-fires-map/basemap_cache/
+wildcad-fires-map/state/
 
 # --- hrrr-smoke-chart ---
 # smoke.json is live data fetch_smoke.py regenerates every run, and the

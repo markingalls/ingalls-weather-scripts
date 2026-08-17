@@ -1,0 +1,11 @@
+# Add this line to the droplet's existing crontab (crontab -e) alongside
+# everything else already there. No API key needed -- every source here
+# (WildCAD-E, CAL FIRE/WFIGS, BC Wildfire Service, Alberta Wildfire) is
+# unauthenticated.
+#
+# Every 3 hours at :59 -- 02:59, 05:59, 08:59, 11:59, 14:59, 17:59, 20:59,
+# 23:59 UTC. Both products (standard + new-only) publish from the same
+# fetch on this one schedule, so they're never showing two different
+# fetches to a viewer comparing them.
+
+59 2,5,8,11,14,17,20,23 * * * /opt/ingalls-weather-scripts/wildcad-fires-map/venv/bin/python3 /opt/ingalls-weather-scripts/wildcad-fires-map/deploy/publish_wildfires.py >> /opt/ingalls-weather-scripts/wildcad-fires-map/state/cron.log 2>&1
