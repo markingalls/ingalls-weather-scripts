@@ -906,7 +906,7 @@ def build_map(fires, fetched_at, output_path, new_only=False):
 
     # Title & subtitle above the map
     now_local = fetched_at.astimezone(LOCAL_TZ)
-    title = f"New Wildfires (Last {NEW_FIRE_HOURS:.0f}h)" if new_only else f"{now_local.strftime('%A')} Active Wildfires"
+    title = f"New Wildfires (Last {NEW_FIRE_HOURS:.0f}h)" if new_only else "Active Wildfires"
     count_label = f"{len(fires)} new fires" if new_only else f"{len(fires)} fires"
     fig.text(0.03, 0.977, title, fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
