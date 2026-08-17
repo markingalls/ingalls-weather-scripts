@@ -52,6 +52,10 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`500mb-height-wind-map/`](500mb-height-wind-map/) — one-off map of 500
+  mb geopotential height (contoured every 6 dam) and wind speed (shaded
+  purple from 30 kt), from the WindBorne WeatherMesh-6 global ensemble
+  mean, centered on Portland, OR and spanning north to SE Alaska.
 
 ## Shared resources
 
