@@ -100,7 +100,8 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
-LAND_COLOR = "#F5E7B3"
+LAND_COLOR = "#EDE5C1"  # muted/desaturated relative to the TPW sibling map's LAND_COLOR --
+# toned down on request so it doesn't compete with the purple wind shading.
 OCEAN_COLOR = "#D2E8F3"
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
