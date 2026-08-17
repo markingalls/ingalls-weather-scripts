@@ -1,11 +1,21 @@
-# Add this line to the droplet's existing crontab (crontab -e) alongside
+# Add these lines to the droplet's existing crontab (crontab -e) alongside
 # everything else already there. No API key needed -- every source here
 # (WildCAD-E, CAL FIRE/WFIGS, BC Wildfire Service, Alberta Wildfire) is
 # unauthenticated.
 #
-# Every 3 hours at :59 -- 02:59, 05:59, 08:59, 11:59, 14:59, 17:59, 20:59,
-# 23:59 UTC. Both products (standard + new-only) publish from the same
-# fetch on this one schedule, so they're never showing two different
-# fetches to a viewer comparing them.
+# Every 3 hours at :59 Pacific time -- 02:59, 05:59, 08:59, 11:59, 14:59,
+# 17:59, 20:59, 23:59 America/Los_Angeles -- unlike every other project in
+# this repo, which schedules in UTC. CRON_TZ scopes to the lines below it
+# until reassigned, so it's set right before this entry and reset to UTC
+# right after, leaving every other crontab entry unaffected regardless of
+# where in the file this block sits. Requires a cron build with CRON_TZ
+# support (Debian/Ubuntu's cron package has had it since ~2019 -- if a
+# tick doesn't fire at the expected Pacific time, confirm with
+# `cron --version` or check /var/log/syslog for a CRON_TZ parse warning).
+# Both products (standard + new-only) publish from the same fetch on this
+# one schedule, so they're never showing two different fetches to a
+# viewer comparing them.
 
+CRON_TZ=America/Los_Angeles
 59 2,5,8,11,14,17,20,23 * * * /opt/ingalls-weather-scripts/wildcad-fires-map/venv/bin/python3 /opt/ingalls-weather-scripts/wildcad-fires-map/deploy/publish_wildfires.py >> /opt/ingalls-weather-scripts/wildcad-fires-map/state/cron.log 2>&1
+CRON_TZ=UTC

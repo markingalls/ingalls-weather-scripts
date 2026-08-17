@@ -39,9 +39,11 @@ in a set already filtered to age <= 24h.
   `wildcad_new_fires.png`) from that single fetch. One product failing
   doesn't stop the other, same pattern as every other publish script in
   this repo.
-- `deploy/crontab.example` -- every 3 hours at :59 (02:59, 05:59, 08:59,
-  ... 23:59 UTC) -- both products share this cadence so they're never
-  showing two different fetches side by side.
+- `deploy/crontab.example` -- every 3 hours at :59 Pacific time (02:59,
+  05:59, 08:59, ... 23:59 America/Los_Angeles, via a `CRON_TZ` line --
+  every other project in this repo schedules in UTC instead) -- both
+  products share this cadence so they're never showing two different
+  fetches side by side.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies (cartopy
   needs GDAL, apt-only). `setup.sh` also installs the Poppins font used
   for map labels, since it isn't packaged for apt.
