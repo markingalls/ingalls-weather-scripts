@@ -245,17 +245,22 @@ def fetch_pressure_level_field(remote_zip, names, tmp_dir, variable, level_hpa, 
     `ensemble_mean/` if neither layout matches, rather than guessing
     silently wrong.
     """
-    top_names = sorted({n.split("/")[0] for n in names})
+    # Every array's root group path -- the prefix before "/zarr.json" --
+    # at whatever depth it actually lives, not just the first path
+    # segment (a nested array like "ensemble_mean/geopotential/zarr.json"
+    # would otherwise only ever surface as "ensemble_mean", which can
+    # never match a variable-specific lookup).
+    array_group_paths = sorted({n[: -len("/zarr.json")] for n in names if n.endswith("/zarr.json")})
     level_str = str(level_hpa)
-    direct_matches = [n for n in top_names
-                       if n.startswith(f"ensemble_mean/{variable}") and level_str in n]
+    direct_matches = [p for p in array_group_paths
+                       if p.startswith(f"ensemble_mean/{variable}") and level_str in p]
     if len(direct_matches) == 1:
         print(f"  {variable}: found level-specific array '{direct_matches[0]}'")
         return fetch_zarr_array(remote_zip, names, tmp_dir, direct_matches[0])
 
     array_path = f"ensemble_mean/{variable}"
-    if f"{array_path}/zarr.json" not in names and array_path not in top_names:
-        ensemble_mean_entries = sorted({n for n in top_names if n.startswith("ensemble_mean/")})
+    if array_path not in array_group_paths:
+        ensemble_mean_entries = [p for p in array_group_paths if p.startswith("ensemble_mean/")]
         raise SystemExit(
             f"Could not find '{array_path}' (or a level-specific variant) in the archive. "
             f"Entries found under ensemble_mean/: {ensemble_mean_entries}"
@@ -268,7 +273,7 @@ def fetch_pressure_level_field(remote_zip, names, tmp_dir, variable, level_hpa, 
         return fetch_zarr_array(remote_zip, names, tmp_dir, array_path)
 
     for cand in LEVEL_COORD_CANDIDATES:
-        if cand in top_names:
+        if cand in array_group_paths:
             level_values = np.asarray(fetch_zarr_array(remote_zip, names, tmp_dir, cand))
             level_axis_candidates = [i for i, n in enumerate(arr_shape) if n == len(level_values)]
             if len(level_axis_candidates) != 1:
