@@ -1,0 +1,15 @@
+# Add this line to the droplet's existing crontab (crontab -e) alongside
+# everything else already there. No API key needed -- HRRR's own free
+# GRIB2 distribution (AWS Open Data, falling back to NOMADS/Google) is
+# unauthenticated.
+#
+# Every 6 hours at :30, 3.5h after each synoptic HRRR cycle's init time
+# (00z/06z/12z/18z -> 03:30/09:30/15:30/21:30 UTC) -- HRRR takes ~2.5-3h
+# to finish posting all 48 hourly files for a cycle (see
+# ../../tri-cities-7day-forecast/fetch_hrrr_smoke_forecast.py), so this
+# is a modest buffer past that, not the nominal init time itself.
+# fetch_smoke.py's own select_latest_48h_run() falls back to the previous
+# complete cycle if this one's still posting, so an occasional late run
+# degrades gracefully rather than failing outright.
+
+30 3,9,15,21 * * * /opt/ingalls-weather-scripts/hrrr-smoke-chart/venv/bin/python3 /opt/ingalls-weather-scripts/hrrr-smoke-chart/deploy/publish_smoke.py >> /opt/ingalls-weather-scripts/hrrr-smoke-chart/state/cron.log 2>&1

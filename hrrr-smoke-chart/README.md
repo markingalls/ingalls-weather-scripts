@@ -1,11 +1,11 @@
 # HRRR Smoke Charts
 
-Generates styled meteograms of NOAA HRRR smoke for one or more points, over
+Generates styled meteograms of NOAA HRRR smoke for three PNW regions, over
 a full 48-hour HRRR cycle, for Ingalls Weather's Instagram. Same canvas
 footprint and fonts as the
 [Columbia Basin alerts map](../columbia-basin-alerts-map/) and the
-[850/700 mb temp chart](../850-700-temp-chart/), just a two-location smoke
-line chart instead of a map or an ensemble spread.
+[850/700 mb temp chart](../850-700-temp-chart/), just a multi-line smoke
+chart instead of a map or an ensemble spread.
 
 Two smoke fields, each renderable multiple ways:
 
@@ -18,23 +18,50 @@ Two smoke fields, each renderable multiple ways:
   units (mg/m²) -- AQI is a surface-air-quality concept and doesn't apply to
   a column total, so `--units aqi` is ignored for this variable.
 
-Defaults to **Kennewick, WA** and **Hermiston, OR**, but any set of lat/lon
-points works.
+`fetch_smoke.py`'s `REGIONS` defines 3 regions, 5 cities each, all fetched
+in one pass -- `build_chart.py --region <key>` then plots one region's 5
+cities as a multi-line chart for whichever variable/units combination you
+ask for. The deployed product (see "Deployment" below) renders all
+3 regions x 2 variables = 6 charts, always in raw units, from that single
+shared fetch:
+
+| Region | Cities |
+|---|---|
+| `columbia_basin` | Tri-Cities WA, Hermiston OR, Walla Walla WA, Yakima WA, Moses Lake WA |
+| `willamette` | Portland OR, Hillsboro OR, Salem OR, Eugene OR, Gresham OR |
+| `puget_sound` | Seattle WA, Tacoma WA, Everett WA, Bellevue WA, Bellingham WA |
+
+`fetch_smoke.py --locations '[...]'` still overrides `REGIONS` entirely for
+an ad hoc single-point (or arbitrary custom set) fetch, same as before.
 
 ## Files
 
-- `fetch_smoke.py` — finds the most recent HRRR run at a synoptic hour
-  (00/06/12/18z -- the only cycles that run out to 48h; the other hourly
-  cycles stop at 18h) that has finished processing through F48, pulls
-  **both** smoke fields (near-surface + vertically integrated) at each
-  forecast hour via [Herbie](https://github.com/blaylockbk/Herbie) (NOAA's
-  AWS Open Data bucket, no API key needed), and writes `smoke.json`. Run
-  this once per run you care about -- `build_chart.py` can then render any
-  variable/units combination from that same file without re-fetching.
-- `build_chart.py` — renders `smoke.json` into a PNG. Output defaults to
-  `hrrr_<variable>_smoke_<units>.png` (e.g. `hrrr_near_surface_smoke_aqi.png`,
-  `hrrr_near_surface_smoke_raw.png`, `hrrr_column_smoke_raw.png`); pass
-  `--output` to override.
+- `fetch_smoke.py` — `REGIONS` (3 regions x 5 cities, see above) and
+  `DEFAULT_LOCATIONS` (their union, 15 cities). Finds the most recent HRRR
+  run at a synoptic hour (00/06/12/18z -- the only cycles that run out to
+  48h; the other hourly cycles stop at 18h) that has finished processing
+  through F48, pulls **both** smoke fields (near-surface + vertically
+  integrated) at each forecast hour via
+  [Herbie](https://github.com/blaylockbk/Herbie) (NOAA's AWS Open Data
+  bucket, no API key needed -- `HRRR_SOURCE_PRIORITY` explicitly skips
+  Utah CHPC's now-defunct Pando archive, see its comment), and writes
+  `smoke.json`. Run this once per run you care about -- `build_chart.py`
+  can then render any region/variable/units combination from that same
+  file without re-fetching.
+- `build_chart.py` — `build_chart(data, region, variable, units,
+  output_path)` (the CLI's `main()` is a thin wrapper around it, same
+  pattern as every other project's `build_map()`) filters an already-
+  loaded `smoke.json` dict down to one region's 5 cities and renders one
+  PNG. CLI output defaults to `hrrr_<region>_<variable>_smoke_<units>.png`;
+  pass `--output` to override.
+- `deploy/publish_smoke.py` — cron entry point. Fetches once (all 15
+  cities), renders and atomically publishes all 6 region/variable charts
+  (always raw units) from that single fetch. One chart failing doesn't
+  stop the others, same pattern as every other publish script in this
+  repo.
+- `deploy/crontab.example` — every 6 hours at :30, 3.5h after each
+  synoptic HRRR cycle (00z/06z/12z/18z -> 03:30/09:30/15:30/21:30 UTC) --
+  see the file for why that buffer, not the nominal init time itself.
 - `requirements.txt` / `setup.sh` — Python dependencies (`herbie-data` +
   `cfgrib`/`eccodes` for pulling and decoding the GRIB2 subsets; no system
   packages needed beyond what pip installs).
@@ -44,16 +71,20 @@ points works.
 ```bash
 bash setup.sh                      # first time / fresh environment only
 
-# Default: Kennewick, WA + Hermiston, OR
+# Default: all 15 cities across all 3 regions, one fetch
 python3 fetch_smoke.py
 
-python3 build_chart.py                                          # near-surface, AQI (default)
-python3 build_chart.py --units raw                               # near-surface, raw µg/m3, NOAA color scale
-python3 build_chart.py --variable column                         # vertically integrated, mg/m2, NOAA color scale
+python3 build_chart.py --region columbia_basin                                    # near-surface, AQI (default)
+python3 build_chart.py --region columbia_basin --units raw                        # near-surface, raw µg/m3, NOAA color scale
+python3 build_chart.py --region columbia_basin --variable column                  # vertically integrated, mg/m2, NOAA color scale
+python3 build_chart.py --region willamette --variable column --units raw
+python3 build_chart.py --region puget_sound --variable near_surface --units raw
 
-# Any other set of points
+# Any other set of points (bypasses REGIONS entirely -- build_chart.py's
+# --region then has nothing to filter down to, so it isn't usable against
+# a --locations override; render with a script of your own against
+# smoke.json's "locations"/"variables" instead for a genuinely custom set)
 python3 fetch_smoke.py --locations '[{"label":"Yakima, WA","lat":46.6021,"lon":-120.5059},{"label":"Walla Walla, WA","lat":46.0646,"lon":-118.3430}]'
-python3 build_chart.py
 ```
 
 ## Notes
@@ -99,17 +130,33 @@ python3 build_chart.py
   legend, not the shaded field itself. y-max is fixed to
   `max(all series) * 1.25` with a per-variable floor (10 µg/m³ near-surface,
   20 mg/m² column) so a quiet run still shows some headroom.
-- Both location lines always get a white halo (AQI bands or the raw NOAA
-  scale both put color behind them) so they stay legible over whichever
-  band color they cross.
+- All 5 of a region's city lines always get a white halo (AQI bands or
+  the raw NOAA scale both put color behind them) so they stay legible
+  over whichever band color they cross.
 - **X-axis** is rendered in Pacific time (`America/Los_Angeles`, so it
   follows PDT/PST automatically), even though the run itself is fetched
   and labeled by init time in UTC/z per meteorological convention.
 - Chart styling (fonts, dimensions) mirrors `850-700-temp-chart/build_chart.py`
-  -- edit `build_chart.py` directly to adjust. Location lines are forest
-  green `#164f29` (also used in that project, the logo's pine tree) for the
-  first location, dark blue `#0b3d91` for the second. Axis spines/ticks are
-  black. Logo sits top-right, spanning the title/subtitle/legend header
-  (the alerts-map/temp-chart projects place it bottom-right
-  instead, since those don't have a full-width band legend competing for
-  that corner).
+  -- edit `build_chart.py` directly to adjust. `LINE_COLORS` has 5 entries
+  (one region's full city count) -- forest green `#164f29` (also used in
+  that project, the logo's pine tree) and dark blue `#0b3d91` first, for
+  continuity with the rest of the repo's charts, then brick red, purple,
+  and burnt orange, chosen to stay visually distinct from those two and
+  each other. Axis spines/ticks are black. Logo sits top-right, spanning
+  the title/subtitle/legend header (the alerts-map/temp-chart projects
+  place it bottom-right instead, since those don't have a full-width band
+  legend competing for that corner).
+
+## Deployment
+
+`deploy/publish_smoke.py` fetches all 15 cities once and publishes all 6
+region/variable charts (always raw units) from that shared fetch:
+`hrrr_columbia_basin_near_surface_smoke.png`,
+`hrrr_columbia_basin_column_smoke.png`,
+`hrrr_willamette_near_surface_smoke.png`,
+`hrrr_willamette_column_smoke.png`,
+`hrrr_puget_sound_near_surface_smoke.png`,
+`hrrr_puget_sound_column_smoke.png`. See `deploy/crontab.example` for the
+schedule (every 6 hours, timed off HRRR's own posting cadence) and
+`../wildcad-fires-map/README.md`'s deployment notes for the general
+first-time droplet setup pattern (venv, fonts, crontab) this follows.

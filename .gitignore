@@ -123,8 +123,11 @@ wildcad-fires-map/state/
 # --- hrrr-smoke-chart ---
 # smoke.json is live data fetch_smoke.py regenerates every run, and the
 # rendered chart is an output too -- neither is source, so don't track them.
+# state/ is the droplet-deploy guard's runtime state (lock file, logs) --
+# created on the server, not source.
 hrrr-smoke-chart/smoke.json
-hrrr-smoke-chart/hrrr_*_smoke_*.png
+hrrr-smoke-chart/hrrr_*_smoke*.png
+hrrr-smoke-chart/state/
 # --- tri-cities-7day-forecast ---
 # forecast.json/metamesh_forecast.json/openmeteo_forecast.json are live data
 # the fetch_*.py scripts regenerate every run, and the rendered graphic is

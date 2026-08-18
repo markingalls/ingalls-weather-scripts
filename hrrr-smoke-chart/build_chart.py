@@ -12,6 +12,8 @@ import matplotlib.dates as mdates
 import matplotlib.patheffects as pe
 import numpy as np
 
+from fetch_smoke import REGIONS
+
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
 f_bold = fm.FontProperties(fname=FONT_DIR + "Poppins-Bold.ttf")
@@ -26,11 +28,13 @@ GRID_COLOR = "#000000"
 AXIS_COLOR = "#000000"
 
 # Forest green (the logo's pine tree, also used in ../850-700-temp-chart/)
-# for the first location, dark blue for the second.
-# Both lines always get a white halo since the plot area is always shaded
-# (AQI bands or the NOAA smoke-concentration scale below), some of which
-# are close in hue to these two.
-LINE_COLORS = ["#164f29", "#0b3d91"]
+# first, dark blue second, then three more chosen to stay visually
+# distinct from those two and each other at a glance -- a --region chart
+# plots all 5 of a region's cities on one axes. Both lines always get a
+# white halo since the plot area is always shaded (AQI bands or the NOAA
+# smoke-concentration scale below), some of which are close in hue to
+# one or more of these.
+LINE_COLORS = ["#164f29", "#0b3d91", "#a83232", "#6b3fa0", "#c26b02"]
 LINE_HALO = [pe.withStroke(linewidth=4, foreground="white")]
 
 Z_BANDS = 1
@@ -105,28 +109,46 @@ def pm25_to_aqi(conc_ugm3):
 def parse_args():
     ap = argparse.ArgumentParser(description="Render an HRRR smoke chart.")
     ap.add_argument("--data", default="smoke.json")
+    ap.add_argument("--region", choices=list(REGIONS), required=True,
+                     help="Which region's 5 cities (see fetch_smoke.py REGIONS) to plot as "
+                          "one multi-line chart -- smoke.json normally has all regions' data "
+                          "from one shared fetch, this picks out just one region's lines.")
     ap.add_argument("--variable", choices=list(VARIABLES), default="near_surface",
                      help="near_surface = MASSDEN @ 8m; column = vertically integrated smoke")
     ap.add_argument("--units", choices=["aqi", "raw"], default="aqi",
                      help="aqi only applies to --variable near_surface; column is always raw")
     ap.add_argument("--output", default=None,
-                     help="defaults to hrrr_<variable>_smoke_<units>.png")
+                     help="defaults to hrrr_<region>_<variable>_smoke_<units>.png")
     return ap.parse_args()
 
 
-def main():
-    args = parse_args()
-    meta = VARIABLES[args.variable]
-    use_aqi = args.units == "aqi" and meta["supports_aqi"]
-    if args.units == "aqi" and not meta["supports_aqi"]:
-        print(f"NOTE: --variable {args.variable} has no AQI equivalent -- rendering raw units instead.")
-
-    data = json.load(open(args.data))
+def build_chart(data, region, variable, units, output_path):
+    """data is the already-loaded smoke.json dict (not a path) -- a
+    publish script rendering all region/variable combinations from one
+    shared fetch loads it once and calls this repeatedly, rather than
+    re-reading the file per chart."""
+    meta = VARIABLES[variable]
+    use_aqi = units == "aqi" and meta["supports_aqi"]
+    if units == "aqi" and not meta["supports_aqi"]:
+        print(f"NOTE: --variable {variable} has no AQI equivalent -- rendering raw units instead.")
 
     times = [datetime.fromisoformat(t.replace("Z", "+00:00")) for t in data["times"]]
     init_time = datetime.fromisoformat(data["initialization_time"].replace("Z", "+00:00"))
-    locations = data["locations"]
-    raw_series = data["variables"][meta["key"]]["series"]
+    # smoke.json normally holds every region's cities from one shared
+    # fetch (see fetch_smoke.py's DEFAULT_LOCATIONS) -- keep just this
+    # region's 5, in REGIONS' own order, not whatever order they happened
+    # to land in smoke.json.
+    region_labels = {loc["label"] for loc in REGIONS[region]["locations"]}
+    locations = [loc for loc in data["locations"] if loc["label"] in region_labels]
+    missing = region_labels - {loc["label"] for loc in locations}
+    if missing:
+        raise SystemExit(f"--region {region} needs {sorted(missing)}, not present in smoke.json "
+                          f"-- was it fetched with fetch_smoke.py's default (all-regions) locations?")
+    # Restricted to this region's labels before use anywhere below -- y_max
+    # in particular must scale off only what's actually plotted, not every
+    # city smoke.json happens to carry from a shared, all-regions fetch.
+    raw_series = {label: vals for label, vals in data["variables"][meta["key"]]["series"].items()
+                  if label in region_labels}
     series = ({label: [pm25_to_aqi(v) for v in vals] for label, vals in raw_series.items()}
               if use_aqi else raw_series)
 
@@ -225,7 +247,8 @@ def main():
     # ---------- title / subtitle ----------
     subtitle_y = top_y + 0.058
     title_y = subtitle_y + 0.035
-    fig.text(left_x, title_y, meta["title"], fontproperties=f_bold, fontsize=22, color=INK)
+    title = f"{meta['title']} — {REGIONS[region]['title']}"
+    fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     subtitle = (f"NOAA HRRR Init {init_time.strftime('%Y-%m-%d')} {init_time.strftime('%H')}z"
                 f" • 48-hour forecast")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
@@ -260,9 +283,18 @@ def main():
     fig.text(center_x, 0.02, "NOAA HRRR — Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
-    output = args.output or f"hrrr_{args.variable}_smoke_{'aqi' if use_aqi else 'raw'}.png"
-    plt.savefig(output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
-    print(f"saved {output}")
+    plt.savefig(output_path, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
+    plt.close(fig)
+    print(f"saved {output_path}")
+
+
+def main():
+    args = parse_args()
+    data = json.load(open(args.data))
+    output_path = args.output or (
+        f"hrrr_{args.region}_{args.variable}_smoke_{'aqi' if (args.units == 'aqi' and VARIABLES[args.variable]['supports_aqi']) else 'raw'}.png"
+    )
+    build_chart(data, args.region, args.variable, args.units, output_path)
 
 
 if __name__ == "__main__":
