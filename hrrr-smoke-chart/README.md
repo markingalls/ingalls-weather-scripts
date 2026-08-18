@@ -27,9 +27,9 @@ shared fetch:
 
 | Region | Cities |
 |---|---|
-| `columbia_basin` | Tri-Cities WA, Hermiston OR, Walla Walla WA, Yakima WA, Moses Lake WA |
-| `willamette` | Portland OR, Hillsboro OR, Salem OR, Eugene OR, Gresham OR |
-| `puget_sound` | Seattle WA, Tacoma WA, Everett WA, Bellevue WA, Bellingham WA |
+| `columbia_basin` | Tri-Cities, Hermiston, Walla Walla, Yakima, Moses Lake |
+| `willamette` | Portland, Hillsboro, Salem, Eugene, Gresham |
+| `puget_sound` | Seattle, Tacoma, Everett, Bellevue, Bellingham |
 
 `fetch_smoke.py --locations '[...]'` still overrides `REGIONS` entirely for
 an ad hoc single-point (or arbitrary custom set) fetch, same as before.
