@@ -8,13 +8,13 @@ Valley, Puget Sound) x 2 variables (near-surface, vertically integrated).
 One chart failing doesn't stop the others, same pattern as every other
 publish script in this repo.
 
-Scheduled every 6 hours at :30 past each synoptic hour (see
-deploy/crontab.example) -- HRRR takes ~2.5-3h after a cycle's init time to
-finish posting all 48 hourly files (see
-../../tri-cities-7day-forecast/fetch_hrrr_smoke_forecast.py), so :30 is a
-modest buffer past that. fetch_smoke.py's own select_latest_48h_run()
-looks back through cycles for one it can actually fetch in full, so an
-occasional late-posting run just means this tick picks up the previous
+Scheduled every 6 hours, 2.5h past each synoptic cycle's init time (see
+deploy/crontab.example for exact times) -- verified directly against
+AWS's HRRR bucket that every cycle's F48 GRIB2 posts consistently at
+~1h44-47m after init, so this leaves a ~45min cushion past that observed
+posting time. fetch_smoke.py's own select_latest_48h_run() looks back
+through cycles for one it can actually fetch in full, so an occasional
+late-posting run just means this tick picks up the previous
 (already-complete) cycle instead of failing outright -- self-correcting
 on the next tick.
 

@@ -3,13 +3,19 @@
 # GRIB2 distribution (AWS Open Data, falling back to NOMADS/Google) is
 # unauthenticated.
 #
-# Every 6 hours at :30, 3.5h after each synoptic HRRR cycle's init time
-# (00z/06z/12z/18z -> 03:30/09:30/15:30/21:30 UTC) -- HRRR takes ~2.5-3h
-# to finish posting all 48 hourly files for a cycle (see
-# ../../tri-cities-7day-forecast/fetch_hrrr_smoke_forecast.py), so this
-# is a modest buffer past that, not the nominal init time itself.
+# Every 6 hours at :30, 2.5h after each synoptic HRRR cycle's init time
+# (00z/06z/12z/18z -> 02:30/08:30/14:30/20:30 UTC). Verified directly
+# against AWS's HRRR bucket (Last-Modified on the actual F48 GRIB2 files,
+# 8 consecutive cycles): every cycle's F48 posts remarkably consistently
+# at ~1h44-47m after its nominal init time, so this leaves a ~45min
+# cushion past that observed posting time for an occasional slow cycle --
+# not the ~2.5-3h once assumed here (based on a comment in
+# ../../tri-cities-7day-forecast/fetch_hrrr_smoke_forecast.py that turned
+# out not to match this field's actual posting behavior). Re-verify with
+# `curl -sSI https://noaa-hrrr-bdp-pds.s3.amazonaws.com/hrrr.<YYYYMMDD>/conus/hrrr.t<HH>z.wrfsfcf48.grib2`
+# if NOAA's posting cadence ever seems to have changed.
 # fetch_smoke.py's own select_latest_48h_run() falls back to the previous
 # complete cycle if this one's still posting, so an occasional late run
 # degrades gracefully rather than failing outright.
 
-30 3,9,15,21 * * * /opt/ingalls-weather-scripts/hrrr-smoke-chart/venv/bin/python3 /opt/ingalls-weather-scripts/hrrr-smoke-chart/deploy/publish_smoke.py >> /opt/ingalls-weather-scripts/hrrr-smoke-chart/state/cron.log 2>&1
+30 2,8,14,20 * * * /opt/ingalls-weather-scripts/hrrr-smoke-chart/venv/bin/python3 /opt/ingalls-weather-scripts/hrrr-smoke-chart/deploy/publish_smoke.py >> /opt/ingalls-weather-scripts/hrrr-smoke-chart/state/cron.log 2>&1
