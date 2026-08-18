@@ -59,11 +59,13 @@ an ad hoc single-point (or arbitrary custom set) fetch, same as before.
   (always raw units) from that single fetch. One chart failing doesn't
   stop the others, same pattern as every other publish script in this
   repo.
-- `deploy/crontab.example` — every 6 hours at :30, 2.5h after each
-  synoptic HRRR cycle (00z/06z/12z/18z -> 02:30/08:30/14:30/20:30 UTC) --
+- `deploy/crontab.example` — every 6 hours at :05, ~2h05m after each
+  synoptic HRRR cycle (00z/06z/12z/18z -> 02:05/08:05/14:05/20:05 UTC) --
   verified against AWS's HRRR bucket that F48 posts consistently at
-  ~1h44-47m after init, so this is a ~45min cushion past that, not a
-  guess -- see the file for how to re-verify if NOAA's cadence changes.
+  ~1h44-47m after init, so this is a ~20min cushion past that (a tight
+  but deliberate choice, traded for fresher charts -- a miss just falls
+  back to the previous cycle, not a failure). See the file for how to
+  re-verify if NOAA's cadence changes.
 - `requirements.txt` / `setup.sh` — Python dependencies (`herbie-data` +
   `cfgrib`/`eccodes` for pulling and decoding the GRIB2 subsets; no system
   packages needed beyond what pip installs).

@@ -8,15 +8,16 @@ Valley, Puget Sound) x 2 variables (near-surface, vertically integrated).
 One chart failing doesn't stop the others, same pattern as every other
 publish script in this repo.
 
-Scheduled every 6 hours, 2.5h past each synoptic cycle's init time (see
+Scheduled every 6 hours, ~2h05m past each synoptic cycle's init time (see
 deploy/crontab.example for exact times) -- verified directly against
 AWS's HRRR bucket that every cycle's F48 GRIB2 posts consistently at
-~1h44-47m after init, so this leaves a ~45min cushion past that observed
+~1h44-47m after init, so this leaves a ~20min cushion past that observed
 posting time. fetch_smoke.py's own select_latest_48h_run() looks back
 through cycles for one it can actually fetch in full, so an occasional
 late-posting run just means this tick picks up the previous
 (already-complete) cycle instead of failing outright -- self-correcting
-on the next tick.
+on the next tick, which is what makes this tight a buffer an acceptable
+trade for fresher charts rather than a real reliability risk.
 
 An flock-based lock means an overlapping cron tick (e.g. a slow run still
 in progress when the next scheduled tick fires) skips instead of running
