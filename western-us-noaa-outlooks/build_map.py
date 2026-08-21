@@ -361,10 +361,11 @@ def parse_usdm_geojson(text):
 #     carries CATEGORICAL and ANY SEVERE (no separate tornado/wind/hail),
 #     matching SPC's own Day 3 product.
 #   - type=F (fire weather) THRESHOLD comes through directly as
-#     ELEV/CRIT/EXTM/IDRT under one category, "FIRE WEATHER CATEGORICAL" --
-#     dry thunderstorm risk (IDRT) is NOT a separate category as originally
-#     assumed, it's just another THRESHOLD value alongside the fire-index
-#     tiers, so it maps onto SPC_FIRE_STYLE with no special-casing needed.
+#     ELEV/CRIT/EXTM/IDRT/SDRT under one category, "FIRE WEATHER
+#     CATEGORICAL" -- dry thunderstorm risk (IDRT/SDRT) is NOT a separate
+#     category as originally assumed, it's just another THRESHOLD value
+#     alongside the fire-index tiers, so it maps onto SPC_FIRE_STYLE with
+#     no special-casing needed.
 #   - TORNADO/WIND/HAIL THRESHOLD is a fraction ("0.05", "0.15", ...) rather
 #     than a bare percentage, and "CIG1"/"CIG2" for the significant tier(s)
 #     (matching spc_prob_style's existing "CIG" check exactly -- CIG2 is
@@ -748,8 +749,18 @@ SPC_FIRE_STYLE = {
     "EXTM": {"color": "#e600a9", "alpha": 0.65, "order_key": 3, "label": "Extreme", "axis": "index"},
     # Dry thunderstorm risk is a separate hazard axis (lightning without
     # rain), not a more severe fire-weather-index tier -- distinct hue.
-    # ("Iso DryT" in SPC's own renderer; "Scattered DryT" reuses Critical's red.)
+    # ("Iso DryT" in SPC's own renderer; "Scattered DryT" reuses Critical's
+    # red -- confirmed directly against SPC's fire_weather/SPC_firewx
+    # MapServer legend, both "Critical" and "Scattered DryT" swatches are
+    # the exact same image.) THRESHOLD's real code is "SDRT" (IEM's
+    # shapefile mirror), not the "SCTDRYT" name used in that MapServer's
+    # prose description -- confirmed against a live IEM fetch. This entry
+    # was missing entirely until now, which silently dropped every
+    # Scattered Dry Thunderstorm polygon (spc_style() returns None -- and
+    # only logs a WARNING -- for a THRESHOLD/LABEL with no matching key).
     "IDRT": {"color": "#732600", "alpha": 0.55, "order_key": 4, "label": "Isolated Dry Thunderstorms",
+              "axis": "dry_thunder"},
+    "SDRT": {"color": "#ff0000", "alpha": 0.55, "order_key": 5, "label": "Scattered Dry Thunderstorms",
               "axis": "dry_thunder"},
 }
 
