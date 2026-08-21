@@ -646,9 +646,21 @@ def draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px):
         partition = next_partition
 
     OVERLAP_EDGE = "#4a4a4a"
+    # Densify every ring before projecting -- cartopy's NearsidePerspective
+    # project_geometry() has a real bug (confirmed directly: reproduced with
+    # ax.add_geometries() too, so it's not specific to this function's manual
+    # projection call) where a sufficiently complex/concave polygon with long
+    # straight edges gets misclassified by its antimeridian/horizon-crossing
+    # detector and the whole polygon fills as its own inverse -- the entire
+    # visible disk instead of just the polygon's interior. Splitting long
+    # edges into <=0.1-degree segments (well under the ~0.2 degree length
+    # that reproduced the bug) gives that detector enough resolution to get
+    # it right, without changing the polygon's actual shape.
+    SEGMENTIZE_MAX_DEG = 0.1
     for i, (geom, cell_labels) in enumerate(partition):
         if geom.is_empty:
             continue
+        geom = geom.segmentize(SEGMENTIZE_MAX_DEG)
         axes_present = {l.get("axis", "primary") for l in cell_labels}
         if len(axes_present) <= 1:
             # Single axis (including the common single-label case) -- the
@@ -749,18 +761,21 @@ SPC_FIRE_STYLE = {
     "EXTM": {"color": "#e600a9", "alpha": 0.65, "order_key": 3, "label": "Extreme", "axis": "index"},
     # Dry thunderstorm risk is a separate hazard axis (lightning without
     # rain), not a more severe fire-weather-index tier -- distinct hue.
-    # ("Iso DryT" in SPC's own renderer; "Scattered DryT" reuses Critical's
-    # red -- confirmed directly against SPC's fire_weather/SPC_firewx
-    # MapServer legend, both "Critical" and "Scattered DryT" swatches are
-    # the exact same image.) THRESHOLD's real code is "SDRT" (IEM's
-    # shapefile mirror), not the "SCTDRYT" name used in that MapServer's
-    # prose description -- confirmed against a live IEM fetch. This entry
-    # was missing entirely until now, which silently dropped every
-    # Scattered Dry Thunderstorm polygon (spc_style() returns None -- and
-    # only logs a WARNING -- for a THRESHOLD/LABEL with no matching key).
+    # ("Iso DryT" in SPC's own renderer; SPC's own MapServer legend actually
+    # reuses Critical's red for "Scattered DryT" -- confirmed directly, both
+    # swatches are the exact same image -- but that collides with our own
+    # Critical fire-index color when the two overlap, so this deviates from
+    # SPC's raw styling and uses the same purple this codebase already uses
+    # for a top-severity tier elsewhere, SPC_SEVERE_STYLE's own "HIGH".)
+    # THRESHOLD's real code is "SDRT" (IEM's shapefile mirror), not the
+    # "SCTDRYT" name used in that MapServer's prose description -- confirmed
+    # against a live IEM fetch. This entry was missing entirely until now,
+    # which silently dropped every Scattered Dry Thunderstorm polygon
+    # (spc_style() returns None -- and only logs a WARNING -- for a
+    # THRESHOLD/LABEL with no matching key).
     "IDRT": {"color": "#732600", "alpha": 0.55, "order_key": 4, "label": "Isolated Dry Thunderstorms",
               "axis": "dry_thunder"},
-    "SDRT": {"color": "#ff0000", "alpha": 0.55, "order_key": 5, "label": "Scattered Dry Thunderstorms",
+    "SDRT": {"color": "#b23b9c", "alpha": 0.55, "order_key": 5, "label": "Scattered Dry Thunderstorms",
               "axis": "dry_thunder"},
 }
 
