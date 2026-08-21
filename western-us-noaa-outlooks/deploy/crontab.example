@@ -23,15 +23,25 @@
 45 19 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_convective_day3 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 
 # --- SPC Fire Weather (Day 1 + Day 2 share one AM issuance, then separate PM updates) ---
+# PM update offset 10min from the SPC Day 1 tier below (both were 15 20,
+# an exact-same-minute collision -- confirmed in state/publish.log
+# alternating which tier's cron fork won the shared flock() race and
+# which got silently skipped, day to day. The lock itself is correct/
+# intentional (see publish_outlooks.py's docstring) -- the two tiers just
+# can't literally start at the same instant.
 15 8 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_fire,spc_fire_day2 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 15 17 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_fire >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
-15 20 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_fire_day2 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+25 20 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_fire_day2 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 
 # --- CPC 6-10 Day + 8-14 Day (temp + precip): daily, issued 3-4pm Eastern ---
 0 21 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products temp_6_10,precip_6_10,temp_8_14,precip_8_14 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 
 # --- CPC Week 3-4 (temp + precip): weekly, Fridays 3-4pm Eastern ---
-0 21 * * 5  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products temp_wk34,precip_wk34 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+# Offset 10min from the daily CPC tier above (both were 0 21, colliding
+# every Friday the same way as the Fire Weather case above -- confirmed
+# in state/publish.log, the daily tier lost the race and was skipped
+# entirely on the Friday this was found).
+10 21 * * 5 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products temp_wk34,precip_wk34 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 
 # --- U.S. Drought Monitor: weekly, Thursdays ---
 0 14 * * 4  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products drought_monitor >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1

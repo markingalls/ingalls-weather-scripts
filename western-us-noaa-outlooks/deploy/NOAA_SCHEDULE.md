@@ -40,3 +40,21 @@ from NOAA/SPC/CPC's own pages (checked live, not from memory):
 All times in crontab.example add roughly 10-15 minutes of buffer past
 the stated issuance time, so the fetch isn't racing the file actually
 landing on NOAA's server.
+
+**Operational stagger, not a NOAA-schedule fact**: two pairs of tiers
+above genuinely share the same issuance minute (Fire Weather Day 2's PM
+update and SPC Day 1's 2000Z tier both land at :15 past 2000Z; CPC
+Week 3-4 and the daily CPC tier both land at :00 past 2100Z on Fridays).
+crontab.example's own lock is shared across every tier (see
+publish_outlooks.py's docstring -- deliberate, to avoid two memory-heavy
+cartopy renders stacking up on this droplet), so two tiers scheduled at
+the exact same minute don't queue -- one wins the flock() race and the
+other is skipped outright, silently, until its own next scheduled tick
+(confirmed happening in practice: state/publish.log showed the winner
+alternating day to day for the 2000Z pair, and the daily CPC tier lost
+outright on the one Friday checked). crontab.example offsets Fire
+Weather Day 2's PM update to :25 and CPC Week 3-4 to :10 past their
+respective hours -- a few minutes clear of each real run's own runtime
+(seconds, not minutes) -- specifically to avoid this, not because NOAA
+issues either product at a different minute than its same-hour
+counterpart.
