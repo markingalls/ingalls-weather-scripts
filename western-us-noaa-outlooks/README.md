@@ -27,6 +27,11 @@ per outlook.
 | `spc_severe`  | Severe Weather (Categorical) Outlook, Day 1  | SPC |
 | `spc_convective_day2` | Severe Weather (Categorical) Outlook, Day 2 | SPC |
 | `spc_convective_day3` | Severe Weather (Categorical) Outlook, Day 3 | SPC |
+| `spc_severe_day4` | Severe Weather Outlook, Day 4 (probabilistic 15%/30%) | SPC |
+| `spc_severe_day5` | Severe Weather Outlook, Day 5 (probabilistic 15%/30%) | SPC |
+| `spc_severe_day6` | Severe Weather Outlook, Day 6 (probabilistic 15%/30%) | SPC |
+| `spc_severe_day7` | Severe Weather Outlook, Day 7 (probabilistic 15%/30%) | SPC |
+| `spc_severe_day8` | Severe Weather Outlook, Day 8 (probabilistic 15%/30%) | SPC |
 | `spc_wind_day1` | Wind Probability Outlook, Day 1            | SPC |
 | `spc_wind_day2` | Wind Probability Outlook, Day 2            | SPC |
 | `spc_hail_day1` | Hail Probability Outlook, Day 1            | SPC |
@@ -109,6 +114,17 @@ The Ingalls Weather logo (placed bottom-right on the map) lives in
   embedded stroke color per tier, like the Wind/Hail probability outlooks
   above, but shaded solid rather than SPC's own hatched-outline rendering,
   matching every other product's style in this file.
+- Day 4-8 Severe Weather (`spc_severe_day4`..`spc_severe_day8`) is likewise
+  a separate product from the Day 1-3 tornado/wind/hail/categorical family,
+  not a further-out day of it: a single combined-severe probability scale
+  (15%/30% only, "equivalent to" but not identical in hex to Day 1-3's own
+  Slight/Enhanced swatches -- see `SPC_DAY4_8_STYLE` in `build_map.py`),
+  issued once daily for all five days at once, fetched from NOAA's ArcGIS
+  MapServer (a different service than the fire outlook above) since IEM
+  doesn't carry it either. A quiet day has no usable valid/expire field at
+  all (unlike the fire outlook's placeholder), so its date subtitle is
+  computed directly from the product's fixed daily schedule instead of a
+  fetched field -- see `date_from_day4_8_schedule()`.
 - WPC's excessive rainfall outlook uses a small, fixed category set too,
   styled with a hand-picked swatch per category in `build_map.py`.
 - The map domain, city labels, etc. are all defined near the top of

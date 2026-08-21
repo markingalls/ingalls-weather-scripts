@@ -37,6 +37,10 @@
 # from one daily issuance): daily, issued 2200Z ---
 20 22 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_fire_day3,spc_fire_day4,spc_fire_day5,spc_fire_day6,spc_fire_day7,spc_fire_day8 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 
+# --- SPC Day 4-8 Severe Weather Outlook (probabilistic 15%/30%, all 5 days
+# from one daily issuance): daily, issued 400 AM CST/CDT ---
+20 10 * * * /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products spc_severe_day4,spc_severe_day5,spc_severe_day6,spc_severe_day7,spc_severe_day8 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
+
 # --- CPC 6-10 Day + 8-14 Day (temp + precip): daily, issued 3-4pm Eastern ---
 0 21 * * *  /opt/ingalls-weather-scripts/western-us-noaa-outlooks/venv/bin/python3 /opt/ingalls-weather-scripts/western-us-noaa-outlooks/deploy/publish_outlooks.py --products temp_6_10,precip_6_10,temp_8_14,precip_8_14 >> /opt/ingalls-weather-scripts/western-us-noaa-outlooks/state/cron.log 2>&1
 

@@ -35,6 +35,21 @@ from NOAA/SPC/CPC's own pages (checked live, not from memory):
   above -- confirmed directly that IEM's `outlooks.py` silently ignores
   `day` past 2 for `type=F`, returning Day 1/2's own records again rather
   than an error, so it doesn't carry this product at all.
+- **SPC Day 4-8 Severe Weather Outlook** (probabilistic 15%/30%, all five
+  days from one issuance): issued once daily at 400 AM CST/CDT, per
+  `spc.noaa.gov/misc/about.php`'s "Issuance Times" section. That's 0900Z
+  under CDT (summer) or 1000Z under CST (winter) -- scheduled at 1020Z, a
+  buffer past the *later* (winter/CST) case, same approach this file
+  already uses for the Day 3 categorical AM tier below -- meaning during
+  CDT season this image can run over an hour stale relative to actual
+  availability (confirmed live: today's real issuance landed ~0856Z), a
+  known, accepted tradeoff rather than maintaining a DST-aware cron.
+  Sourced from NOAA's own ArcGIS MapServer (`mapservices.weather.noaa.gov/
+  vector/rest/services/outlooks/SPC_wx_outlks/MapServer`), not IEM --
+  confirmed directly that IEM's `outlooks.py` silently ignores `day` past
+  3 for `type=C`, returning Day 1-3's own records again rather than an
+  error, so it doesn't carry this product at all (same limitation as the
+  Day 3-8 Fire Weather Outlook above, different MapServer service though).
 - **CPC 6-10 Day and 8-14 Day** (temp + precip): issued daily between
   3-4pm Eastern, per `cpc.ncep.noaa.gov/products/predictions/610day/` and
   `.../814day/`. Scheduled at 2100Z, which covers 3-4pm Eastern under

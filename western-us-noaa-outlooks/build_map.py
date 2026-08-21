@@ -24,6 +24,11 @@ frame/style. Pick one with --product:
     spc_severe    SPC Day 1 Categorical (Severe Weather) Outlook
     spc_convective_day2  SPC Day 2 Categorical (Severe Weather) Outlook
     spc_convective_day3  SPC Day 3 Categorical (Severe Weather) Outlook
+    spc_severe_day4  SPC Day 4 Severe Weather Outlook (probabilistic 15%/30%)
+    spc_severe_day5  SPC Day 5 Severe Weather Outlook (probabilistic 15%/30%)
+    spc_severe_day6  SPC Day 6 Severe Weather Outlook (probabilistic 15%/30%)
+    spc_severe_day7  SPC Day 7 Severe Weather Outlook (probabilistic 15%/30%)
+    spc_severe_day8  SPC Day 8 Severe Weather Outlook (probabilistic 15%/30%)
     spc_tornado_day1  SPC Day 1 Tornado Probability Outlook
     spc_tornado_day2  SPC Day 2 Tornado Probability Outlook
     spc_wind_day1 SPC Day 1 Wind Probability Outlook
@@ -582,6 +587,63 @@ def fetch_spc_firewx_prob(day):
 
 
 # ---------------------------------------------------------------------------
+# SPC Day 4-8 Severe Weather Outlook -- a separate combined-hazard
+# probabilistic product, not a further-out day of the Day 1-3 tornado/
+# wind/hail/categorical family above. Issued once daily at 400 AM
+# CST/CDT (spc.noaa.gov/misc/about.php's "Day 4-8 Severe Weather Outlook"
+# section), covering all five days (4-8) from that one issuance, each as
+# its own graphic. Only two tiers -- 15% and 30% -- "equivalent to
+# 2-SLGT-yellow or 3-ENH-orange" per that same page -- but the MapServer's
+# own renderer (drawingInfo.renderer) gives this product's actual colors
+# directly, confirmed live: pure yellow #ffff00 and #e69800, close to but
+# not identical to SPC_SEVERE_STYLE's own hand-picked SLGT/ENH swatches, so
+# SPC_DAY4_8_STYLE below is its own small table rather than reusing that
+# one. Draws with the plain spc_style() helper (single hazard axis, no
+# dry-thunderstorm-style overlap to stripe).
+#
+# IEM's outlooks.py bulk mirror doesn't carry this either -- confirmed
+# directly, same as the Day 3-8 fire outlook above: day=4..8/type=C all
+# returned Day 1-3's own records again rather than erroring or 404ing --
+# so this fetches from NOAA's own ArcGIS MapServer, a different service
+# (outlooks/SPC_wx_outlks) from the fire weather one above. A day with no
+# 15%/30% risk anywhere isn't a labeled placeholder like the fire
+# outlook's "Probability Too Low" -- confirmed live, it's a tiny (~3 km²)
+# dummy polygon off the Atlantic coast with every field (including
+# valid/expire) null, so there's nothing usable to read a date from on a
+# quiet day. Since the whole schedule is fixed and fully deterministic
+# (each day N's valid window is always the issuing morning's 1200Z plus
+# (N-4) days), date_from_day4_8_schedule() computes it directly from
+# fetch time rather than depending on a field that may not be populated,
+# same spirit as date_from_fetch_time's fallback for WPC above.
+SPC_WX_OUTLKS_URL = "https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer"
+
+
+def fetch_spc_day4_8(day):
+    layer_id = 21 + (day - 4)
+    url = f"{SPC_WX_OUTLKS_URL}/{layer_id}/query"
+    params = {"where": "1=1", "outFields": "*", "f": "geojson"}
+    print(f"Fetching {url} (day={day}) ...")
+    resp = requests.get(url, headers=FETCH_HEADERS, params=params, timeout=60)
+    resp.raise_for_status()
+    data = resp.json()
+    feats = data.get("features")
+    if feats is None:
+        sys.exit(f"SPC Day 4-8 Severe Weather MapServer returned no 'features' at all for "
+                 f"day={day}, layer={layer_id} -- feed issue, not weather.")
+    placemarks = []
+    for feat in feats:
+        props = feat.get("properties") or {}
+        label = props.get("label")
+        if label not in ("15", "30"):
+            continue  # the quiet-day dummy polygon (see comment above), not a real tier
+        rings = _geojson_polygon_rings(feat.get("geometry"))
+        if not rings:
+            continue
+        placemarks.append({"fields": {"LABEL": label}, "rings": rings})
+    return placemarks
+
+
+# ---------------------------------------------------------------------------
 # Date formatting per source
 # ---------------------------------------------------------------------------
 
@@ -627,6 +689,21 @@ def date_from_fetch_time(placemarks, fetched_at):
     """WPC's Excessive Rainfall Outlook KML carries no embedded date --
     fall back to today (the outlook is always for the current cycle)."""
     return f"issued {datetime.now().strftime('%b %d, %Y')}"
+
+
+def date_from_day4_8_schedule(day):
+    """SPC's Day 4-8 Severe Weather Outlook's own MapServer doesn't
+    reliably carry a usable valid/expire on a quiet day (see
+    fetch_spc_day4_8's comment) -- computed directly from the fixed,
+    fully deterministic schedule instead: one issuance each morning
+    covers day N's 1200Z-to-1200Z window starting (N-4) days after that
+    same morning's 1200Z."""
+    def fn(placemarks, fetched_at):
+        morning = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+        start = morning + timedelta(days=day - 4)
+        end = start + timedelta(days=1)
+        return f"valid {start.strftime('%b %d, %H')}Z–{end.strftime('%b %d, %H')}Z"
+    return fn
 
 
 def date_from_usdm_fields(placemarks, fetched_at):
@@ -902,6 +979,14 @@ SPC_SEVERE_STYLE = {
     "HIGH": {"color": "#b23b9c", "alpha": 0.68, "order_key": 6, "label": "High"},
 }
 
+# Day 4-8 Severe Weather Outlook's own two tiers -- see fetch_spc_day4_8's
+# comment. Colors confirmed directly from the outlooks/SPC_wx_outlks
+# MapServer's own renderer definition, not approximated from SPC_SEVERE_STYLE.
+SPC_DAY4_8_STYLE = {
+    "15": {"color": "#ffff00", "alpha": 0.6, "order_key": 1, "label": "15% Severe Weather Risk"},
+    "30": {"color": "#e69800", "alpha": 0.65, "order_key": 2, "label": "30% Severe Weather Risk"},
+}
+
 
 def spc_style(style_map, warning_label):
     def style(pm):
@@ -1157,6 +1242,18 @@ PRODUCTS = {
         date=date_from_valid_expire_iso,
         output="western_us_spc_convective_day2.png",
     ),
+    **{
+        f"spc_severe_day{d}": dict(
+            title=f"Western U.S. Severe Weather Outlook — Day {d}",
+            subtitle_prefix=f"NWS Storm Prediction Center — Day {d} Outlook",
+            agency="SPC",
+            spc_day4_8_day=d,
+            style=spc_style(SPC_DAY4_8_STYLE, "day 4-8 severe outlook"),
+            date=date_from_day4_8_schedule(d),
+            output=f"western_us_spc_severe_day{d}.png",
+        )
+        for d in range(4, 9)
+    },
     "spc_convective_day3": dict(
         title="Western U.S. Severe Weather Outlook — Day 3",
         subtitle_prefix="NWS Storm Prediction Center — Day 3 Categorical Outlook",
@@ -1430,6 +1527,9 @@ def build_map(product_key, output_path, override_path=None):
         fetched_at = None
     elif "spc_firewx_prob_day" in cfg:
         placemarks = fetch_spc_firewx_prob(cfg["spc_firewx_prob_day"])
+        fetched_at = None
+    elif "spc_day4_8_day" in cfg:
+        placemarks = fetch_spc_day4_8(cfg["spc_day4_8_day"])
         fetched_at = None
     else:
         text, fetched_at = fetch_source(cfg, override_path)
