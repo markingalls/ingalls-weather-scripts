@@ -605,6 +605,38 @@ def make_stripe_image(colors, width_px, height_px, stripe_px=20):
     return img
 
 
+def project_geom_safe(proj, pc, geom):
+    """Project a lon/lat Polygon/MultiPolygon into `proj`'s native (data)
+    coordinates by transforming each ring's vertices directly, instead of
+    cartopy's own Projection.project_geometry(). That method has a real bug
+    under NearsidePerspective (confirmed directly, and confirmed NOT
+    specific to a hand-rolled use of it -- cartopy's own public
+    ax.add_geometries() reproduces it on the identical geometry): for
+    certain ordinary, valid, simple concave polygons it misjudges whether
+    the polygon needs clipping/splitting against the projection's boundary
+    and returns the *entire* visible disk instead of the polygon -- everything
+    fills, not just the interior. Densifying edges (segmentize) only masked
+    this for some polygons and made others worse, so it isn't a real fix.
+    transform_points() has none of that boundary-clipping logic -- it's a
+    pure per-point coordinate transform -- so it can't hit this bug. Safe
+    here specifically because every polygon this draws is confined to the
+    western U.S. extent this map already renders in full, i.e. always well
+    inside the visible hemisphere; it would need real
+    antimeridian/horizon-boundary clipping (which this does not do) for a
+    geometry that actually extends past what the map shows."""
+    polys = list(geom.geoms) if geom.geom_type == "MultiPolygon" else [geom]
+    out_polys = []
+    for p in polys:
+        proj_rings = []
+        for ring in [p.exterior] + list(p.interiors):
+            xs = np.array([c[0] for c in ring.coords])
+            ys = np.array([c[1] for c in ring.coords])
+            pts = proj.transform_points(pc, xs, ys)
+            proj_rings.append(pts[:, :2])
+        out_polys.append(ShPolygon(proj_rings[0], proj_rings[1:]))
+    return out_polys[0] if len(out_polys) == 1 else ShMultiPolygon(out_polys)
+
+
 def draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px):
     """Draw the parsed hazard polygons, partitioned into disjoint regions
     first rather than alpha-stacked directly, so a region covered by more
@@ -646,28 +678,22 @@ def draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px):
         partition = next_partition
 
     OVERLAP_EDGE = "#4a4a4a"
-    # Densify every ring before projecting -- cartopy's NearsidePerspective
-    # project_geometry() has a real bug (confirmed directly: reproduced with
-    # ax.add_geometries() too, so it's not specific to this function's manual
-    # projection call) where a sufficiently complex/concave polygon with long
-    # straight edges gets misclassified by its antimeridian/horizon-crossing
-    # detector and the whole polygon fills as its own inverse -- the entire
-    # visible disk instead of just the polygon's interior. Splitting long
-    # edges into <=0.1-degree segments (well under the ~0.2 degree length
-    # that reproduced the bug) gives that detector enough resolution to get
-    # it right, without changing the polygon's actual shape.
-    SEGMENTIZE_MAX_DEG = 0.1
     for i, (geom, cell_labels) in enumerate(partition):
         if geom.is_empty:
             continue
-        geom = geom.segmentize(SEGMENTIZE_MAX_DEG)
+        # project_geom_safe(), not ax.add_geometries()/ax.projection.
+        # project_geometry() -- see its docstring for the cartopy bug this
+        # avoids entirely rather than papering over.
+        proj_geom = project_geom_safe(ax.projection, pc, geom)
+        clip_path = shapely_to_path(proj_geom)
         axes_present = {l.get("axis", "primary") for l in cell_labels}
         if len(axes_present) <= 1:
             # Single axis (including the common single-label case) -- the
             # most severe category's solid color wins, same as unstriped.
             top = max(cell_labels, key=lambda l: l["order_key"])
-            ax.add_geometries([geom], crs=pc, facecolor=top["color"], edgecolor=top["color"],
-                               linewidth=1.2, alpha=top["alpha"], zorder=3 + i)
+            patch = PathPatch(clip_path, transform=ax.transData, facecolor=top["color"],
+                               edgecolor=top["color"], linewidth=1.2, alpha=top["alpha"], zorder=3 + i)
+            ax.add_patch(patch)
             continue
 
         # Cross-axis overlap: stripe with one representative (most severe
@@ -680,16 +706,15 @@ def draw_hazard_layers(ax, pc, styled, ax_w_px, ax_h_px):
         colors = [rep_by_axis[a]["color"] for a in sorted(rep_by_axis)]
         alpha = max(l["alpha"] for l in cell_labels)
         stripe_img = make_stripe_image(colors, ax_w_px, ax_h_px)
-        proj_geom = ax.projection.project_geometry(geom, pc)
-        clip_path = shapely_to_path(proj_geom)
         clip_patch = PathPatch(clip_path, transform=ax.transData)
         # GeoAxes overrides imshow to require a CRS transform; this is
         # plain axes-fraction space, so call the base Axes.imshow.
         im = Axes.imshow(ax, stripe_img, extent=(0, 1, 0, 1), transform=ax.transAxes,
                           origin="upper", interpolation="nearest", alpha=alpha, zorder=3 + i)
         im.set_clip_path(clip_patch)
-        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
-                           linewidth=1.2, alpha=1.0, zorder=3 + i + 0.05)
+        outline = PathPatch(clip_path, transform=ax.transData, facecolor="none",
+                             edgecolor=OVERLAP_EDGE, linewidth=1.2, alpha=1.0, zorder=3 + i + 0.05)
+        ax.add_patch(outline)
 
 
 # ---------------------------------------------------------------------------
