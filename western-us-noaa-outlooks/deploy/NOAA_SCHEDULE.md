@@ -22,6 +22,19 @@ from NOAA/SPC/CPC's own pages (checked live, not from memory):
   ~2:00am CST/CDT (~0700-0800Z depending on daylight saving), per
   `origin-west-www-spc.woc.noaa.gov/misc/about.php`; Day 1 gets a separate
   update by 1700Z, Day 2 by 2000Z.
+- **SPC Fire Weather Day 3-8** (probabilistic Dry Thunderstorm + Wind/Low-RH
+  risk, all six days from one issuance): issued once daily at 2200Z, per
+  `spc.noaa.gov/misc/about.php`'s "Day 3-8 Fire Weather Outlook" section.
+  Scheduled at 2220Z, a 20-minute buffer -- confirmed live that every
+  day's ISSUE timestamp within one fetch lands a few minutes *before*
+  2200Z (e.g. 2153Z), so this isn't racing the data landing, same
+  early-release pattern seen on the SPC Day 2 outlook elsewhere in this
+  file. Sourced from NOAA's own ArcGIS MapServer
+  (`mapservices.weather.noaa.gov/vector/rest/services/fire_weather/
+  SPC_firewx/MapServer`), not IEM's bulk shapefile mirror used for Day 1/2
+  above -- confirmed directly that IEM's `outlooks.py` silently ignores
+  `day` past 2 for `type=F`, returning Day 1/2's own records again rather
+  than an error, so it doesn't carry this product at all.
 - **CPC 6-10 Day and 8-14 Day** (temp + precip): issued daily between
   3-4pm Eastern, per `cpc.ncep.noaa.gov/products/predictions/610day/` and
   `.../814day/`. Scheduled at 2100Z, which covers 3-4pm Eastern under

@@ -16,8 +16,14 @@ per outlook.
 | `precip_8_14` | Precipitation Outlook, 8–14 Day              | CPC |
 | `temp_wk34`   | Temperature Outlook, Week 3–4                | CPC |
 | `precip_wk34` | Precipitation Outlook, Week 3–4              | CPC |
-| `spc_fire`    | Fire Weather Outlook, Day 1                  | SPC |
-| `spc_fire_day2` | Fire Weather Outlook, Day 2                | SPC |
+| `spc_fire`    | Fire Weather Outlook, Day 1 (categorical)     | SPC |
+| `spc_fire_day2` | Fire Weather Outlook, Day 2 (categorical)   | SPC |
+| `spc_fire_day3` | Fire Weather Outlook, Day 3 (probabilistic Dry T + Wind/RH) | SPC |
+| `spc_fire_day4` | Fire Weather Outlook, Day 4 (probabilistic Dry T + Wind/RH) | SPC |
+| `spc_fire_day5` | Fire Weather Outlook, Day 5 (probabilistic Dry T + Wind/RH) | SPC |
+| `spc_fire_day6` | Fire Weather Outlook, Day 6 (probabilistic Dry T + Wind/RH) | SPC |
+| `spc_fire_day7` | Fire Weather Outlook, Day 7 (probabilistic Dry T + Wind/RH) | SPC |
+| `spc_fire_day8` | Fire Weather Outlook, Day 8 (probabilistic Dry T + Wind/RH) | SPC |
 | `spc_severe`  | Severe Weather (Categorical) Outlook, Day 1  | SPC |
 | `spc_convective_day2` | Severe Weather (Categorical) Outlook, Day 2 | SPC |
 | `spc_convective_day3` | Severe Weather (Categorical) Outlook, Day 3 | SPC |
@@ -93,6 +99,16 @@ The Ingalls Weather logo (placed bottom-right on the map) lives in
 - SPC only publishes separate Wind and Hail probability outlooks for Day 1
   and Day 2 -- Day 3 only has a combined all-hazard "Probabilistic" outlook,
   not split by hazard type, so there's no `spc_wind_day3`/`spc_hail_day3`.
+- Day 3-8 Fire Weather (`spc_fire_day3`..`spc_fire_day8`) is a different
+  product from Day 1/2's categorical outlook, not just a further-out day of
+  it: probabilistic (10/40% Dry Thunderstorm risk, 40/70% Wind/Low-RH risk)
+  rather than the fixed Elevated/Critical/Extreme tiers, issued once daily
+  for all six days at once, and fetched straight from NOAA's own ArcGIS
+  MapServer rather than IEM (which doesn't carry it) -- see
+  `fetch_spc_firewx_prob()`'s comment in `build_map.py`. Uses NOAA's own
+  embedded stroke color per tier, like the Wind/Hail probability outlooks
+  above, but shaded solid rather than SPC's own hatched-outline rendering,
+  matching every other product's style in this file.
 - WPC's excessive rainfall outlook uses a small, fixed category set too,
   styled with a hand-picked swatch per category in `build_map.py`.
 - The map domain, city labels, etc. are all defined near the top of

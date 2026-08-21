@@ -15,6 +15,12 @@ frame/style. Pick one with --product:
     precip_wk34   CPC Week 3-4 Precipitation Outlook
     spc_fire      SPC Day 1 Fire Weather Outlook
     spc_fire_day2 SPC Day 2 Fire Weather Outlook
+    spc_fire_day3 SPC Day 3 Fire Weather Outlook (probabilistic Dry T + Wind/RH)
+    spc_fire_day4 SPC Day 4 Fire Weather Outlook (probabilistic Dry T + Wind/RH)
+    spc_fire_day5 SPC Day 5 Fire Weather Outlook (probabilistic Dry T + Wind/RH)
+    spc_fire_day6 SPC Day 6 Fire Weather Outlook (probabilistic Dry T + Wind/RH)
+    spc_fire_day7 SPC Day 7 Fire Weather Outlook (probabilistic Dry T + Wind/RH)
+    spc_fire_day8 SPC Day 8 Fire Weather Outlook (probabilistic Dry T + Wind/RH)
     spc_severe    SPC Day 1 Categorical (Severe Weather) Outlook
     spc_convective_day2  SPC Day 2 Categorical (Severe Weather) Outlook
     spc_convective_day3  SPC Day 3 Categorical (Severe Weather) Outlook
@@ -320,6 +326,22 @@ def parse_kml_extended_data(text):
     return results
 
 
+def _geojson_polygon_rings(geom):
+    """Exterior-only ring list from a GeoJSON Polygon/MultiPolygon geometry
+    dict (holes dropped), or None if geom is missing/not a polygon type.
+    Shared by every ArcGIS-GeoJSON-sourced fetch in this file."""
+    if not geom:
+        return None
+    if geom["type"] == "Polygon":
+        parts = [geom["coordinates"]]
+    elif geom["type"] == "MultiPolygon":
+        parts = geom["coordinates"]
+    else:
+        return None
+    rings = [part[0] for part in parts if part and len(part[0]) >= 3]
+    return rings or None
+
+
 def parse_usdm_geojson(text):
     """U.S. Drought Monitor's ArcGIS FeatureServer returns plain GeoJSON
     rather than KML: one feature per DM category (0-4), each already the
@@ -329,16 +351,7 @@ def parse_usdm_geojson(text):
     data = json.loads(text)
     results = []
     for feat in data.get("features", []):
-        geom = feat.get("geometry")
-        if not geom:
-            continue
-        if geom["type"] == "Polygon":
-            parts = [geom["coordinates"]]
-        elif geom["type"] == "MultiPolygon":
-            parts = geom["coordinates"]
-        else:
-            continue
-        rings = [part[0] for part in parts if part and len(part[0]) >= 3]
+        rings = _geojson_polygon_rings(feat.get("geometry"))
         if not rings:
             continue
         results.append({"fields": feat.get("properties", {}), "rings": rings})
@@ -489,6 +502,82 @@ def fetch_iem_outlook(day, iem_type, category, hazard_label=None):
             },
             "rings": [],
         })
+    return placemarks
+
+
+# ---------------------------------------------------------------------------
+# SPC Day 3-8 Fire Weather Outlook (probabilistic) -- a genuinely different
+# product from Day 1/2's categorical outlook above, not just a further-out
+# day of the same one. Issued once daily at 2200Z, one issuance covering all
+# six days at once (spc.noaa.gov/misc/about.php, "Day 3-8 Fire Weather
+# Outlook" section; confirmed live -- every day's ISSUE timestamp within one
+# fetch matches). IEM's outlooks.py bulk mirror (used for Day 1/2 above)
+# does NOT carry this product -- confirmed directly: day=3..8/type=F all
+# returned the exact same Day-1/2-only records, i.e. IEM silently ignores
+# day past 2 for type=F rather than erroring, so this fetches straight from
+# NOAA's own ArcGIS MapServer instead (mapservices.weather.noaa.gov isn't
+# behind the spc.noaa.gov CloudFront block the IEM comment above describes
+# -- confirmed live). Each day has two independent layers -- Dry
+# Thunderstorm risk and Wind/Low-RH risk -- each a 2-tier probability scale
+# (10/40% for Dry T, 40/70% for Wind/RH; confirmed live, and matches the
+# tiers spc.noaa.gov/products/exper/fire_wx/ describes) with NOAA's own
+# fill/stroke hex embedded right on each feature, same as spc_prob_style's
+# CIG tier above -- used directly rather than a hand-picked ramp, so this
+# tracks any future NOAA color-scheme change automatically. Day N's Dry T
+# layer is id 7+(N-3)*3, Wind/RH is 8+(N-3)*3 (ids 7/8, 10/11, 13/14, 16/17,
+# 19/20, 22/23 for days 3-8 -- confirmed against the MapServer's own layer
+# list). A day/hazard with no risk anywhere returns one placeholder feature
+# with label "Probability Too Low" and blank stroke/fill (a real polygon --
+# essentially the whole CONUS bounding box -- not an empty result), which
+# this drops same as any other legitimately-quiet category.
+SPC_FIREWX_PROB_URL = "https://mapservices.weather.noaa.gov/vector/rest/services/fire_weather/SPC_firewx/MapServer"
+SPC_FIREWX_PROB_HAZARDS = [("dryt", "dry_thunder"), ("wind", "wind_rh")]
+
+
+def fetch_spc_firewx_prob(day):
+    placemarks = []
+    for hazard_offset, (hazard_key, axis) in enumerate(SPC_FIREWX_PROB_HAZARDS):
+        layer_id = 7 + (day - 3) * 3 + hazard_offset
+        url = f"{SPC_FIREWX_PROB_URL}/{layer_id}/query"
+        params = {"where": "1=1", "outFields": "*", "f": "geojson"}
+        print(f"Fetching {url} (day={day}, hazard={hazard_key}) ...")
+        resp = requests.get(url, headers=FETCH_HEADERS, params=params, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        feats = data.get("features")
+        if not feats:
+            sys.exit(f"SPC firewx probabilistic MapServer returned no features at all for "
+                     f"day={day}, layer={layer_id} -- feed issue, not weather.")
+        for feat in feats:
+            props = feat.get("properties", {})
+            label = (props.get("label") or "").strip()
+            stroke = (props.get("stroke") or "").strip()
+            if not stroke or label == "Probability Too Low":
+                # Quiet day for this hazard -- still carry VALID_ISO/EXPIRE_ISO
+                # through so the date subtitle is right, same pattern as
+                # fetch_iem_outlook's own date-only placemark above.
+                placemarks.append({
+                    "fields": {
+                        "VALID_ISO": _iem_iso(props["valid"]),
+                        "EXPIRE_ISO": _iem_iso(props["expire"]),
+                    },
+                    "rings": [],
+                })
+                continue
+            rings = _geojson_polygon_rings(feat.get("geometry"))
+            if not rings:
+                continue
+            placemarks.append({
+                "fields": {
+                    "LABEL": label,
+                    "LABEL2": (props.get("label2") or "").strip() or label,
+                    "STROKE": stroke,
+                    "AXIS": axis,
+                    "VALID_ISO": _iem_iso(props["valid"]),
+                    "EXPIRE_ISO": _iem_iso(props["expire"]),
+                },
+                "rings": rings,
+            })
     return placemarks
 
 
@@ -882,6 +971,27 @@ def spc_prob_style(hazard_label):
     return style
 
 
+def spc_firewx_prob_style(pm):
+    """Style for the Day 3-8 Fire Weather Outlook (see fetch_spc_firewx_prob).
+    Uses NOAA's own embedded stroke color and label2 directly rather than a
+    hand-picked style table -- this product's real rendering is hatched
+    outlines with a transparent fill (confirmed against the MapServer's own
+    drawingInfo renderer), but we shade solid like every other product in
+    this file, so "color" here means our own fill, not a literal copy of
+    SPC's rendering. "axis" separates Dry Thunderstorm risk from Wind/Low-RH
+    risk so the two stripe on overlap instead of blending, same mechanism
+    Day 1/2's fire-index-vs-dry-thunderstorm axes use."""
+    fields = pm["fields"]
+    label = fields.get("LABEL", "")
+    try:
+        probability = float(label)
+    except ValueError:
+        print(f"WARNING: unrecognized fire weather probabilistic category '{label}', skipping.")
+        return None
+    return {"color": fields["STROKE"], "alpha": 0.6, "order_key": probability,
+            "label": fields.get("LABEL2") or label, "axis": fields["AXIS"]}
+
+
 WPC_ERO_STYLE = [
     ("Marginal", {"color": "#6fae6f", "alpha": 0.58}),
     ("Slight",   {"color": "#e0c84b", "alpha": 0.62}),
@@ -1017,6 +1127,18 @@ PRODUCTS = {
         date=date_from_valid_expire_iso,
         output="western_us_spc_fire_day2.png",
     ),
+    **{
+        f"spc_fire_day{d}": dict(
+            title=f"Western U.S. Fire Weather Outlook — Day {d}",
+            subtitle_prefix=f"NWS Storm Prediction Center — Day {d} Outlook",
+            agency="SPC",
+            spc_firewx_prob_day=d,
+            style=spc_firewx_prob_style,
+            date=date_from_valid_expire_iso,
+            output=f"western_us_spc_fire_day{d}.png",
+        )
+        for d in range(3, 9)
+    },
     "spc_severe": dict(
         title="Western U.S. Severe Weather Outlook",
         subtitle_prefix="NWS Storm Prediction Center — Day 1 Categorical Outlook",
@@ -1305,6 +1427,9 @@ def build_map(product_key, output_path, override_path=None):
 
     if "iem" in cfg:
         placemarks = fetch_iem_outlook(**cfg["iem"])
+        fetched_at = None
+    elif "spc_firewx_prob_day" in cfg:
+        placemarks = fetch_spc_firewx_prob(cfg["spc_firewx_prob_day"])
         fetched_at = None
     else:
         text, fetched_at = fetch_source(cfg, override_path)
