@@ -76,6 +76,12 @@ dew-point-storm-map/output/*.png
 wildcad-fires-map/output/*.json
 wildcad-fires-map/output/*.png
 
+# --- lower-mainland-victoria-lightning-map ---
+# fetch_lightning.py pulls flash data live; output/ only holds the fetched
+# JSON and the rendered PNG -- neither is source, so don't track them.
+lower-mainland-victoria-lightning-map/output/*.json
+lower-mainland-victoria-lightning-map/output/*.png
+
 # --- hrrr-smoke-chart ---
 # smoke.json is live data fetch_smoke.py regenerates every run, and the
 # rendered chart is an output too -- neither is source, so don't track them.

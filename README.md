@@ -28,6 +28,11 @@ workflows. Each project lives in its own directory with its own README.
   — real-time companion to `columbia-basin-lightning-map/`: the last 2
   hours of GLM flash detections, with finer 0-30/30-60/60-120 minute
   recency bands for watching an active storm right now.
+- [`lower-mainland-victoria-lightning-map/`](lower-mainland-victoria-lightning-map/)
+  — one-off map of a single past calendar day's GLM lightning flash
+  detections zoomed to Whistler, Hope, Port Renfrew, and Everett (Metro
+  Vancouver, the Fraser Valley, southern Vancouver Island, and the
+  northwest Puget Sound corridor), sourced from GOES-18.
 - [`dew-point-storm-map/`](dew-point-storm-map/) — one-off map of today's
   maximum dew point depression across British Columbia, Washington,
   Oregon, and Idaho, with a dashed red outline where ECMWF IFS's fields
