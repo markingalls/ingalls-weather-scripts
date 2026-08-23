@@ -76,6 +76,7 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import matplotlib
 matplotlib.use("Agg")
@@ -107,6 +108,8 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+
+LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 # ---------------------------------------------------------------------------
 # Data sources
@@ -248,7 +251,7 @@ def fetch_minor_highways(lon_min, lon_max, lat_min, lat_max):
     return []
 
 
-def build_map(fire, minor_hwy_geoms, output_path):
+def build_map(fire, minor_hwy_geoms, generated_at, output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_med = fm.FontProperties(fname=POPPINS_MED_PATH)
 
@@ -333,10 +336,12 @@ def build_map(fire, minor_hwy_geoms, output_path):
     acres = fire["acres"] or 0
     pct = fire["pct_contained"]
     pct_str = f"{pct:.0f}% contained" if pct is not None else "containment unknown"
+    updated_local = generated_at.astimezone(LOCAL_TZ)
+    updated_str = updated_local.strftime("%Y-%m-%d %H:%M PT")
 
     fig.text(0.03, 0.976, f"{fire['name']} Fire", fontsize=22,
               fontproperties=poppins_med, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.9245, f"{acres:,.0f} acres • {pct_str}",
+    fig.text(0.03, 0.9245, f"{acres:,.0f} acres • {pct_str} • Updated: {updated_str}",
               fontsize=12.5, fontproperties=poppins_med, color="#3a3835", ha="left", va="top")
 
     fig.text(0.5, 0.015, "NIFC WFIGS Interagency Fire Perimeters, US Census (counties), "
@@ -396,4 +401,4 @@ if __name__ == "__main__":
     now = datetime.now(tz=timezone.utc)
     out_path = args.out or (OUTPUT_DIR / f"{args.fire_name.lower().replace(' ', '_')}"
                                           f"_fire_{now.strftime('%Y-%m-%d')}.png")
-    build_map(fire, minor_hwy_geoms, out_path)
+    build_map(fire, minor_hwy_geoms, now, out_path)
