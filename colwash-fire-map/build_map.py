@@ -33,8 +33,11 @@ Counties (counties_wa_or_id.geojson) and WA interstates/main highways
 motorway/trunk only) are shared basemap data from ../maps/, same
 source/provenance as the rest of this repo's WA-domain maps.
 
-Minor highways (the next OSM class down, "primary"/"primary_link" --
-washington_roads.geojson doesn't carry this tier at all, confirmed by
+Minor highways (the next OSM class(es) down -- "primary"/"primary_link",
+plus "secondary"/"secondary_link" ways that carry a state-route ref like
+SR 221 or SR 241, so numbered state highways show up without pulling in
+every unnumbered farm/county road OSM also tags secondary --
+washington_roads.geojson doesn't carry either tier at all, confirmed by
 inspecting its highway-value distribution) are fetched live from
 OpenStreetMap via Overpass, scoped to a bbox around EXTENT so the query
 stays cheap. Best-effort like the town lookups below: several public
@@ -142,11 +145,8 @@ LAT_MIN, LAT_MAX = 45.9037, 46.4037
 # Towns outside EXTENT are dropped automatically at draw time, not filtered
 # out of this list -- e.g. Wapato and Bickleton, in frame at the previous
 # (town-padded) extent, sit just outside this fire-centered one now.
-# 5th field is an optional vertical label nudge in points (default 0) --
-# only Zillah needs one, since its marker now sits almost exactly on the
-# frame's top edge and its label would otherwise straddle the border.
+# 5th field is an optional vertical label nudge in points (default 0).
 TOWNS = [
-    ("Zillah", -120.2620, 46.4021, "left", -9),
     ("Granger", -120.1951, 46.3418, "right", 0),
     ("Toppenish", -120.3089, 46.3775, "left", 0),
     ("Wapato", -120.4203, 46.4476, "left", 0),
@@ -210,17 +210,26 @@ def fetch_perimeter(fire_name, state):
 
 
 def fetch_minor_highways(lon_min, lon_max, lat_min, lat_max):
-    """Best-effort: OSM highway=primary/primary_link ways within the given
-    bbox, as a list of shapely LineStrings. washington_roads.geojson has no
-    tier below trunk, so this is the only source for it. Tries each mirror
-    in OVERPASS_URLS in turn; returns [] (map renders without this layer)
-    if every mirror fails, rather than blocking the whole map on a
+    """Best-effort: OSM ways within the given bbox for the "minor highway"
+    tier, as a list of shapely LineStrings. washington_roads.geojson has no
+    tier below trunk, so this is the only source for it. Two OSM classes
+    feed this layer: every highway=primary/primary_link way (no ref
+    needed -- these read as the next tier down from trunk regardless of
+    whether OSM gave them a route number), plus highway=secondary/
+    secondary_link ways that *do* carry a state-route ref (e.g. SR 221,
+    SR 241) -- secondary is otherwise mostly unnumbered farm/county roads,
+    so it's filtered to ref~"^SR" rather than pulled in wholesale, which
+    would bury the actual state highways in clutter. Tries each mirror in
+    OVERPASS_URLS in turn; returns [] (map renders without this layer) if
+    every mirror fails, rather than blocking the whole map on a
     third-party service that isn't this map's main data source."""
     query = f"""
     [out:json][timeout:25];
     (
       way["highway"="primary"]({lat_min},{lon_min},{lat_max},{lon_max});
       way["highway"="primary_link"]({lat_min},{lon_min},{lat_max},{lon_max});
+      way["highway"="secondary"]["ref"~"^SR"]({lat_min},{lon_min},{lat_max},{lon_max});
+      way["highway"="secondary_link"]["ref"~"^SR"]({lat_min},{lon_min},{lat_max},{lon_max});
     );
     out geom;
     """
