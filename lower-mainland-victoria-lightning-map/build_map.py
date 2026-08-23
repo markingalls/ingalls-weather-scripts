@@ -18,7 +18,6 @@ USAGE
 """
 import argparse
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -46,25 +45,13 @@ f_bold = fm.FontProperties(fname=FONT_DIR + "Poppins-Bold.ttf")
 f_reg = fm.FontProperties(fname=FONT_DIR + "Poppins-Regular.ttf")
 f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
 
-# ---------- time-of-day bands ----------
-# This is a single past calendar day, not a rolling lookback, so bands are
-# keyed to local clock time rather than "age" -- a warm gradient from pale
-# (overnight/morning) to hot (evening), drawn chronologically so later-day
-# flashes render on top where tracks overlap. Bounds are local (Pacific)
-# hours, matching the day fetch_lightning.py pulls.
-TIME_BANDS = [
-    (0, 6, "12am-6am PT", "#FFD84D"),
-    (6, 12, "6am-12pm PT", "#FFB347"),
-    (12, 18, "12pm-6pm PT", "#FF6F3C"),
-    (18, 24, "6pm-12am PT", "#FF1E56"),
-]
-
-
-def band_for_hour(hour):
-    for start, end, label, color in TIME_BANDS:
-        if start <= hour < end:
-            return label, color
-    return TIME_BANDS[-1][2], TIME_BANDS[-1][3]
+# A full archived day has no meaningful "how recent" axis the way a live
+# nowcast does (every flash on the map is equally "that day"), so this is
+# a single style, matching ../columbia-basin-lightning-daily-map/ (the
+# canonical daily-archive lightning map posted to the website) rather than
+# the age-banded style used by the rolling-lookback lightning maps.
+FLASH_COLOR = "#8B2FC9"
+FLASH_LABEL = "Lightning flash"
 
 
 # ---------- extent / projection ----------
@@ -108,14 +95,20 @@ def build_map(date, data_path, output_path):
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
 
     # ---------- land ----------
-    land_geoms = load_geoms(MAPS_DIR / "land_slim.json")
+    # Full-resolution Natural Earth 10m land + minor islands, clipped to
+    # this domain and checked in locally -- ../maps/land_slim.json is
+    # simplified for continental-scale maps and reads visibly blocky at
+    # this tight a zoom (Gulf Islands, Howe Sound, the Fraser mouth).
+    land_geoms = load_geoms(THIS_DIR / "coastline_10m.geojson")
     ax.add_geometries(land_geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", zorder=1)
 
     # ---------- countries (US/Canada border) ----------
-    target_names = {"United States of America", "Canada"}
-    c_geoms = load_geoms(MAPS_DIR / "countries_slim.json",
-                          lambda f: (f["properties"].get("NAME") or f["properties"].get("ADMIN")
-                                     or f["properties"].get("name")) in target_names)
+    # admin0_boundary_lines.json, not ../maps/countries_slim.json's polygon
+    # edges -- a dedicated boundary-line layer (land border only, no
+    # coastline duplication) renders a cleaner line than tracing a
+    # simplified country polygon's outline; see ../dew-point-storm-map/
+    # build_map.py for the same choice.
+    c_geoms = load_geoms(MAPS_DIR / "admin0_boundary_lines.json")
     ax.add_geometries(c_geoms, crs=pc, facecolor="none", edgecolor="#9a978c",
                        linewidth=1.1, zorder=2)
 
@@ -130,26 +123,24 @@ def build_map(date, data_path, output_path):
     ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac",
                        linewidth=0.7, zorder=3)
 
-    # ---------- WA counties (only WA corner of the domain has county data) ----------
-    co_geoms = load_geoms(MAPS_DIR / "counties_wa_or_id.geojson")
-    ax.add_geometries(co_geoms, crs=pc, facecolor="none", edgecolor="#c7c4b8",
-                       linewidth=0.5, zorder=4)
-
-    # ---------- roads (WA only -- no BC roads basemap in ../maps/) ----------
+    # ---------- roads (WA + BC -- ../maps/bc_roads.geojson is this map's
+    # own OSM motorway/trunk pull for the Canadian side, in the same
+    # style/schema as the shared washington_roads.geojson) ----------
     MOTORWAY = {"motorway", "motorway_link"}
     TRUNK = {"trunk", "trunk_link"}
     MOTORWAY_COLOR = "#8FB8E0"  # pastel blue
     TRUNK_COLOR = "#F2B880"     # pastel orange
 
     motorway_geoms, trunk_geoms = [], []
-    wa_roads = json.load(open(MAPS_DIR / "washington_roads.geojson"))
-    for f in wa_roads["features"]:
-        hwy = f["properties"].get("highway")
-        geom = shape(f["geometry"])
-        if hwy in MOTORWAY:
-            motorway_geoms.append(geom)
-        elif hwy in TRUNK:
-            trunk_geoms.append(geom)
+    for roads_file in ("washington_roads.geojson", "bc_roads.geojson"):
+        d = json.load(open(MAPS_DIR / roads_file))
+        for f in d["features"]:
+            hwy = f["properties"].get("highway")
+            geom = shape(f["geometry"])
+            if hwy in MOTORWAY:
+                motorway_geoms.append(geom)
+            elif hwy in TRUNK:
+                trunk_geoms.append(geom)
 
     ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR,
                        linewidth=1.1, zorder=5)
@@ -157,43 +148,38 @@ def build_map(date, data_path, output_path):
                        linewidth=1.3, zorder=6)
 
     # ---------- lightning flashes ----------
-    buckets = {label: {"lons": [], "lats": []} for _, _, label, _ in TIME_BANDS}
-    for flash in flashes:
-        flash_time_pt = datetime.fromisoformat(flash["time"]).astimezone(PACIFIC)
-        label, _ = band_for_hour(flash_time_pt.hour)
-        buckets[label]["lons"].append(flash["lon"])
-        buckets[label]["lats"].append(flash["lat"])
-
-    for _, _, label, color in TIME_BANDS:
-        lons = buckets[label]["lons"]
-        lats = buckets[label]["lats"]
-        if not lons:
-            continue
-        ax.scatter(lons, lats, transform=pc, s=14, color=color, alpha=0.7,
-                   edgecolor="none", linewidths=0, zorder=7)
+    lons = [f["lon"] for f in flashes]
+    lats = [f["lat"] for f in flashes]
+    ax.scatter(lons, lats, transform=pc, s=10, color=FLASH_COLOR, alpha=0.55,
+               edgecolor="none", linewidths=0, zorder=7)
 
     # ---------- city labels ----------
     cities = [
         ("Whistler", -122.9574, 50.1163, "right"),
         ("Squamish", -123.1558, 49.7016, "right"),
-        ("Vancouver", -123.1207, 49.2827, "right"),
-        ("Surrey", -122.8490, 49.1913, "left"),
+        ("Sechelt", -123.7556, 49.4742, "left"),
+        ("Vancouver", -123.1207, 49.2827, "left"),
+        ("Coquitlam", -122.7932, 49.2838, "right"),
+        ("Surrey", -122.8490, 49.1913, "right"),
         ("Abbotsford", -122.3045, 49.0504, "right"),
         ("Chilliwack", -121.9514, 49.1579, "right"),
         ("Hope", -121.4412, 49.3820, "left"),
         ("Nanaimo", -123.9401, 49.1659, "left"),
         ("Duncan", -123.7079, 48.7787, "left"),
-        ("Victoria", -123.3656, 48.4284, "left"),
+        ("Victoria", -123.3656, 48.4284, "right"),
         ("Sooke", -123.7275, 48.3742, "right"),
         ("Port Renfrew", -124.4204, 48.5541, "right"),
+        ("Port Angeles", -123.4307, 48.1181, "right"),
+        ("Oak Harbor", -122.6401, 48.2934, "left"),
         ("Bellingham", -122.4787, 48.7519, "right"),
         ("Everett", -122.2021, 47.9790, "right"),
     ]
+    LABEL_DX = 0.035
     for name, lon, lat, side in cities:
         ax.plot(lon, lat, marker="o", markersize=4, color="black",
                  transform=pc, zorder=8)
         ha = "left" if side == "right" else "right"
-        dx = 0.07 if side == "right" else -0.07
+        dx = LABEL_DX if side == "right" else -LABEL_DX
         txt = ax.text(lon + dx, lat, name, transform=pc, ha=ha, va="center",
                        fontproperties=f_med, fontsize=11, color="black", zorder=9)
         txt.set_path_effects([pe.withStroke(linewidth=1.65, foreground="white", alpha=0.6)])
@@ -238,15 +224,13 @@ def build_map(date, data_path, output_path):
     fig.text(left_x, title_y,
               f"Lower Mainland & Victoria: Lightning ({window_start.strftime('%b %d, %Y')})",
               fontproperties=f_bold, fontsize=22, color="#2b2a26")
-    subtitle = (f"{len(flashes):,} flashes detected — GOES-18 GLM, "
-                f"full day {window_start.strftime('%b %d, %Y')} ({window_start.strftime('%Z')})")
+    subtitle = f"{len(flashes):,} flashes detected — GOES-18 GLM ({window_start.strftime('%Z')})"
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 
     # ---------- legend ----------
     legend_handles = [
-        Line2D([0], [0], marker="o", color="none", markerfacecolor=color,
-               markeredgecolor="none", markersize=9, alpha=0.85, label=label)
-        for _, _, label, color in TIME_BANDS
+        Line2D([0], [0], marker="o", color="none", markerfacecolor=FLASH_COLOR,
+               markeredgecolor="none", markersize=9, alpha=0.85, label=FLASH_LABEL),
     ]
     leg = fig.legend(handles=legend_handles, loc="lower left",
                       bbox_to_anchor=(left_x + 0.012, map_pos.y0 + 0.012),
@@ -257,7 +241,7 @@ def build_map(date, data_path, output_path):
 
     # ---------- attribution ----------
     fig.text(center_x, 0.02,
-              "NOAA GOES-18 GLM / US Census (counties) / OpenStreetMap (roads) — Ingalls Weather",
+              "NOAA GOES-18 GLM / OpenStreetMap (roads) — Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color="#5a584f", ha="center")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
