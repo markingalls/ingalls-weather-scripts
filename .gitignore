@@ -106,7 +106,8 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
 
-# --- colwash-fire-map ---
-# build_map.py fetches the fire perimeter/reservation boundary live, and the
-# rendered PNG is an output too -- neither is source, so don't track them.
-colwash-fire-map/output/*.png
+# --- fire-perimeter-map ---
+# build_map.py fetches the fire perimeter/roads/towns live for whichever
+# fire it's pointed at, and the rendered PNG is an output too -- neither
+# is source, so don't track them.
+fire-perimeter-map/output/*.png

@@ -36,6 +36,10 @@ workflows. Each project lives in its own directory with its own README.
   currently active wildfires across the same domain as
   `dew-point-storm-map/`, merged from WildCAD-E (US dispatch centers),
   CAL FIRE (via NIFC WFIGS), BC Wildfire Service, and Alberta Wildfire.
+- [`fire-perimeter-map/`](fire-perimeter-map/) — zoomed local map of a
+  single wildfire's current NIFC-mapped perimeter (defaults to the
+  Colwash Fire, WA), against county lines, a highway hierarchy, and
+  nearby towns, all fetched live for whichever fire it's pointed at.
 - [`hrrr-smoke-chart/`](hrrr-smoke-chart/) — generates styled meteograms of
   NOAA HRRR smoke (near-surface as AQI or raw µg/m³, or vertically
   integrated) for one or more points over a full 48-hour HRRR cycle
