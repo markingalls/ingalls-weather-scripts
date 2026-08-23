@@ -73,7 +73,6 @@ import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import matplotlib
 matplotlib.use("Agg")
@@ -106,8 +105,6 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
-LOCAL_TZ = ZoneInfo("America/Los_Angeles")
-
 # ---------------------------------------------------------------------------
 # Data sources
 # ---------------------------------------------------------------------------
@@ -125,36 +122,42 @@ DEFAULT_FIRE_NAME = "Colwash"
 DEFAULT_STATE = "WA"
 
 # ---------------------------------------------------------------------------
-# Figure geometry / map domain -- tuned to the Colwash Fire's footprint
-# (roughly -120.18 to -119.77 lon, 46.12 to 46.19 lat), padded out to the
-# nearest valley towns on each side. FIG_WIDTH_IN/AXES_RECT's box aspect
-# (9.4in / 4.70in = 2.00) is set to match EXTENT's degree aspect
-# (1.00/0.50 = 2.00) so cartopy's set_extent doesn't have to letterbox the
-# frame.
+# Figure geometry / map domain -- same 1.00 x 0.50 deg zoom level as before,
+# now centered on the fire perimeter's own bounding-box center (-119.979,
+# 46.154) rather than padded out toward the nearest towns. FIG_WIDTH_IN/
+# AXES_RECT's box aspect (9.4in / 4.70in = 2.00) is set to match EXTENT's
+# degree aspect (1.00/0.50 = 2.00) so cartopy's set_extent doesn't have to
+# letterbox the frame.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 10.0, 6.9
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 10.0, 6.58
 FIG_DPI = 200
-AXES_RECT = [0.03, 0.143, 0.94, 0.681]
+AXES_RECT = [0.03, 0.150, 0.94, 0.714]
 MAP_FRAME_INSET_PX = 22
 
-LON_MIN, LON_MAX = -120.62, -119.62
-LAT_MIN, LAT_MAX = 46.02, 46.52
+LON_MIN, LON_MAX = -120.4791, -119.4791
+LAT_MIN, LAT_MAX = 45.9037, 46.4037
 
 # (name, lon, lat, label side) -- looked up individually via OSM Nominatim,
 # not reused from another script's CITIES list (see module docstring).
-# Towns outside EXTENT (e.g. Bickleton) are dropped automatically at draw
-# time, not filtered out of this list.
+# Towns outside EXTENT are dropped automatically at draw time, not filtered
+# out of this list -- e.g. Wapato and Bickleton, in frame at the previous
+# (town-padded) extent, sit just outside this fire-centered one now.
+# 5th field is an optional vertical label nudge in points (default 0) --
+# only Zillah needs one, since its marker now sits almost exactly on the
+# frame's top edge and its label would otherwise straddle the border.
 TOWNS = [
-    ("Zillah", -120.2620, 46.4021, "left"),
-    ("Granger", -120.1951, 46.3418, "right"),
-    ("Toppenish", -120.3089, 46.3775, "left"),
-    ("Wapato", -120.4203, 46.4476, "left"),
-    ("Satus", -120.1503, 46.2701, "right"),
-    ("Sunnyside", -120.0082, 46.3246, "right"),
-    ("Grandview", -119.9017, 46.2510, "right"),
-    ("Mabton", -119.9967, 46.2149, "left"),
-    ("Prosser", -119.7692, 46.2067, "right"),
-    ("Bickleton", -120.3128, 46.0018, "right"),
+    ("Zillah", -120.2620, 46.4021, "left", -9),
+    ("Granger", -120.1951, 46.3418, "right", 0),
+    ("Toppenish", -120.3089, 46.3775, "left", 0),
+    ("Wapato", -120.4203, 46.4476, "left", 0),
+    ("Satus", -120.1503, 46.2701, "right", 0),
+    ("Sunnyside", -120.0082, 46.3246, "right", 0),
+    ("Grandview", -119.9017, 46.2510, "right", 0),
+    ("Mabton", -119.9967, 46.2149, "left", 0),
+    ("Prosser", -119.7692, 46.2067, "right", 0),
+    ("Whitstran", -119.7062, 46.2358, "right", 0),
+    ("Paterson", -119.6028, 45.9371, "right", 0),
+    ("Bickleton", -120.3128, 46.0018, "right", 0),
 ]
 
 FIRE_FILL = "#e6231e"
@@ -283,14 +286,14 @@ def build_map(fire, minor_hwy_geoms, output_path):
 
     geodetic_transform = pc._as_mpl_transform(ax)
     town_stroke = [pe.withStroke(linewidth=2.2, foreground=(1, 1, 1, 0.85))]
-    for name, lon_c, lat_c, side in TOWNS:
+    for name, lon_c, lat_c, side, dy_pt in TOWNS:
         if not (LON_MIN <= lon_c <= LON_MAX and LAT_MIN <= lat_c <= LAT_MAX):
             continue
         ax.plot(lon_c, lat_c, marker="o", markersize=4.2, color="#3a3835", zorder=10,
                 mec="white", mew=0.7, transform=pc)
         dx_pt = 7 if side == "right" else -7
         ha = "left" if side == "right" else "right"
-        name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
+        name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=dy_pt, units="points")
         txt = ax.text(lon_c, lat_c, name, fontsize=9.5, fontproperties=poppins_med,
                        color="#2b2a26", ha=ha, va="center", zorder=11, transform=name_transform)
         txt.set_path_effects(town_stroke)
@@ -313,7 +316,7 @@ def build_map(fire, minor_hwy_geoms, output_path):
         handles.append(Line2D([0], [0], color=MINOR_HWY_COLOR, linewidth=1.6, label="Minor highways"))
     leg = fig.legend(handles=handles, loc="center", frameon=False, fontsize=9,
                       prop=poppins_reg, ncol=len(handles), handletextpad=0.6,
-                      columnspacing=1.5, bbox_to_anchor=(frame_center, 0.078))
+                      columnspacing=1.5, bbox_to_anchor=(frame_center, 0.082))
     for text in leg.get_texts():
         text.set_color("#2b2a26")
 
@@ -321,26 +324,13 @@ def build_map(fire, minor_hwy_geoms, output_path):
     acres = fire["acres"] or 0
     pct = fire["pct_contained"]
     pct_str = f"{pct:.0f}% contained" if pct is not None else "containment unknown"
-    discovered_local = fire["discovered"].astimezone(LOCAL_TZ) if fire["discovered"] else None
-    mapped_local = fire["mapped"].astimezone(LOCAL_TZ) if fire["mapped"] else None
 
-    fig.text(0.03, 0.977, f"{fire['name']} Fire", fontsize=22,
+    fig.text(0.03, 0.976, f"{fire['name']} Fire", fontsize=22,
               fontproperties=poppins_med, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.928, f"{acres:,.0f} acres • {pct_str}",
+    fig.text(0.03, 0.9245, f"{acres:,.0f} acres • {pct_str}",
               fontsize=12.5, fontproperties=poppins_med, color="#3a3835", ha="left", va="top")
-    detail_bits = []
-    if discovered_local:
-        detail_bits.append(f"Discovered {discovered_local.strftime('%b %-d')}")
-    if mapped_local:
-        detail_bits.append(f"perimeter mapped {mapped_local.strftime('%b %-d, %-I:%M %p')} Pacific")
-    if fire["jurisdiction"]:
-        detail_bits.append(f"jurisdiction: {fire['jurisdiction']}")
-    if fire["map_method"]:
-        detail_bits.append(f"mapped via {fire['map_method']}")
-    fig.text(0.03, 0.893, " • ".join(detail_bits), fontsize=10,
-              fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.014, "NIFC WFIGS Interagency Fire Perimeters, US Census (counties), "
+    fig.text(0.5, 0.015, "NIFC WFIGS Interagency Fire Perimeters, US Census (counties), "
                           "OpenStreetMap (roads) — Ingalls Weather", fontsize=9,
               fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
