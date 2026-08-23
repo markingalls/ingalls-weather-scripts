@@ -89,6 +89,19 @@ python3 build_map.py --date 2026-08-22   # ... for a specific date
   doesn't duplicate roads already covered by `washington_roads.geojson`,
   in the same `{"highway": <tag>}`/`LineString` schema as the existing
   per-state road files so `build_map.py` can style it identically.
+  `../maps/washington_roads.geojson` itself was also refreshed from the
+  `digitalocean` deploy branch's newer pull (33k features vs. the old 18k)
+  -- the old file had zero coverage on the Olympic Peninsula (nothing west
+  of about -124.2), which cut off US-101 well east of Port Angeles; the
+  refreshed file's `trunk`-tagged coverage runs the full width of this
+  domain.
+- **No admin1 (state/province) boundary layer**: the only state/province
+  line this domain touches is WA's own northern edge, which *is* the
+  international border already drawn from `admin0_boundary_lines.json` --
+  Natural Earth's admin1 lines don't flag "this segment is shared with an
+  admin0 border," so adding that layer back drew a visible double line
+  right along the border. Skipped entirely rather than filtered, since it
+  contributes nothing else within this domain.
 - **City labels**: side (`"left"`/`"right"`) controls which side of the
   dot the label sits on; `LABEL_DX` controls the gap. Both are manually
   tuned per city to avoid overlaps in this label-dense metro area -- no

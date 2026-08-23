@@ -112,14 +112,17 @@ def build_map(date, data_path, output_path):
     ax.add_geometries(c_geoms, crs=pc, facecolor="none", edgecolor="#9a978c",
                        linewidth=1.1, zorder=2)
 
-    # ---------- states/provinces + lakes ----------
-    s_geoms = load_geoms(MAPS_DIR / "admin1_boundary_lines.json")
+    # ---------- lakes ----------
+    # No admin1_boundary_lines.json layer here -- the only state/province
+    # boundary this domain touches is WA's own northern edge, which *is*
+    # the international border already drawn above, so adding it back on
+    # top (Natural Earth's admin1 lines don't distinguish "shares this
+    # segment with an admin0 border" from a true internal state line) drew
+    # a visible double line right along the border.
     lake_geoms = load_geoms(
         MAPS_DIR / "states_lakes_slim.json",
         lambda f: f["properties"].get("admin", "") in ("United States of America", "Canada")
         and "Lake" in f["properties"].get("featurecla", ""))
-    ax.add_geometries(s_geoms, crs=pc, facecolor="none", edgecolor="#b9b6ac",
-                       linewidth=0.8, zorder=3)
     ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac",
                        linewidth=0.7, zorder=3)
 
