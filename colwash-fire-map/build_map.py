@@ -3,12 +3,11 @@ Colwash Fire Perimeter Map
 Ingalls Weather
 
 A zoomed local map of a single wildfire's NIFC-mapped perimeter, defaulting
-to the Colwash Fire (Yakama Reservation, Yakima County, WA). Shows the fire
-perimeter polygon itself -- not a point marker like ../wildcad-fires-map/ --
-against county lines, the Yakama Nation Reservation boundary (the fire's
-jurisdiction is BIA), state/interstate highways, and nearby towns, so the
-footprint reads against real terrain and roads at a scale a regional map
-can't provide.
+to the Colwash Fire (Yakima County, WA). Shows the fire perimeter polygon
+itself -- not a point marker like ../wildcad-fires-map/ -- against county
+lines, a highway hierarchy (interstate/main/minor), and nearby towns, so
+the footprint reads against real terrain and roads at a scale a regional
+map can't provide.
 
 DATA SOURCES
 ------------
@@ -20,31 +19,38 @@ This is the *current* perimeter layer (most recent mapped extent per fire),
 not a full history -- exactly one polygon per active incident, which is
 what a single-fire snapshot map wants. Attribute fields used: poly_GISAcres
 (size), attr_PercentContained, attr_POOCounty/attr_POOJurisdictionalAgency
-(the BIA/county line in the caption), attr_FireDiscoveryDateTime,
-poly_PolygonDateTime (when this perimeter was last mapped), attr_FireCause,
-poly_MapMethod (mapping technique -- shown in the caption since accuracy
-varies a lot by method, e.g. GPS-walked vs. infrared vs. modeled).
+(shown in the caption), attr_FireDiscoveryDateTime, poly_PolygonDateTime
+(when this perimeter was last mapped), attr_FireCause, poly_MapMethod
+(mapping technique -- shown in the caption since accuracy varies a lot by
+method, e.g. GPS-walked vs. infrared vs. modeled).
 NOTE: a sibling service on the same host,
 WFIGS_Interagency_Fire_Perimeters, returns "Token Required" (HTTP 200,
 error body) -- it looks like a stale/renamed alias; Current is the one that
 actually works unauthenticated.
 
-Yakama Nation Reservation boundary -- US Census TIGERweb, "Federal American
-Indian Reservations" (Census2020/AIANNHA, layer 2), queried by name. Fetched
-live rather than checked into ../maps/ since it's specific to this one fire's
-location, unlike the shared statewide basemap layers. Best-effort: if the
-fire in question isn't near a reservation, or the request fails, the
-boundary is silently skipped rather than blocking the whole map.
+Counties (counties_wa_or_id.geojson) and WA interstates/main highways
+(washington_roads.geojson, already pre-filtered upstream to
+motorway/trunk only) are shared basemap data from ../maps/, same
+source/provenance as the rest of this repo's WA-domain maps.
 
-Counties (counties_wa_or_id.geojson) and WA state/interstate highways
-(washington_roads.geojson, already pre-filtered upstream to motorway/trunk
-only) are shared basemap data from ../maps/, same source/provenance as the
-rest of this repo's WA-domain maps.
+Minor highways (the next OSM class down, "primary"/"primary_link" --
+washington_roads.geojson doesn't carry this tier at all, confirmed by
+inspecting its highway-value distribution) are fetched live from
+OpenStreetMap via Overpass, scoped to a bbox around EXTENT so the query
+stays cheap. Best-effort like the town lookups below: several public
+Overpass mirrors are tried in turn (the primary overpass-api.de endpoint
+reset the connection outright when this was built, for reasons unrelated
+to the query itself -- maps.mail.ru's mirror is tried first since it's the
+one confirmed working here), and the layer is silently skipped rather
+than blocking the map if every mirror fails.
 
 Town label coordinates were looked up individually against OpenStreetMap
 Nominatim (not carried over from another script's CITIES list -- this
 map's zoom level needs small unincorporated-adjacent towns like Mabton and
-Satus that a regional map has no reason to include).
+Satus that a regional map has no reason to include). Prosser specifically
+uses its downtown/city-hall coordinate, not the town's Nominatim
+administrative-boundary centroid (which sits north of I-82, on the far
+side of the freeway from the actual town center relative to this fire).
 
 USAGE
 -----
@@ -52,9 +58,9 @@ USAGE
     python build_map.py --fire-name "Some Other Fire" --state OR
 
 Re-running for a *different* fire will fetch the right perimeter, but
-EXTENT/CITIES/reservation lookup below are still tuned to the Colwash
-Fire's south-central-WA location -- a fire elsewhere would need those
-adjusted (see EXTENT comment).
+EXTENT/TOWNS below are still tuned to the Colwash Fire's south-central-WA
+location -- a fire elsewhere would need those adjusted (see EXTENT
+comment).
 
 REQUIRES (shared, checked into ../maps/ at repo root):
     counties_wa_or_id.geojson, washington_roads.geojson
@@ -63,6 +69,7 @@ Logo is read from ../assets/ingalls_weather_logo.png at repo root.
 """
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,7 +87,7 @@ import numpy as np
 import requests
 
 import cartopy.crs as ccrs
-from shapely.geometry import shape
+from shapely.geometry import shape, LineString
 from PIL import Image
 
 # ---------------------------------------------------------------------------
@@ -106,30 +113,37 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # ---------------------------------------------------------------------------
 PERIMETER_URL = ("https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/"
                   "services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query")
-RESERVATION_URL = ("https://tigerweb.geo.census.gov/arcgis/rest/services/"
-                    "Census2020/AIANNHA/MapServer/2/query")
+
+# Tried in order -- see module docstring for why mail.ru's mirror is first.
+OVERPASS_URLS = [
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+]
 
 DEFAULT_FIRE_NAME = "Colwash"
 DEFAULT_STATE = "WA"
-RESERVATION_NAME = "Yakama Nation Reservation"
 
 # ---------------------------------------------------------------------------
 # Figure geometry / map domain -- tuned to the Colwash Fire's footprint
 # (roughly -120.18 to -119.77 lon, 46.12 to 46.19 lat), padded out to the
 # nearest valley towns on each side. FIG_WIDTH_IN/AXES_RECT's box aspect
-# (9.4in / 5.11in = 1.84) is set to match EXTENT's degree aspect (1.20/0.65
-# = 1.85) so cartopy's set_extent doesn't have to letterbox the frame.
+# (9.4in / 4.70in = 2.00) is set to match EXTENT's degree aspect
+# (1.00/0.50 = 2.00) so cartopy's set_extent doesn't have to letterbox the
+# frame.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 10.0, 7.3
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 10.0, 6.9
 FIG_DPI = 200
-AXES_RECT = [0.03, 0.135, 0.94, 0.70]
+AXES_RECT = [0.03, 0.143, 0.94, 0.681]
 MAP_FRAME_INSET_PX = 22
 
-LON_MIN, LON_MAX = -120.75, -119.55
-LAT_MIN, LAT_MAX = 45.95, 46.60
+LON_MIN, LON_MAX = -120.62, -119.62
+LAT_MIN, LAT_MAX = 46.02, 46.52
 
 # (name, lon, lat, label side) -- looked up individually via OSM Nominatim,
 # not reused from another script's CITIES list (see module docstring).
+# Towns outside EXTENT (e.g. Bickleton) are dropped automatically at draw
+# time, not filtered out of this list.
 TOWNS = [
     ("Zillah", -120.2620, 46.4021, "left"),
     ("Granger", -120.1951, 46.3418, "right"),
@@ -139,22 +153,15 @@ TOWNS = [
     ("Sunnyside", -120.0082, 46.3246, "right"),
     ("Grandview", -119.9017, 46.2510, "right"),
     ("Mabton", -119.9967, 46.2149, "left"),
-    ("Prosser", -119.7686, 46.2532, "right"),
+    ("Prosser", -119.7692, 46.2067, "right"),
     ("Bickleton", -120.3128, 46.0018, "right"),
-]
-
-COUNTY_LABELS = [
-    ("YAKIMA CO.", -120.62, 46.53),
-    ("KLICKITAT CO.", -120.42, 46.02),
-    ("BENTON CO.", -119.68, 46.03),
 ]
 
 FIRE_FILL = "#e6231e"
 FIRE_EDGE = "#7a0e0a"
-RESERVATION_FILL = "#e8d9a8"
-RESERVATION_EDGE = "#a68a3f"
 MOTORWAY_COLOR = "#8FB8E0"
 TRUNK_COLOR = "#F2B880"
+MINOR_HWY_COLOR = "#E2707A"
 
 
 def fetch_perimeter(fire_name, state):
@@ -199,35 +206,41 @@ def fetch_perimeter(fire_name, state):
     }
 
 
-def fetch_reservation(name):
-    """Best-effort: returns a shapely geometry or None. A fire that isn't
-    near a named reservation, or a request that fails, shouldn't block the
-    rest of the map -- this layer is context, not the point of the map."""
-    try:
-        params = {
-            "where": f"NAME='{name}'",
-            "outFields": "NAME",
-            "outSR": "4326",
-            "f": "geojson",
-        }
-        r = requests.get(RESERVATION_URL, params=params, timeout=30)
-        r.raise_for_status()
-        feats = r.json().get("features", [])
-        if not feats:
-            print(f"NOTE: reservation {name!r} not found, skipping that layer.")
-            return None
-        return shape(feats[0]["geometry"])
-    except requests.RequestException as e:
-        print(f"NOTE: reservation lookup failed ({e}), skipping that layer.")
-        return None
+def fetch_minor_highways(lon_min, lon_max, lat_min, lat_max):
+    """Best-effort: OSM highway=primary/primary_link ways within the given
+    bbox, as a list of shapely LineStrings. washington_roads.geojson has no
+    tier below trunk, so this is the only source for it. Tries each mirror
+    in OVERPASS_URLS in turn; returns [] (map renders without this layer)
+    if every mirror fails, rather than blocking the whole map on a
+    third-party service that isn't this map's main data source."""
+    query = f"""
+    [out:json][timeout:25];
+    (
+      way["highway"="primary"]({lat_min},{lon_min},{lat_max},{lon_max});
+      way["highway"="primary_link"]({lat_min},{lon_min},{lat_max},{lon_max});
+    );
+    out geom;
+    """
+    for url in OVERPASS_URLS:
+        try:
+            r = requests.post(url, data={"data": query}, timeout=30)
+            r.raise_for_status()
+            elements = r.json().get("elements", [])
+            geoms = [LineString([(pt["lon"], pt["lat"]) for pt in el["geometry"]])
+                     for el in elements if el.get("geometry")]
+            print(f"  {len(geoms)} minor-highway segments from {url}")
+            return geoms
+        except (requests.RequestException, ValueError) as e:
+            print(f"NOTE: Overpass mirror {url} failed ({e}), trying next...")
+    print("NOTE: all Overpass mirrors failed, skipping minor highways layer.")
+    return []
 
 
-def build_map(fire, reservation_geom, output_path):
+def build_map(fire, minor_hwy_geoms, output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_med = fm.FontProperties(fname=POPPINS_MED_PATH)
 
     print("Loading basemap layers...")
-    import json
     counties = json.loads(COUNTIES_FILE.read_text())
     county_geoms = [shape(f["geometry"]) for f in counties["features"]]
 
@@ -252,10 +265,9 @@ def build_map(fire, reservation_geom, output_path):
     ax.add_geometries(county_geoms, crs=pc, facecolor="none", edgecolor="#b9b6ac",
                        linewidth=0.8, zorder=2)
 
-    if reservation_geom is not None:
-        ax.add_geometries([reservation_geom], crs=pc, facecolor=RESERVATION_FILL,
-                           edgecolor=RESERVATION_EDGE, linewidth=1.1, alpha=0.45,
-                           linestyle=(0, (5, 3)), zorder=1.5)
+    if minor_hwy_geoms:
+        ax.add_geometries(minor_hwy_geoms, crs=pc, facecolor="none", edgecolor=MINOR_HWY_COLOR,
+                           linewidth=1.0, zorder=2.5)
 
     ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR,
                        linewidth=1.3, zorder=3)
@@ -263,7 +275,7 @@ def build_map(fire, reservation_geom, output_path):
                        linewidth=1.6, zorder=4)
 
     # Fire perimeter -- drawn last (before towns) so it reads as the
-    # clear focal point against the roads/reservation/county context.
+    # clear focal point against the roads/county context.
     ax.add_geometries([fire["geom"]], crs=pc, facecolor=FIRE_FILL, edgecolor=FIRE_EDGE,
                        linewidth=1.8, alpha=0.55, zorder=5)
     ax.add_geometries([fire["geom"]], crs=pc, facecolor="none", edgecolor=FIRE_EDGE,
@@ -283,11 +295,6 @@ def build_map(fire, reservation_geom, output_path):
                        color="#2b2a26", ha=ha, va="center", zorder=11, transform=name_transform)
         txt.set_path_effects(town_stroke)
 
-    for label, lon_c, lat_c in COUNTY_LABELS:
-        ax.text(lon_c, lat_c, label, fontsize=8, fontproperties=poppins_reg,
-                 color="#8a877a", ha="center", va="center", zorder=6,
-                 style="italic", transform=pc)
-
     ax.spines["geo"].set_edgecolor("black")
     ax.spines["geo"].set_linewidth(1.6)
 
@@ -299,15 +306,11 @@ def build_map(fire, reservation_geom, output_path):
     handles = [
         Patch(facecolor=FIRE_FILL, edgecolor=FIRE_EDGE, alpha=0.7, linewidth=1.3,
               label=f"{fire['name']} Fire perimeter"),
-    ]
-    if reservation_geom is not None:
-        handles.append(Patch(facecolor=RESERVATION_FILL, edgecolor=RESERVATION_EDGE,
-                              alpha=0.6, linewidth=1.1, linestyle=(0, (5, 3)),
-                              label="Yakama Nation Reservation"))
-    handles += [
         Line2D([0], [0], color=MOTORWAY_COLOR, linewidth=2.2, label="Interstate"),
-        Line2D([0], [0], color=TRUNK_COLOR, linewidth=2.0, label="US / State highway"),
+        Line2D([0], [0], color=TRUNK_COLOR, linewidth=2.0, label="Main highways"),
     ]
+    if minor_hwy_geoms:
+        handles.append(Line2D([0], [0], color=MINOR_HWY_COLOR, linewidth=1.6, label="Minor highways"))
     leg = fig.legend(handles=handles, loc="center", frameon=False, fontsize=9,
                       prop=poppins_reg, ncol=len(handles), handletextpad=0.6,
                       columnspacing=1.5, bbox_to_anchor=(frame_center, 0.078))
@@ -323,8 +326,7 @@ def build_map(fire, reservation_geom, output_path):
 
     fig.text(0.03, 0.977, f"{fire['name']} Fire", fontsize=22,
               fontproperties=poppins_med, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.928, f"{acres:,.0f} acres • {pct_str} • "
-                           f"{fire['county']} County, {fire['state']}",
+    fig.text(0.03, 0.928, f"{acres:,.0f} acres • {pct_str}",
               fontsize=12.5, fontproperties=poppins_med, color="#3a3835", ha="left", va="top")
     detail_bits = []
     if discovered_local:
@@ -338,8 +340,8 @@ def build_map(fire, reservation_geom, output_path):
     fig.text(0.03, 0.893, " • ".join(detail_bits), fontsize=10,
               fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.014, "NIFC WFIGS Interagency Fire Perimeters, US Census (reservation, "
-                          "counties), OpenStreetMap (roads) — Ingalls Weather", fontsize=9,
+    fig.text(0.5, 0.014, "NIFC WFIGS Interagency Fire Perimeters, US Census (counties), "
+                          "OpenStreetMap (roads) — Ingalls Weather", fontsize=9,
               fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -389,12 +391,10 @@ if __name__ == "__main__":
     print(f"  {fire['acres']:,.0f} ac, {fire['county']} County, "
           f"jurisdiction {fire['jurisdiction']}, mapped {fire['mapped']}")
 
-    reservation_geom = None
-    if args.fire_name == DEFAULT_FIRE_NAME and args.state == DEFAULT_STATE:
-        print(f"Fetching {RESERVATION_NAME!r} boundary...")
-        reservation_geom = fetch_reservation(RESERVATION_NAME)
+    print("Fetching minor highways (OSM Overpass)...")
+    minor_hwy_geoms = fetch_minor_highways(LON_MIN, LON_MAX, LAT_MIN, LAT_MAX)
 
     now = datetime.now(tz=timezone.utc)
     out_path = args.out or (OUTPUT_DIR / f"{args.fire_name.lower().replace(' ', '_')}"
                                           f"_fire_{now.strftime('%Y-%m-%d')}.png")
-    build_map(fire, reservation_geom, out_path)
+    build_map(fire, minor_hwy_geoms, out_path)
