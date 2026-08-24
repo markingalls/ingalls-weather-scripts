@@ -202,14 +202,15 @@ REGIONS = {
     # Basin/Portland/BC Interior's shared true-zoom-level setup, not a
     # variant of it. Originally matched columbia-basin-alerts-map's
     # "pnw_wide" region exactly; lat_span/center_lat are now taller than
-    # that region's, moving the north edge from 49.3 up to ~50.3 so it
-    # stops slicing through storm cells that cross the border into the
-    # Fraser Valley/Lower Mainland -- south/east/west edges are otherwise
-    # unchanged. No fetch-side change needed: fetch_lightning.py's shared
-    # LAT_MAX (driven by bc_interior, up at 54.31) already covers this.
+    # that region's, moving the north edge from 49.3 up to ~52.0 so it
+    # stops slicing through storm cells that cross the border into
+    # southern BC -- south edge unchanged; east/west shift by <0.5deg,
+    # negligible on this domain's 13-15deg width. No fetch-side change
+    # needed: fetch_lightning.py's shared LAT_MAX (driven by bc_interior,
+    # up at 54.31) already covers this.
     "pnw": dict(
-        center_lon=-119.3, center_lat=45.4,
-        lon_span=13.0, lat_span=9.8, satellite_height=22_000_000,
+        center_lon=-119.3, center_lat=46.3,
+        lon_span=13.0, lat_span=11.6, satellite_height=22_000_000,
         legend_loc="upper right",
         roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads.geojson",
                      "nevada_roads_north.geojson", "montana_roads_west.geojson",
