@@ -473,14 +473,19 @@ def build_map(region_key, lightning_path, output_path):
     ax = fig.add_axes([0.04, 0.045, 0.92, 0.80], projection=proj)
     ax.set_facecolor("white")
     ax.set_extent(extent, crs=pc)
-    # cartopy expands the requested extent to match this fixed-aspect axes
-    # box when the two aspect ratios don't line up exactly (true for every
-    # region here, not just the custom-span ones) -- e.g. bc_interior's
-    # nominal 8.87-degree lon_span actually renders as ~9.95 degrees, about
-    # 0.54 degrees wider on each side. Flashes need to be filtered against
-    # this *actual* displayed box, not the nominal one, or real data within
-    # the visible frame gets silently dropped right at the edges.
-    actual_extent = ax.get_extent(crs=pc)
+    # The axes' true visible boundary is a rectangle in this projection's
+    # own native x/y (what set_extent actually establishes as xlim/ylim);
+    # in lat/lon terms that boundary is a curve, not a rectangle, so
+    # ax.get_extent(crs=pc)'s lat/lon bounding box is only an
+    # approximation of it -- close at the corners, but short of the true
+    # edge at the middle of each side (checked directly: for this
+    # projection/domain the true top edge runs ~0.1-0.2deg north of what
+    # get_extent() reports, worst at the center longitude). Filtering
+    # flashes against that approximate box instead of the real native
+    # xlim/ylim was silently dropping real data well inside the visible
+    # frame, short of its actual edge. Flashes are filtered directly in
+    # native coordinates below instead.
+    native_xlim, native_ylim = ax.get_xlim(), ax.get_ylim()
 
     # ---------- static basemap (land/countries/states/counties/roads) ----------
     # Cached raster, not redrawn from vector data every run -- see
@@ -494,21 +499,24 @@ def build_map(region_key, lightning_path, output_path):
     data = json.load(open(lightning_path))
     flashes = data["flashes"]
     window_end = datetime.fromisoformat(data["window_end"])
-    extent_box_lons = (actual_extent[0], actual_extent[1])
-    extent_box_lats = (actual_extent[2], actual_extent[3])
 
     # Bucket by age band, then plot oldest band first so more recent
     # strikes (drawn last) sit visually on top of older ones where they
-    # overlap. Flashes are filtered to the actual displayed box (not the
-    # nominal one -- see the ax.get_extent() note above) -- the fetch step
-    # pulls one shared domain-spanning box, and individual
-    # regions crop tighter than that shared box.
+    # overlap. Projected to this axes' own native coordinates and checked
+    # against its real xlim/ylim (see the native_xlim/native_ylim note
+    # above) -- not an approximate lat/lon box -- so flashes fill the
+    # frame all the way to its true edge.
+    all_lons = np.array([f["lon"] for f in flashes])
+    all_lats = np.array([f["lat"] for f in flashes])
+    native = proj.transform_points(pc, all_lons, all_lats)
+    in_frame = ((native[:, 0] >= native_xlim[0]) & (native[:, 0] <= native_xlim[1]) &
+                (native[:, 1] >= native_ylim[0]) & (native[:, 1] <= native_ylim[1]))
+
     buckets = {label: {"lons": [], "lats": []} for _, label, _ in AGE_BANDS}
-    for flash in flashes:
-        lon, lat = flash["lon"], flash["lat"]
-        if not (extent_box_lons[0] <= lon <= extent_box_lons[1] and
-                extent_box_lats[0] <= lat <= extent_box_lats[1]):
+    for flash, keep in zip(flashes, in_frame):
+        if not keep:
             continue
+        lon, lat = flash["lon"], flash["lat"]
         flash_time = datetime.fromisoformat(flash["time"])
         age_hours = (window_end - flash_time).total_seconds() / 3600.0
         label, _ = band_for_age(age_hours)
