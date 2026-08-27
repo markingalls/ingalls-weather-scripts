@@ -56,7 +56,7 @@ layer is silently skipped rather than blocking the map if every mirror
 fails. Trade-off worth knowing: since roads no longer fall back to a
 bundled file, an Overpass outage now means no roads at all, not just no
 minor-highway tier.
-  - Roads: motorway/motorway_link is "Interstate", trunk/trunk_link is
+  - Roads: motorway/motorway_link is "Freeway", trunk/trunk_link is
     "Main highways", primary/primary_link plus secondary/secondary_link
     *that carries a state-route ref* (e.g. SR 221 in Washington, OR 244 in
     Oregon) is "Minor highways" -- secondary is otherwise mostly unnumbered
@@ -432,7 +432,7 @@ def build_map(fire, roads, towns, extent, generated_at, output_path):
               label=f"{fire['name']} Fire perimeter"),
     ]
     if roads["motorway"]:
-        handles.append(Line2D([0], [0], color=MOTORWAY_COLOR, linewidth=2.2, label="Interstate"))
+        handles.append(Line2D([0], [0], color=MOTORWAY_COLOR, linewidth=2.2, label="Freeway"))
     if roads["trunk"]:
         handles.append(Line2D([0], [0], color=TRUNK_COLOR, linewidth=2.0, label="Main highways"))
     if roads["minor"]:
