@@ -204,20 +204,34 @@ python3 build_graphic.py
     stretch reads more like "overnight" than "today" on a TV-style forecast,
     and a single combined day+night indicator per card doesn't need
     temperature's day/night split.
-  - **Suppressed when it would just read "0.00"**: if the rounded P75 total
-    is zero (common at the low end of `POP_DISPLAY_THRESHOLD`, e.g. a 25%
-    chance where even the 75th percentile member is still ~dry),
-    `precip_summary()` returns `None` instead of a probability with a blank
-    amount under it.
-  - **Overrides NWS's own condition icon** when the chance of precip is
-    ≥70% (`SIGNIFICANT_POP_THRESHOLD`), replacing it with a plain
+  - **Trace amounts, and NWS's own PoP as a fallback**: `precip_summary()`
+    always returns ECMWF's own pop/amount now (never `None`) — it's
+    `attach_precip()` that decides how to display it, reconciling ECMWF's
+    numbers against NWS's condition icon (already resolved on the column by
+    this point):
+    - ECMWF's own pop clears `POP_DISPLAY_THRESHOLD` (20%) and its P25-P75
+      rounds to something nonzero: show ECMWF's own numbers, as above.
+    - ECMWF's signal is too weak to print as a real percentage/amount
+      (below `POP_DISPLAY_THRESHOLD`, or its rounded P25-P75 is 0) but NWS's
+      condition icon is itself a precip condition (rain/snow/thunderstorm):
+      a precip icon with nothing (or a contradicting low number) underneath
+      it reads as broken, so this shows NWS's own `probabilityOfPrecipitation`
+      instead, with a trace-amount placeholder (`<0.05"` rain / `<0.5"` snow)
+      in place of a real range ECMWF never established.
+    - Neither source shows real precip: no indicator at all.
+  - **Overrides NWS's own condition icon** when ECMWF's own chance of precip
+    is ≥30% (`SIGNIFICANT_POP_THRESHOLD`) — i.e. essentially any day ECMWF
+    shows a real (non-trace) signal for at all — replacing it with a plain
     `RAINday`/`SNOWday` regardless of what NWS's `icon` field says —
     `attach_precip()` does this right after computing `precip_summary()`.
     NWS's icon reflects its own forecast text, which can undersell the
     chance our ensemble-derived probability shows (e.g. NWS says "Sunny" but
-    the ensemble says 85% chance of rain); at that level of confidence the
+    the ensemble says 40% chance of rain); at that level of confidence the
     ensemble wins. Also sets `sun_relevant` to `False` for that column, same
     reasoning as excluding persistent rain from `SUN_RELEVANT_NWS_CODES`.
+    Only applies to ECMWF's own (non-trace) numbers -- the NWS-PoP trace
+    fallback above never touches the icon, since NWS's icon is already the
+    thing driving that fallback.
   - **AM/PM timing**: `precip_timing()` splits each day's precip-weighted
     signal (each hour's precipitation averaged across members) at noon; if
     ≥75% (`TIMING_DOMINANT_FRAC`) of it falls before noon the card gets an

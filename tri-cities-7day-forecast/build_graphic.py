@@ -129,8 +129,9 @@ POP_DISPLAY_THRESHOLD = 0.20  # only show the indicator at all above this chance
 LOW_POP_THRESHOLD = 0.5   # "low chance" for sun-backing purposes (see main())
 # Above this, override NWS's own condition icon with a plain rain/snow icon
 # entirely -- NWS's icon reflects its own forecast text, which can undersell
-# the chance our ensemble-derived probability shows.
-SIGNIFICANT_POP_THRESHOLD = 0.70
+# the chance our ensemble-derived probability shows. Below it, NWS's own
+# condition icon stands.
+SIGNIFICANT_POP_THRESHOLD = 0.30
 MM_PER_INCH = 25.4
 CM_PER_INCH = 2.54
 
