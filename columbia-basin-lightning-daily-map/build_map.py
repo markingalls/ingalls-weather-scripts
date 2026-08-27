@@ -200,18 +200,13 @@ REGIONS = {
     # lon_span/lat_span/satellite_height are overridden here since this
     # region is a fundamentally different (much wider) zoom than Columbia
     # Basin/Portland/BC Interior's shared true-zoom-level setup, not a
-    # variant of it. Originally matched columbia-basin-alerts-map's
-    # "pnw_wide" region exactly; lat_span/center_lat are now taller than
-    # that region's, moving the north edge from 49.3 up to ~54.3 -- the
-    # same actual rendered edge as bc_interior's own north edge -- so it
-    # stops hard-clipping storm cells that cross the border into BC, even
-    # on an exceptionally large storm day. South edge unchanged; east/west
-    # shift by <1deg, small relative to this domain's 13-15deg width. No
-    # fetch-side change needed: fetch_lightning.py's shared LAT_MAX
-    # (driven by bc_interior, up at 54.31) already covers this.
+    # variant of it -- same extent as columbia-basin-alerts-map's
+    # "pnw_wide" region so a domain looks the same across products.
+    # british_columbia_roads.geojson is included even though this domain
+    # only just crosses the border, for the sliver of BC that is in frame.
     "pnw": dict(
-        center_lon=-119.3, center_lat=47.45,
-        lon_span=13.0, lat_span=13.9, satellite_height=22_000_000,
+        center_lon=-119.3, center_lat=44.9,
+        lon_span=13.0, lat_span=8.8, satellite_height=22_000_000,
         legend_loc="upper right",
         roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads.geojson",
                      "nevada_roads_north.geojson", "montana_roads_west.geojson",
@@ -219,7 +214,6 @@ REGIONS = {
                      "british_columbia_roads.geojson"],
         output_base="pnw_lightning",
         cities=[
-            ("Vancouver", -123.1207, 49.2827, "left"),
             ("Seattle", -122.3321, 47.6062, "left"),
             ("Bellingham", -122.4443, 48.7519, "left"),
             ("Spokane", -117.4260, 47.6588, "left"),
