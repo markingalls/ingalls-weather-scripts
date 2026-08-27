@@ -67,6 +67,20 @@ LOCATIONS = [
         "metamesh_station": "kpdx",
         "output_name": "portland_forecast.png",
     },
+    {
+        "label": "Eugene, OR",
+        "lat": 44.1247,
+        "lon": -123.2206,
+        "metamesh_station": "keug",
+        "output_name": "eugene_forecast.png",
+    },
+    {
+        "label": "Seattle, WA",
+        "lat": 47.4489,
+        "lon": -122.3089,
+        "metamesh_station": "ksea",
+        "output_name": "seattle_forecast.png",
+    },
 ]
 
 

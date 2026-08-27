@@ -4,12 +4,12 @@ This is the reference copy of the walkthrough. Follow along here or in
 chat -- they match. Each phase says what you're doing and why.
 
 As of the multi-location update, `deploy/build_and_publish.py` builds and
-publishes three images per scheduled run, one per location in its
-`LOCATIONS` list: `tricities_forecast.png`, `hermiston_forecast.png`, and
-`portland_forecast.png`, all served from the same `images.ingallswx.com`
-folder. Each location is fetched, built, and published independently --
-one failing (e.g. a source hiccup for that location) doesn't block the
-others from publishing that run.
+publishes five images per scheduled run, one per location in its
+`LOCATIONS` list: `tricities_forecast.png`, `hermiston_forecast.png`,
+`portland_forecast.png`, `eugene_forecast.png`, and `seattle_forecast.png`,
+all served from the same `images.ingallswx.com` folder. Each location is
+fetched, built, and published independently -- one failing (e.g. a source
+hiccup for that location) doesn't block the others from publishing that run.
 
 Money note up front: the only required recurring cost is the droplet
 itself (~$12/mo for the 2 GiB/1 vCPU "Basic" tier). Everything else here
@@ -160,8 +160,8 @@ GitHub Actions version.
 
 Already handled:
 - `build_and_publish.py` always writes each location to the same filename
-  (`/var/www/images/{tricities,hermiston,portland}_forecast.png`), via a
-  temp file + atomic rename so nginx never serves a half-written PNG
+  (`/var/www/images/{tricities,hermiston,portland,eugene,seattle}_forecast.png`),
+  via a temp file + atomic rename so nginx never serves a half-written PNG
   mid-save.
 - `nginx-images.conf` sets `Cache-Control: no-cache, max-age=60` on the
   whole folder, so every normal browser reload revalidates with the
@@ -186,9 +186,10 @@ venv/bin/python3 deploy/build_and_publish.py
 tail -f state/build.log
 ```
 
-Confirm all three of `/var/www/images/tricities_forecast.png`,
-`hermiston_forecast.png`, and `portland_forecast.png` exist and are
-fresh, then load `https://images.ingallswx.com/tricities_forecast.png` in a
-browser (should load padlock-secure, no warnings). Wait for the next
-scheduled cron time (07:15, 12:30, 19:15, or 00:30 UTC) and confirm the
-file's timestamp updates on its own while the URL stays the same.
+Confirm all five of `/var/www/images/tricities_forecast.png`,
+`hermiston_forecast.png`, `portland_forecast.png`, `eugene_forecast.png`,
+and `seattle_forecast.png` exist and are fresh, then load
+`https://images.ingallswx.com/tricities_forecast.png` in a browser (should
+load padlock-secure, no warnings). Wait for the next scheduled cron time
+(07:15, 12:30, 19:15, or 00:30 UTC) and confirm the file's timestamp
+updates on its own while the URL stays the same.

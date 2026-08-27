@@ -65,7 +65,7 @@ COUNTABLE_STATUSES = {"200", "304"}
 # Ordered prefix/regex -> category. First match wins; extend this as new
 # products get added rather than leaving them bucketed under "Other".
 CATEGORY_PATTERNS = [
-    (re.compile(r"^(tricities|hermiston|portland)_forecast\.png$"), "7-Day Forecasts"),
+    (re.compile(r"^(tricities|hermiston|portland|eugene|seattle)_forecast\.png$"), "7-Day Forecasts"),
     (re.compile(r"^850mb_"), "850mb Temp Charts"),
     (re.compile(r"^western_us_spc_"), "SPC Outlooks"),
     (re.compile(r"^western_us_(temp|precip)_"), "CPC Outlooks"),
