@@ -134,6 +134,19 @@ SIGNIFICANT_POP_THRESHOLD = 0.70
 MM_PER_INCH = 25.4
 CM_PER_INCH = 2.54
 
+# Trace-amount placeholders shown when a day is precip enough to call out
+# (either ECMWF's own pop clears POP_DISPLAY_THRESHOLD, or NWS's condition
+# icon is itself a precip condition) but ECMWF's own P25-P75 rounds to
+# nothing worth printing as a real range -- see attach_precip().
+TRACE_RAIN_TEXT = '<0.05"'
+TRACE_SNOW_TEXT = '<0.5"'
+
+# NWS forecast icon colors that are themselves precip conditions (rain,
+# snow, and thunderstorm variants) -- used both to gate the smoke override
+# below (never stack a smoke icon over a precip day) and, in attach_precip(),
+# to detect "NWS's own icon says precip" for the trace fallback.
+PRECIP_GLYPH_COLORS = {COLOR_RAIN, COLOR_SNOW, COLOR_STORM}
+
 # Only give a chance-of-precip for the 05:00-23:59 local stretch of the day
 # (excludes the 00:00-04:59 hours, which read more like "overnight" than
 # "today" on a TV-style forecast). Also used to split into an AM/PM half for
@@ -315,6 +328,12 @@ def daily_columns(periods, drop_today=False, today_date=None):
             "glyph": glyph,
             "glyph_color": color,
             "sun_relevant": sun_relevant,
+            # NWS's own chance-of-precip for the day period, 0-100 (or None
+            # if NWS didn't report one) -- see attach_precip()'s trace
+            # fallback, which defers to this when ECMWF's ensemble-derived
+            # pop is too weak to print on its own but NWS's condition icon
+            # is itself a precip condition.
+            "nws_pop": day.get("probabilityOfPrecipitation", {}).get("value"),
         })
         i += 2
     return columns
@@ -562,20 +581,19 @@ def round_snow_inches(inches):
 
 
 def precip_summary(ecmwf_data, date):
-    """None if there's nothing worth showing: chance of precip (fraction of
-    ensemble members whose PRECIP_DAY_START_HOUR-23:59 daily total exceeds
-    POP_THRESHOLD_MM) below POP_DISPLAY_THRESHOLD, or the rounded P25-P75
-    total would just display as zero anyway. Otherwise a dict: pop (0-1),
+    """ECMWF's own chance-of-precip signal for one day, always computed --
+    never None -- so attach_precip() can decide how (or whether) to display
+    it against NWS's condition icon: pop (0-1, fraction of ensemble members
+    whose PRECIP_DAY_START_HOUR-23:59 daily total exceeds POP_THRESHOLD_MM),
     is_snow (day classified as snow if at least half the members show
     measurable snowfall), rounded p25_in/p75_in for whichever of rain/snow
-    applies, and timing ('AM'/'PM'/None, see precip_timing())."""
+    applies (may round to 0 -- that's attach_precip's trace case, not this
+    function's problem), and timing ('AM'/'PM'/None, see precip_timing())."""
     hourly = ecmwf_data["hourly"]
     precip_mm = ensemble_member_daily_totals(hourly, "precipitation", date, PRECIP_DAY_START_HOUR)
     snow_cm = ensemble_member_daily_totals(hourly, "snowfall", date, PRECIP_DAY_START_HOUR)
 
     pop = sum(1 for v in precip_mm if v > POP_THRESHOLD_MM) / len(precip_mm)
-    if pop < POP_DISPLAY_THRESHOLD:
-        return None
 
     is_snow = statistics.median(snow_cm) > 0
     if is_snow:
@@ -587,11 +605,6 @@ def precip_summary(ecmwf_data, date):
 
     p25_in = round_inches(float(np.percentile(totals_in, 25)))
     p75_in = round_inches(float(np.percentile(totals_in, 75)))
-    if p75_in == 0:
-        # the interquartile range rounds to nothing worth printing (e.g. a
-        # 25% chance where even the 75th percentile is still ~dry) -- a
-        # probability with "0.00" under it reads as broken, not informative.
-        return None
 
     return {
         "pop": pop,
@@ -603,10 +616,66 @@ def precip_summary(ecmwf_data, date):
 
 
 def attach_precip(columns, ecmwf_data):
+    """Decides, per column, whether/how to show the precip indicator by
+    reconciling two independent sources: ECMWF's own ensemble-derived pop
+    and amount (precip_summary(), the only source for the P25-P75 total),
+    and NWS's condition icon (already on col["glyph_color"] at this point --
+    attach_precip is the only thing that ever overrides it, and hasn't yet
+    for this column).
+
+    Three cases:
+      - ECMWF's pop clears POP_DISPLAY_THRESHOLD and its P25-P75 rounds to
+        something nonzero: use ECMWF's own numbers, same as always.
+      - ECMWF's signal is too weak to print as a real percentage/amount
+        (below POP_DISPLAY_THRESHOLD, or its range rounds to 0) but NWS's
+        icon is itself a precip condition: a rain/snow cloud with nothing
+        under it (or a contradicting near-zero ECMWF number) reads as
+        broken, so defer to NWS's own PoP with a trace-amount placeholder
+        instead.
+      - Neither source shows real precip: no indicator at all.
+    """
     for col in columns:
-        precip = precip_summary(ecmwf_data, col["date"].date())
+        ecmwf = precip_summary(ecmwf_data, col["date"].date())
+        nws_is_precip = col["glyph_color"] in PRECIP_GLYPH_COLORS
+        strong_ecmwf = ecmwf["pop"] >= POP_DISPLAY_THRESHOLD and ecmwf["p75_in"] > 0
+
+        if strong_ecmwf:
+            precip = {
+                "pop": ecmwf["pop"],
+                "is_snow": ecmwf["is_snow"],
+                "p25_in": ecmwf["p25_in"],
+                "p75_in": ecmwf["p75_in"],
+                "trace": False,
+                "timing": ecmwf["timing"],
+            }
+        elif nws_is_precip:
+            nws_pop = col.get("nws_pop")
+            precip = {
+                "pop": (ecmwf["pop"] if nws_pop is None else nws_pop / 100),
+                "is_snow": col["glyph_color"] == COLOR_SNOW,
+                "p25_in": None,
+                "p75_in": None,
+                "trace": True,
+                # NWS's PoP field carries no AM/PM timing signal of its own.
+                "timing": None,
+            }
+        elif ecmwf["pop"] >= POP_DISPLAY_THRESHOLD:
+            # ECMWF alone clears the display threshold but its own P25-P75
+            # rounds to nothing -- same trace treatment, keyed off ECMWF's
+            # numbers since NWS's icon doesn't show precip here at all.
+            precip = {
+                "pop": ecmwf["pop"],
+                "is_snow": ecmwf["is_snow"],
+                "p25_in": None,
+                "p75_in": None,
+                "trace": True,
+                "timing": ecmwf["timing"],
+            }
+        else:
+            precip = None
+
         col["precip"] = precip
-        if precip and precip["pop"] >= SIGNIFICANT_POP_THRESHOLD:
+        if precip and not precip["trace"] and precip["pop"] >= SIGNIFICANT_POP_THRESHOLD:
             name = "SNOWday" if precip["is_snow"] else "RAINday"
             col["glyph"] = chr(GLYPHS[name])
             col["glyph_color"] = COLOR_SNOW if precip["is_snow"] else COLOR_RAIN
@@ -624,7 +693,6 @@ SMOKE_SEASON_MONTHS = {5, 6, 7, 8, 9, 10}
 SMOKE_SUSTAINED_THRESHOLD_MG = 50   # mg/m^2 sustained for 3+ hours
 SMOKE_SUSTAINED_HOURS = 3
 SMOKE_SPIKE_THRESHOLD_MG = 200      # mg/m^2 in any single hour
-PRECIP_GLYPH_COLORS = {COLOR_RAIN, COLOR_SNOW, COLOR_STORM}
 
 
 def smoke_daytime_values(hourly, day_start, day_end):
@@ -837,10 +905,13 @@ def main():
             ax.text(cx - 0.005, PRECIP_CHANCE_Y, f"{pop_pct:.0f}%", ha="left", va="center",
                      fontproperties=f_med, fontsize=11.5, color=precip_color, zorder=3)
 
-            p25_in, p75_in = precip["p25_in"], precip["p75_in"]
-            amount_fmt = "{:.1f}" if precip["is_snow"] else "{:.2f}"
-            amount_text = (f'{amount_fmt.format(p75_in)}"' if p25_in == p75_in
-                           else f'{amount_fmt.format(p25_in)}"–{amount_fmt.format(p75_in)}"')
+            if precip["trace"]:
+                amount_text = TRACE_SNOW_TEXT if precip["is_snow"] else TRACE_RAIN_TEXT
+            else:
+                p25_in, p75_in = precip["p25_in"], precip["p75_in"]
+                amount_fmt = "{:.1f}" if precip["is_snow"] else "{:.2f}"
+                amount_text = (f'{amount_fmt.format(p75_in)}"' if p25_in == p75_in
+                               else f'{amount_fmt.format(p25_in)}"–{amount_fmt.format(p75_in)}"')
             ax.text(cx, PRECIP_RANGE_Y, amount_text, ha="center", va="center",
                      fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
