@@ -58,10 +58,16 @@ bundled file, an Overpass outage now means no roads at all, not just no
 minor-highway tier.
   - Roads: motorway/motorway_link is "Interstate", trunk/trunk_link is
     "Main highways", primary/primary_link plus secondary/secondary_link
-    *that carries a state-route ref* (e.g. SR 221, SR 241) is "Minor
-    highways" -- secondary is otherwise mostly unnumbered farm/county
-    roads, so it's filtered to ref~"^SR" rather than pulled in wholesale,
-    which would bury the actual state highways in clutter.
+    *that carries a state-route ref* (e.g. SR 221 in Washington, OR 244 in
+    Oregon) is "Minor highways" -- secondary is otherwise mostly unnumbered
+    farm/county roads, so it's filtered to a ref pattern rather than
+    pulled in wholesale, which would bury the actual state highways in
+    clutter. The ref prefix OSM uses is state-specific -- "SR" in
+    Washington, but the state's own postal code ("OR", confirmed against
+    Oregon data) elsewhere -- so fetch_roads() matches "SR" or the
+    queried --state code, not a fixed "^SR" (which would silently drop
+    every Oregon route, as it originally did before the Hagen Fire map
+    surfaced the gap).
   - Towns: every OSM place=city/town/village node inside the extent,
     ranked by place tier then population, capped at --max-towns (default
     10). This is a good default but, being automatic, won't always match
@@ -237,7 +243,7 @@ def query_overpass(query, label):
     "layer unavailable this run" and degrade gracefully, not as fatal."""
     for url in OVERPASS_URLS:
         try:
-            r = requests.post(url, data={"data": query}, timeout=30)
+            r = requests.post(url, data={"data": query}, timeout=60)
             r.raise_for_status()
             elements = r.json().get("elements", [])
             print(f"  {len(elements)} {label} elements from {url}")
@@ -248,19 +254,30 @@ def query_overpass(query, label):
     return []
 
 
-def fetch_roads(lon_min, lon_max, lat_min, lat_max):
+def fetch_roads(lon_min, lon_max, lat_min, lat_max, state):
     """OSM ways within the given bbox, categorized into this map's three
     road tiers -- see module docstring for the tier/ref rules. Returns
     {"motorway": [...], "trunk": [...], "minor": [...]} of shapely
     LineStrings; a tier with no hits (including every tier, if Overpass
-    is unreachable) is just an empty list, not an error."""
+    is unreachable) is just an empty list, not an error.
+
+    The secondary-tier ref filter is state-aware: OSM tags a state route's
+    ref with that state's own convention -- "SR ###" in Washington, but
+    "OR ###" in Oregon (confirmed against Oregon data; every OSM ref in a
+    WFIGS-state's secondary highways was one of "OR ###"/"US ###"/"CR ###",
+    no "SR" at all) -- so a WA-only "^SR" filter would silently drop
+    every Oregon state route. Matching "SR" or the queried --state's own
+    postal code covers both known conventions; a state with some other
+    convention would need this revisited, the same caveat as the
+    WA/OR/ID-only counties layer below."""
+    ref_pattern = f"^(SR|{state.upper()})\\s?\\d"
     query = f"""
-    [out:json][timeout:25];
+    [out:json][timeout:45];
     (
       way["highway"~"^(motorway|motorway_link)$"]({lat_min},{lon_min},{lat_max},{lon_max});
       way["highway"~"^(trunk|trunk_link)$"]({lat_min},{lon_min},{lat_max},{lon_max});
       way["highway"~"^(primary|primary_link)$"]({lat_min},{lon_min},{lat_max},{lon_max});
-      way["highway"~"^(secondary|secondary_link)$"]["ref"~"^SR"]({lat_min},{lon_min},{lat_max},{lon_max});
+      way["highway"~"^(secondary|secondary_link)$"]["ref"~"{ref_pattern}"]({lat_min},{lon_min},{lat_max},{lon_max});
     );
     out geom;
     """
@@ -293,7 +310,7 @@ def fetch_towns(lon_min, lon_max, lat_min, lat_max, max_towns, exclude_names):
     {"name", "lon", "lat"} dicts -- label side is decided later in
     build_map(), once the extent's center is known."""
     query = f"""
-    [out:json][timeout:25];
+    [out:json][timeout:45];
     node["place"~"^(city|town|village)$"]({lat_min},{lon_min},{lat_max},{lon_max});
     out body;
     """
@@ -520,7 +537,7 @@ if __name__ == "__main__":
     lon_min, lon_max, lat_min, lat_max = extent
 
     print("Fetching roads (OSM Overpass)...")
-    roads = fetch_roads(lon_min, lon_max, lat_min, lat_max)
+    roads = fetch_roads(lon_min, lon_max, lat_min, lat_max, args.state)
 
     print("Fetching towns (OSM Overpass)...")
     towns = fetch_towns(lon_min, lon_max, lat_min, lat_max, args.max_towns, args.exclude_town)
