@@ -78,6 +78,25 @@ def region_extent(center_lon, center_lat, lon_span=LON_SPAN, lat_span=LAT_SPAN):
     ]
 
 
+# Fraction of the displayed box's own span (in each axis) over which a
+# flash right at the edge fades from full opacity down to fully
+# transparent, instead of being hard-clipped by a straight line right at
+# the frame boundary. A storm that extends past a bounded regional map's
+# edge is expected (see bc_interior's REGIONS comment) -- this only
+# changes how that gets drawn, not what's included: a flash's fade still
+# hits 0 exactly at the same boundary the old hard filter dropped it at,
+# so nothing appears that wasn't already inside the displayed box.
+EDGE_FADE_FRAC = 0.12
+
+
+def edge_fade(lon, lat, extent_box_lons, extent_box_lats):
+    lon_margin = EDGE_FADE_FRAC * (extent_box_lons[1] - extent_box_lons[0])
+    lat_margin = EDGE_FADE_FRAC * (extent_box_lats[1] - extent_box_lats[0])
+    lon_fade = min(lon - extent_box_lons[0], extent_box_lons[1] - lon) / lon_margin
+    lat_fade = min(lat - extent_box_lats[0], extent_box_lats[1] - lat) / lat_margin
+    return max(0.0, min(lon_fade, lat_fade, 1.0))
+
+
 # Longest legitimate segment length seen in admin1_boundary_lines.json's
 # TIGER-derived state lines is ~1.6 degrees; countries_slim.json's country
 # borders have several segments over-simplified down to a single straight
@@ -212,25 +231,17 @@ REGIONS = {
     # lon_span/lat_span/satellite_height are overridden here since this
     # region is a fundamentally different (much wider) zoom than Columbia
     # Basin/Portland/BC Interior's shared true-zoom-level setup, not a
-    # variant of it. Originally matched columbia-basin-alerts-map's
-    # "pnw_wide" region exactly; lat_span/center_lat are now taller than
-    # that region's, moving the north edge from 49.3 up to ~52.0 so it
-    # stops slicing through storm cells that cross the border into
-    # southern BC -- south edge unchanged; east/west shift by <0.5deg,
-    # negligible on this domain's 13-15deg width. No fetch-side change
-    # needed: fetch_lightning.py's shared LAT_MAX (driven by bc_interior,
-    # up at 54.31) already covers this.
+    # variant of it -- same extent as columbia-basin-alerts-map's
+    # "pnw_wide" region so a domain looks the same across products.
     "pnw": dict(
-        center_lon=-119.3, center_lat=46.3,
-        lon_span=13.0, lat_span=11.6, satellite_height=22_000_000,
+        center_lon=-119.3, center_lat=44.9,
+        lon_span=13.0, lat_span=8.8, satellite_height=22_000_000,
         legend_loc="upper right",
         roads_files=["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads.geojson",
                      "nevada_roads_north.geojson", "montana_roads_west.geojson",
-                     "california_roads_north.geojson", "utah_roads_northwest.geojson",
-                     "british_columbia_roads.geojson"],
+                     "california_roads_north.geojson", "utah_roads_northwest.geojson"],
         output="pnw_lightning_realtime.png",
         cities=[
-            ("Vancouver", -123.1207, 49.2827, "left"),
             ("Seattle", -122.3321, 47.6062, "left"),
             ("Bellingham", -122.4443, 48.7519, "left"),
             ("Spokane", -117.4260, 47.6588, "left"),
@@ -501,18 +512,21 @@ def build_map(region_key, lightning_path, output_path):
     # strikes (drawn last) sit visually on top of older ones where they
     # overlap. Flashes are filtered to this region's own extent here --
     # the fetch step pulls one shared domain-spanning box, and individual
-    # regions crop tighter than that shared box.
-    buckets = {label: {"lons": [], "lats": []} for _, label, _ in AGE_BANDS}
+    # regions crop tighter than that shared box. Each kept flash's opacity
+    # is scaled by edge_fade() so ones near the boundary taper off instead
+    # of stopping at a hard line -- see EDGE_FADE_FRAC above.
+    buckets = {label: {"lons": [], "lats": [], "fades": []} for _, label, _ in AGE_BANDS}
     for flash in flashes:
         lon, lat = flash["lon"], flash["lat"]
-        if not (extent_box_lons[0] <= lon <= extent_box_lons[1] and
-                extent_box_lats[0] <= lat <= extent_box_lats[1]):
+        fade = edge_fade(lon, lat, extent_box_lons, extent_box_lats)
+        if fade <= 0:
             continue
         flash_time = datetime.fromisoformat(flash["time"])
         age_hours = (window_end - flash_time).total_seconds() / 3600.0
         label, _ = band_for_age(age_hours)
         buckets[label]["lons"].append(lon)
         buckets[label]["lats"].append(lat)
+        buckets[label]["fades"].append(fade)
 
     total_in_region = sum(len(b["lons"]) for b in buckets.values())
 
@@ -521,7 +535,8 @@ def build_map(region_key, lightning_path, output_path):
         lats = buckets[label]["lats"]
         if not lons:
             continue
-        ax.scatter(lons, lats, transform=pc, s=10, color=color, alpha=0.65,
+        alphas = [0.65 * f for f in buckets[label]["fades"]]
+        ax.scatter(lons, lats, transform=pc, s=10, color=color, alpha=alphas,
                    edgecolor="none", linewidths=0, zorder=7)
 
     # ---------- city labels ----------
