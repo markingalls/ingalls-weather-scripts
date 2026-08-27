@@ -19,7 +19,15 @@ stale one.
 An flock-based lock means an overlapping cron tick (e.g. a slow run still
 in progress when the next scheduled tick fires) skips instead of running
 a second pass concurrently.
+
+Pass one or more --location substrings (matched case-insensitively against
+each entry's "label") to restrict a run to a subset -- e.g. a one-time
+manual check of a newly added location -- without touching the others'
+already-published images:
+
+    venv/bin/python3 deploy/build_and_publish.py --location Eugene --location Seattle
 """
+import argparse
 import fcntl
 import os
 import subprocess
@@ -142,7 +150,27 @@ def build_location(loc, env):
     os.replace(tmp_path, final_path)
 
 
+def parse_args():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--location", action="append", default=None,
+                     help="Restrict this run to locations whose label contains this substring "
+                          "(case-insensitive, repeatable). Default: every entry in LOCATIONS.")
+    return ap.parse_args()
+
+
 def main():
+    args = parse_args()
+    if args.location:
+        needles = [s.lower() for s in args.location]
+        locations = [loc for loc in LOCATIONS if any(n in loc["label"].lower() for n in needles)]
+        unmatched = [n for n in needles if not any(n in loc["label"].lower() for loc in LOCATIONS)]
+        if unmatched:
+            log(f"No LOCATIONS entry matches --location {unmatched} -- check the spelling/label.")
+        if not locations:
+            return 1
+    else:
+        locations = LOCATIONS
+
     os.makedirs(STATE_DIR, exist_ok=True)
     lock_fd = open(LOCK_FILE, "w")
     try:
@@ -152,10 +180,10 @@ def main():
         return 0
 
     try:
-        log("Starting scheduled build.")
+        log(f"Starting build for: {', '.join(loc['label'] for loc in locations)}.")
         env = os.environ.copy()
         failures = 0
-        for loc in LOCATIONS:
+        for loc in locations:
             try:
                 build_location(loc, env)
                 log(f"{loc['label']}: succeeded -- {WEB_ROOT}/{loc['output_name']} updated.")
