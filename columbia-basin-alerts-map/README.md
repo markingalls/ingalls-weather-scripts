@@ -64,3 +64,8 @@ python3 build_map.py       # render columbia_basin_alerts.png
   alert itself, not the full forecast zone(s) it happens to intersect.
   Zone-based products (most advisories/watches), which NWS issues
   without their own polygon, still fall back to the zone shape.
+- Severe Thunderstorm, Tornado, and Flash Flood Warnings are drawn as an
+  outline only (no shading/hatching), matching NWS's own convention for
+  these fast-moving, short-fused polygons -- they stay legible layered on
+  top of any zone-based shading underneath instead of competing with it
+  for a fill color.

@@ -274,12 +274,25 @@ event_geoms = {event: unary_union(geoms) for event, geoms in event_geoms.items()
 active_event_types = [event for event, geom in event_geoms.items()
                        if geom.intersects(extent_box)]
 
-# Split the events into a partition of disjoint regions, each tagged with
-# the set of events covering it, so overlapping alerts (e.g. a Red Flag
-# Warning inside a Heat Advisory) can be drawn as their own region instead
-# of alpha-stacking into a color that matches neither alert.
+# Fast-moving, short-fused polygon warnings are drawn as an outline only,
+# never shaded/striped -- matches NWS's own convention for these, and
+# keeps the polygon legible on top of any zone-based shading underneath
+# instead of competing with it for a fill color.
+OUTLINE_ONLY_EVENTS = {
+    "Severe Thunderstorm Warning", "Tornado Warning", "Flash Flood Warning",
+}
+outline_geoms = {event: geom for event, geom in event_geoms.items()
+                  if event in OUTLINE_ONLY_EVENTS}
+shaded_geoms = {event: geom for event, geom in event_geoms.items()
+                if event not in OUTLINE_ONLY_EVENTS}
+
+# Split the shaded events into a partition of disjoint regions, each
+# tagged with the set of events covering it, so overlapping alerts (e.g.
+# a Red Flag Warning inside a Heat Advisory) can be drawn as their own
+# region instead of alpha-stacking into a color that matches neither
+# alert.
 partition = []  # list of (geom, frozenset(events))
-for event, geom in event_geoms.items():
+for event, geom in shaded_geoms.items():
     next_partition = []
     remaining = geom
     for cell_geom, cell_events in partition:
@@ -335,6 +348,15 @@ for tags, geom in combo_geoms.items():
     im.set_clip_path(clip_patch)
     ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
                        linewidth=1.2, alpha=1.0, zorder=4.6)
+
+# Outline-only polygon warnings, drawn last so they stay crisp on top of
+# any zone shading (or another outline-only warning) beneath them.
+for event, geom in outline_geoms.items():
+    if geom.is_empty:
+        continue
+    color = NWS_COLORS.get(event, "#e8a33d")
+    ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=color,
+                       linewidth=2.2, alpha=1.0, zorder=4.7)
 
 # ---------- city labels ----------
 cities = [
@@ -423,6 +445,10 @@ fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=
 legend_handles = []
 for event in active_event_types:
     fill = NWS_COLORS.get(event, "#e8a33d")
+    if event in OUTLINE_ONLY_EVENTS:
+        legend_handles.append(Patch(facecolor="none", edgecolor=fill,
+                                     linewidth=2.0, label=event))
+        continue
     edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
     legend_handles.append(Patch(facecolor=fill, edgecolor=edge, alpha=0.85, label=event))
 
