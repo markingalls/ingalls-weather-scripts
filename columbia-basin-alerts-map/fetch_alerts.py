@@ -75,11 +75,17 @@ def fetch_zone_geometries(alerts_geojson, zone_cache):
                 time.sleep(0.2)  # be polite to the API
             geoms.append(zone_cache[z])
         records.append({
+            "id": p.get("id") or f.get("id"),
             "event": p["event"],
             "severity": p.get("severity"),
             "onset": p.get("onset"),
             "ends": p.get("ends"),
             "headline": p.get("headline"),
+            # Polygon-type products (see POLYGON_WARNING_EVENTS in
+            # build_map.py) carry their own precise warned-area geometry
+            # here; NWS leaves this null for zone-based products, which
+            # fall back to `zones` below.
+            "geometry": f.get("geometry"),
             "zones": geoms,
         })
     return records
