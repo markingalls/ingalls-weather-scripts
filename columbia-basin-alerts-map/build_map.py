@@ -350,13 +350,17 @@ for tags, geom in combo_geoms.items():
                        linewidth=1.2, alpha=1.0, zorder=4.6)
 
 # Outline-only polygon warnings, drawn last so they stay crisp on top of
-# any zone shading (or another outline-only warning) beneath them.
+# any zone shading (or another outline-only warning) beneath them. A
+# black glow behind the colored line -- matching this map's pre-existing
+# style for these warnings -- keeps the outline visible against light
+# basemap areas the way the plain colored line alone couldn't.
 for event, geom in outline_geoms.items():
     if geom.is_empty:
         continue
     color = NWS_COLORS.get(event, "#e8a33d")
-    ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=color,
-                       linewidth=2.2, alpha=1.0, zorder=4.7)
+    art = ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=color,
+                             linewidth=2.2, alpha=1.0, zorder=4.7)
+    art.set_path_effects([pe.withStroke(linewidth=4.0, foreground="black")])
 
 # ---------- city labels ----------
 cities = [
