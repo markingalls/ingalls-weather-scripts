@@ -59,3 +59,8 @@ python3 build_map.py       # render columbia_basin_alerts.png
   whatever domain this is currently showing.
 - Duplicate NWS products covering the exact same zone (this happens
   sometimes) are deduped so they don't double-stack shading.
+- Polygon-based warnings (Severe Thunderstorm, Tornado, Flash Flood, etc.)
+  are drawn using the precise warned-area polygon NWS attaches to the
+  alert itself, not the full forecast zone(s) it happens to intersect.
+  Zone-based products (most advisories/watches), which NWS issues
+  without their own polygon, still fall back to the zone shape.

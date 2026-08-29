@@ -239,13 +239,26 @@ ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_C
 alerts = json.load(open("alerts_with_zones.json"))
 extent_box = box(EXTENT[0], EXTENT[2], EXTENT[1], EXTENT[3])
 
-# Union every zone geometry per event type -- this both merges adjacent
-# same-event zones into one clean outline and naturally de-duplicates
-# NWS products that cover the exact same zone twice.
+# Union every alert's shape per event type -- this both merges adjacent
+# same-event shapes into one clean outline and naturally de-duplicates
+# NWS products that cover the exact same area twice. Polygon-based
+# warnings (Severe Thunderstorm, Tornado, Flash Flood, etc.) carry their
+# own precise warned-area geometry on the alert itself, which is what
+# actually got issued -- it's typically much smaller than the full
+# forecast zone(s) it happens to intersect, so it's used in preference
+# to those zones. Zone-based products (most advisories/watches) have no
+# such geometry and fall back to the union of their affected zones.
 event_geoms = {}
-plotted_zones = set()  # (event, zone_id)
+plotted_ids = set()     # alert ids already contributed via their own polygon
+plotted_zones = set()   # (event, zone_id) already contributed via zone fallback
 for a in alerts:
     event = a["event"]
+    if a.get("geometry"):
+        if a["id"] in plotted_ids:
+            continue
+        plotted_ids.add(a["id"])
+        event_geoms.setdefault(event, []).append(shape(a["geometry"]))
+        continue
     for z in a["zones"]:
         zone_key = (event, z.get("zone_id"))
         if zone_key in plotted_zones:

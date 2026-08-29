@@ -38,11 +38,17 @@ def fetch_zone_geometries(alerts_geojson):
                 "geometry": zj["geometry"],
             })
         records.append({
+            "id": p.get("id") or f.get("id"),
             "event": p["event"],
             "severity": p.get("severity"),
             "onset": p.get("onset"),
             "ends": p.get("ends"),
             "headline": p.get("headline"),
+            # Polygon-based products (Severe Thunderstorm/Tornado/Flash
+            # Flood Warning, etc.) carry their own precise warned area
+            # here; NWS leaves this null for zone-based products
+            # (most advisories/watches), which fall back to `zones` below.
+            "geometry": f.get("geometry"),
             "zones": geoms,
         })
     return records
