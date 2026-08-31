@@ -84,10 +84,15 @@ python3 build_chart.py
   always-on marker instead of up to two optional ones.
 - **Y-axis** floors at a flat 0 mph rather than padding below the day's
   low the way the temp chart does -- wind speed can't go negative, so
-  there's no meaningful "3 mph below calm" to pad for. The ceiling is the
-  day's highest reading across *both* series (gust is almost always >=
-  wind speed, but both are checked rather than assuming that holds for
-  every sample), padded a flat +3 mph so nothing crowds the axis edge.
+  there's no meaningful "3 mph below calm" to pad for. The ceiling
+  defaults to 25 mph -- a calm/typical day (most days) reads better on a
+  consistent, familiar axis rather than one that stretches to whatever
+  that particular calm day's tiny max happened to be, which would make
+  ordinary gusts look artificially dramatic. It widens to cover the day's
+  highest reading across *both* series (gust is almost always >= wind
+  speed, but both are checked rather than assuming that holds for every
+  sample), padded a flat +3 mph, whenever that actually exceeds 25 -- so
+  a genuinely windy day's line/dots never crowd or clip past the edge.
 - Chart styling (fonts, dimensions, logo placement, current-conditions
   stat box mechanics) mirrors `tempest-temp-chart/build_chart.py` --
   edit `build_chart.py` directly to adjust. Wind speed is teal

@@ -193,13 +193,17 @@ def main():
         # Wind speed can't go negative, so the axis floor is a flat 0
         # rather than a padded-below-the-low the way the temp chart pads
         # both directions -- there's no meaningful "3 mph below calm."
-        # The ceiling is the day's highest reading across both series
+        # The ceiling is 25 mph by default -- a calm/typical day (most
+        # days) reads better on a consistent, familiar axis instead of a
+        # needlessly tall one that makes ordinary gusts look tiny -- but
+        # widens to cover the day's highest reading across both series
         # (gust is almost always >= wind speed, but checking both rather
         # than assuming it holds for every single sample), padded the
-        # same fixed +3 mph the temp chart uses so nothing crowds the
-        # axis edge.
+        # same fixed +3 mph the temp chart uses, whenever that actually
+        # exceeds 25 so a genuinely windy day's line/dots never crowd or
+        # clip past the axis edge.
         day_high = max(wind_speeds + gust_values) if gust_values else max(wind_speeds)
-        ax.set_ylim(0, day_high + 3)
+        ax.set_ylim(0, max(25, day_high + 3))
         ax.set_xlim(day_start, day_end)
 
         legend = ax.legend(loc="upper left", frameon=True, fontsize=10.5, prop=f_reg,
