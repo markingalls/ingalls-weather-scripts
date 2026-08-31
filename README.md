@@ -48,6 +48,10 @@ workflows. Each project lives in its own directory with its own README.
   (xmACIS) and 7 days forecast (WindBorne MetaMesh), against 1991-2020
   daily climatology (percentile shading and normal from xmACIS; record
   highs pooled across Tri-Cities-area stations).
+- [`tempest-temp-chart/`](tempest-temp-chart/) — generates a styled
+  same-day temperature chart from a personal WeatherFlow Tempest station:
+  a single air-temperature line across the full 24-hour local calendar
+  day, with the most recent observation marked and labeled.
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
