@@ -41,6 +41,12 @@ Z_GRID = 2
 Z_TEMP = 4
 Z_MARKER = 5
 
+# The Tempest hub reports roughly once a minute -- a gap much longer than
+# that means the station (or its internet connection) was actually down,
+# not just a skipped sample. Used to break the plotted line rather than
+# drawing a straight segment across a period with no real data.
+MAX_GAP = timedelta(minutes=6)
+
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Render today's Tempest station temperature chart.")
@@ -55,6 +61,26 @@ def parse_args():
     ap.add_argument("--mark-high", action="store_true",
                      help="Circle and label the day's highest observation")
     return ap.parse_args()
+
+
+def insert_gaps(times, temps, max_gap):
+    """Returns (times, temps) with a NaN-valued point inserted at the
+    midpoint of any consecutive pair more than max_gap apart -- matplotlib
+    breaks a line at a NaN y-value rather than drawing a straight segment
+    across it, so a real data outage shows as a visible gap instead of
+    reading as continuous data. Extrema/axis-limit logic should keep using
+    the original times/temps, not this -- the inserted points aren't real
+    observations."""
+    if not times:
+        return times, temps
+    out_times, out_temps = [times[0]], [temps[0]]
+    for i in range(1, len(times)):
+        if times[i] - times[i - 1] > max_gap:
+            out_times.append(times[i - 1] + (times[i] - times[i - 1]) / 2)
+            out_temps.append(float("nan"))
+        out_times.append(times[i])
+        out_temps.append(temps[i])
+    return out_times, out_temps
 
 
 def main():
@@ -92,7 +118,8 @@ def main():
 
     temp_line = None
     if times:
-        temp_line = ax.plot(times, temps, color=TEMP_COLOR, linewidth=2.6, zorder=Z_TEMP,
+        plot_times, plot_temps = insert_gaps(times, temps, MAX_GAP)
+        temp_line = ax.plot(plot_times, plot_temps, color=TEMP_COLOR, linewidth=2.6, zorder=Z_TEMP,
                              label="Air temperature")[0]
 
         # The line legitimately stops partway through the day on a same-day
