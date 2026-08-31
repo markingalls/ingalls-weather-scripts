@@ -68,6 +68,15 @@ workflows. Each project lives in its own directory with its own README.
   `images.ingallswx.com/hermiston_wind.png` (refreshed every 5 minutes)
   plus a rolling 5-day look-back archive at `..._day1.png` through
   `..._day5.png` (rotated nightly).
+- [`tempest-pressure-chart/`](tempest-pressure-chart/) — sibling to
+  `tempest-temp-chart/`, same station and same styling: a sea-level
+  pressure line (station pressure reduced via the standard barometric
+  formula and the station's own elevation) across the full 24-hour local
+  calendar day, with a current-conditions pressure readout and the day's
+  high and low circled and labeled. Deployed live at
+  `images.ingallswx.com/hermiston_pressure.png` (refreshed every 5
+  minutes) plus a rolling 5-day look-back archive at `..._day1.png`
+  through `..._day5.png` (rotated nightly).
 
 ## Shared resources
 

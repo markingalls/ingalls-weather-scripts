@@ -1,0 +1,24 @@
+# Add these lines to the droplet's existing crontab (crontab -e) alongside
+# everything else already there.
+#
+# TEMPEST_API_KEY has to be set here (or sourced from a file
+# publish_pressure.py reads itself) because cron does not load your shell
+# profile. If tempest-temp-chart or tempest-wind-chart is already deployed
+# on this droplet (same station, same account), its own crontab entry
+# already sets this same variable -- no need to declare it twice as long
+# as these lines come after that one in the file; included here so this
+# file is self-contained if pressure is deployed on its own.
+TEMPEST_API_KEY=your_tempest_api_key_here
+
+# Every 5 minutes -- same cadence and reasoning as
+# tempest-temp-chart/deploy/crontab.example's own every-5-minutes line.
+
+*/5 * * * * /opt/ingalls-weather-scripts/tempest-pressure-chart/venv/bin/python3 /opt/ingalls-weather-scripts/tempest-pressure-chart/deploy/publish_pressure.py >> /opt/ingalls-weather-scripts/tempest-pressure-chart/state/cron.log 2>&1
+
+# Hourly at :10 past -- same idempotent-per-Pacific-calendar-date design
+# and same DST reasoning as
+# tempest-temp-chart/deploy/crontab.example's own daily-archive line
+# (see that file's comment for the full explanation of why :10-past-the-
+# hour specifically stays aligned to 00:10 PT year-round despite DST).
+
+10 * * * * /opt/ingalls-weather-scripts/tempest-pressure-chart/venv/bin/python3 /opt/ingalls-weather-scripts/tempest-pressure-chart/deploy/publish_pressure_daily.py >> /opt/ingalls-weather-scripts/tempest-pressure-chart/state/cron.log 2>&1
