@@ -47,7 +47,7 @@ Z_MARKER = 5
 # drawing a straight segment across a period with no real data.
 MAX_GAP = timedelta(minutes=6)
 
-# How far back "Current Wind" looks for its peak-gust value -- see the
+# How far back "Current Gusts" looks for its peak-gust value -- see the
 # current-conditions stat box section below for why it's a trailing peak
 # rather than the single most recent sample.
 RECENT_GUST_WINDOW = timedelta(minutes=5)
@@ -421,18 +421,17 @@ def main():
     # themselves up against the same table independently -- there's only
     # one source table, covering both.
     if times and not args.no_current_conditions:
-        # "Current Wind" uses the peak gust of the last 5 minutes, not
+        current_wind_mph = wind_speeds[-1]
+        current_wind_dir_deg = wind_dirs[-1]
+
+        # "Current Gusts" uses the peak gust of the last 5 minutes, not
         # the single most recent 1-minute sample -- a lone sample is
         # noisy/unrepresentative from one moment to the next, while the
         # trailing peak reads as a more meaningful "what's it doing right
-        # now." Direction still comes from the single most recent
-        # reading. Current Gusts is unaffected -- still the single most
-        # recent gust reading.
+        # now."
         window_start = times[-1] - RECENT_GUST_WINDOW
         recent_gusts = [g for t, g in zip(times, wind_gusts) if g is not None and t >= window_start]
-        current_wind_mph = max(recent_gusts) if recent_gusts else None
-        current_wind_dir_deg = wind_dirs[-1]
-        current_gust_mph = wind_gusts[-1]
+        current_gust_mph = max(recent_gusts) if recent_gusts else None
 
         stat_center_y = 0.685 + 0.105 / 2
         stat_gap = 0.02

@@ -131,14 +131,13 @@ python3 build_chart.py --no-current-conditions
   both a speed *and* a direction reading to show a real value (a lone
   direction or a lone speed reads as `N/A`) -- Current Gusts is speed-only,
   since gust has no direction of its own in the Tempest API.
-  **Current Wind's speed number is the peak gust over the trailing
-  `RECENT_GUST_WINDOW` (5 minutes), not the single most recent 1-minute
-  sample** -- a lone sample is noisy from one moment to the next, while a
-  short trailing peak reads as a more meaningful "what's it doing right
-  now" without smoothing away real gustiness the way a longer average
-  would. Direction still comes from the single most recent reading, and
-  Current Gusts is unaffected (still the single most recent gust
-  reading) -- only Current Wind's own number changed.
+  **Current Gusts is the peak gust over the trailing `RECENT_GUST_WINDOW`
+  (5 minutes), not the single most recent 1-minute sample** -- a lone
+  sample is noisy from one moment to the next, while a short trailing
+  peak reads as a more meaningful "what's it doing right now" without
+  smoothing away real gustiness the way a longer average would. Current
+  Wind is unaffected -- still the single most recent wind speed +
+  direction reading.
 - **`--no-current-conditions`** renders a plain historical-day (archive)
   chart: no stat boxes, no "Updated" clause in the subtitle (just the
   date), title drops "Today's", and no dotted last-observation marker --
