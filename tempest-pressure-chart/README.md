@@ -103,6 +103,25 @@ python3 build_chart.py --no-current-conditions
   pressure swing is usually tiny (a calm day might only span ~3-7 mb)
   compared to temperature's; a pad sized like temperature's would
   flatten the day's actual diurnal wobble into an imperceptible sliver.
+  Tick labels are whole millibars (`%.0f`) -- sub-mb precision isn't
+  meaningful at gridline scale, even though the high/low callouts and
+  stat box below still show a decimal.
+- **High/low markers** circle and label the day's highest and lowest
+  sea-level pressure (`HIGH_COLOR`/`LOW_COLOR`, the same red/blue as
+  `tempest-temp-chart`'s own `--mark-high`/`--mark-low`, and the
+  standard synoptic-map H/L convention) -- always on, unlike that flag,
+  since there's only the one series here and a day's high and low are
+  always worth calling out, on both a same-day and an archive chart.
+  Marked against the *raw* (unsmoothed) readings, same values the
+  y-axis padding uses, so the callout is the actual observed extreme --
+  which can leave the circle a hair off the (smoothed) drawn line
+  itself, a tradeoff made deliberately in favor of reporting the true
+  reading. Label placement falls back through above-left/above-right/
+  below-left/below-right, keeping the first that stays inside the plot
+  and clear of the logo and the other marker's label -- same mechanism,
+  and the same solid-white-backing-patch fix (not a path-effects
+  stroke, which leaves gaps between letters transparent), as
+  `tempest-wind-chart`'s own always-on peak-gust marker.
 - Chart styling (fonts, dimensions, logo placement, current-conditions
   stat box mechanics) mirrors `tempest-temp-chart/build_chart.py` -- edit
   `build_chart.py` directly to adjust. The line is the same forest green
@@ -117,14 +136,18 @@ python3 build_chart.py --no-current-conditions
 - **Current-conditions stat box** reuses the sibling charts' stat-box
   design (two-line right-aligned label, bold color-chip value, the
   `get_window_extent()` bbox-padding gotcha -- see
-  `tempest-temp-chart/README.md` for the full writeup), but as a single
-  box centered on the figure's own midpoint rather than the two-column
-  layout the temp/wind charts use, since there's only the one series
-  here. Its chip background comes from `PRESSURE_COLOR_TABLE`, a
-  Pa-keyed `(Pa, (R, G, B))` control-point table linearly interpolated
-  by `interp_color()` (same mechanism as the temp/wind charts' own
-  K- and m/s-keyed tables) -- the current mb reading is converted to Pa
-  via `mb_to_pa()` at the call site, keeping `interp_color()` itself
+  `tempest-temp-chart/README.md` for the full writeup). Unlike the
+  temp/wind charts' two-column layout (which centers the label+chip
+  pair as a single unit, since each has two stats side by side), this
+  single-stat chart centers the **value chip itself** on the figure's
+  own horizontal midpoint, with the "Current Pressure" label sitting to
+  its left -- the number people actually look at lands dead center,
+  rather than being pushed off-center by half the label's own width.
+  Its chip background comes from `PRESSURE_COLOR_TABLE`, a Pa-keyed
+  `(Pa, (R, G, B))` control-point table linearly interpolated by
+  `interp_color()` (same mechanism as the temp/wind charts' own K- and
+  m/s-keyed tables) -- the current mb reading is converted to Pa via
+  `mb_to_pa()` at the call site, keeping `interp_color()` itself
   unit-agnostic. `PRESSURE_COLOR` (the line's own forest green) is
   unrelated to the chip now -- it's still used for the line itself, just
   no longer for the stat box.
@@ -137,7 +160,4 @@ python3 build_chart.py --no-current-conditions
 - **Not (yet) included**: a `build_lookback_charts.py` local-testing /
   backfill tool and the droplet deploy scripts (`deploy/publish_*.py`,
   `deploy/crontab.example`) that the temp and wind charts both have --
-  this project hasn't been asked to go through that yet. Also not
-  included: extremes marking (a `--mark-low`/`--mark-high`-style peak/
-  trough callout) -- ask, and either can be added the same way they
-  exist on the sibling charts.
+  this project hasn't been asked to go through that yet.

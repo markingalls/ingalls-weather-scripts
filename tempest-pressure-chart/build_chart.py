@@ -31,6 +31,12 @@ AXIS_COLOR = "#000000"
 # rather than needing its own new hue.
 PRESSURE_COLOR = "#164f29"
 
+# Same red/blue high/low convention tempest-temp-chart uses for its own
+# (opt-in) --mark-high/--mark-low callouts -- also the standard synoptic-
+# map convention (red H, blue L), which happens to line up nicely here.
+HIGH_COLOR = "#a3242b"
+LOW_COLOR = "#0b3d91"
+
 # ---------- current-conditions stat box ----------
 # Background color table for the stat box -- (Pa, (R, G, B)) control
 # points sorted by Pa -- interp_color() linearly interpolates between
@@ -67,6 +73,7 @@ PRESSURE_COLOR_TABLE = [
 
 Z_GRID = 2
 Z_PRESSURE = 4
+Z_MARKER = 5
 
 # The Tempest hub reports roughly once a minute -- a gap much longer than
 # that means the station (or its internet connection) was actually down,
@@ -284,10 +291,70 @@ def main():
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
+    # ---------- high / low markers ----------
+    # Always on (unlike tempest-temp-chart's opt-in --mark-high/--mark-low)
+    # -- there's only the one series here, so a day's high and low pressure
+    # are always worth calling out, on both a same-day and an archive
+    # chart. Marked against the raw (unsmoothed) readings, same as the
+    # y-axis padding above -- the actual observed extreme, not a value
+    # smoothing may have pulled slightly toward the mean, even though that
+    # can leave the circle a hair off the (smoothed) drawn line itself.
+    if times:
+        low_idx = min(range(len(pressures)), key=lambda i: pressures[i])
+        high_idx = max(range(len(pressures)), key=lambda i: pressures[i])
+
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        ax_box = ax.get_window_extent(renderer)
+        occupied = [logo_ax.get_window_extent(renderer)] if logo_ax is not None else []
+
+        def mark_extreme(idx, color, prefix):
+            t_val, v_val = times[idx], pressures[idx]
+            ax.scatter([t_val], [v_val], s=160, facecolors="none", edgecolors=color,
+                       linewidths=2.2, zorder=Z_MARKER)
+            label_text = f"{prefix}: {v_val:.1f} mb at {t_val.strftime('%H:%M')}"
+
+            def place(ha, va, x_off, y_off):
+                # A solid white backing patch, not a path-effects stroke --
+                # a stroke only outlines the letters, leaving the gaps
+                # between/inside them transparent, so a gridline crossing
+                # the label would still show through. See
+                # tempest-wind-chart/README.md's peak-gust-label writeup
+                # for how this was originally diagnosed.
+                return ax.annotate(label_text, xy=(t_val, v_val), xytext=(x_off, y_off),
+                                    textcoords="offset points", ha=ha, va=va,
+                                    fontproperties=f_bold, fontsize=12, color=color, zorder=Z_MARKER,
+                                    bbox=dict(facecolor="white", edgecolor="none", pad=2))
+
+            # Above-first, same fallback order and reasoning as
+            # tempest-wind-chart's always-on peak-gust marker.
+            candidates = [
+                ("left", "bottom", 15, 10),
+                ("right", "bottom", -15, 10),
+                ("left", "center", 15, -8),
+                ("right", "center", -15, -8),
+            ]
+            txt = None
+            for ha, va, x_off, y_off in candidates:
+                if txt is not None:
+                    txt.remove()
+                txt = place(ha, va, x_off, y_off)
+                fig.canvas.draw()
+                txt_box = txt.get_window_extent(renderer)
+                fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
+                        and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
+                clear = not any(txt_box.overlaps(b) for b in occupied)
+                if fits and clear:
+                    break
+            occupied.append(txt.get_window_extent(renderer))
+
+        mark_extreme(low_idx, LOW_COLOR, "Low")
+        mark_extreme(high_idx, HIGH_COLOR, "High")
+
     # ---------- axes styling ----------
     ax.set_ylabel("Sea Level Pressure (mb)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_xlabel("Time", fontproperties=f_med, fontsize=12, color=INK)
-    ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
+    ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.0f"))
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
     for spine in ("top", "right"):
@@ -408,14 +475,16 @@ def main():
         pad_px = chip_pad * number_fontsize * (fig.get_dpi() / 72)
         chip_width_px = text_width_px + 2 * pad_px
 
-        # Center the whole (label + gap + chip) unit on the figure's own
-        # horizontal midpoint, rather than pinning it to a column.
-        total_width_px = label_width_px + label_number_gap_px + chip_width_px
-        start_x_px = center_x * fig_w_px - total_width_px / 2
-        label_right_px = start_x_px + label_width_px
+        # Center the value chip itself on the figure's own horizontal
+        # midpoint -- not the (label + gap + chip) pair as a single unit,
+        # which would leave the chip (the number people actually look at)
+        # off-center by half the label's width.
+        chip_center_px = center_x * fig_w_px
+        chip_left_visual_px = chip_center_px - chip_width_px / 2
+        label_right_px = chip_left_visual_px - label_number_gap_px
         # anchor = desired visual left edge of the padded chip + pad_px,
         # since the chip's actual left edge sits pad_px left of the anchor.
-        number_anchor_px = label_right_px + label_number_gap_px + pad_px
+        number_anchor_px = chip_left_visual_px + pad_px
 
         fig.text(label_right_px / fig_w_px, stat_center_y, label_text, fontproperties=f_reg,
                   fontsize=label_fontsize, color=INK, ha="right", va="center",
