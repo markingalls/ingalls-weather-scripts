@@ -28,9 +28,9 @@ AXIS_COLOR = "#000000"
 # tri-cities-temp-chart) use for their primary observed-temperature line.
 TEMP_COLOR = "#164f29"
 
-# Dark red for the daily-low callout, distinct from the temperature line
+# Deep blue for the daily-low callout, distinct from the temperature line
 # itself so the circled point reads as an annotation, not just more data.
-LOW_COLOR = "#a3242b"
+LOW_COLOR = "#0b3d91"
 
 Z_GRID = 2
 Z_TEMP = 4
@@ -78,8 +78,8 @@ def main():
                        linewidths=2.2, zorder=Z_LOW)
             label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
             txt = ax.annotate(f"Low: {low_temp:.1f}°F at {low_time.strftime('%H:%M')}",
-                               xy=(low_time, low_temp), xytext=(-12, 14), textcoords="offset points",
-                               ha="right", va="bottom", fontproperties=f_bold, fontsize=12,
+                               xy=(low_time, low_temp), xytext=(12, -14), textcoords="offset points",
+                               ha="left", va="top", fontproperties=f_bold, fontsize=12,
                                color=LOW_COLOR, zorder=Z_LOW)
             txt.set_path_effects(label_stroke)
 

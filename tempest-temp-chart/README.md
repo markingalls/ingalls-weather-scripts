@@ -74,14 +74,14 @@ python3 build_chart.py --mark-low
   observations come in. No forecast source is wired into this project, so
   there's no forward-looking high/low to pad toward in the meantime.
 - **`--mark-low`** (off by default) circles the day's lowest observation
-  and labels it `Low: XX.X°F at HH:MM`, offset up-and-left of the point so
-  it clears both the temperature line and the "now" marker.
+  and labels it `Low: XX.X°F at HH:MM`, offset below-and-right of the point
+  so it clears both the temperature line and the "now" marker.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `850-700-temp-chart/build_chart.py` and `tri-cities-temp-chart/build_chart.py`
   -- edit `build_chart.py` directly to adjust. The temperature line reuses
   the same forest green (`#164f29`) those charts use for their own
-  observed-temperature series; the `--mark-low` callout uses the same dark
-  red (`#a3242b`) `tri-cities-temp-chart` uses for record highs. No
+  observed-temperature series; the `--mark-low` callout uses the same deep
+  blue (`#0b3d91`) `hrrr-smoke-chart` uses for its second location line. No
   legend -- there's only the one series, labeled directly in the
   title/y-axis instead.
 - **Display label**: `fetch_tempest.py` writes both the Tempest API's raw
