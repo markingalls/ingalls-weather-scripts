@@ -47,6 +47,95 @@ Z_MARKER = 5
 # drawing a straight segment across a period with no real data.
 MAX_GAP = timedelta(minutes=6)
 
+# ---------- current-conditions stat boxes ----------
+# Background color tables for the two stat boxes, each a list of (Kelvin,
+# (R, G, B)) control points sorted by K -- interp_color() linearly
+# interpolates between them. Alpha is uniformly opaque in both source
+# tables, so it's dropped here.
+TEMP_COLOR_TABLE = [
+    (205.53962824635747, (20, 1, 11)),
+    (220.54105933801642, (72, 2, 42)),
+    (223.30970412365585, (114, 5, 69)),
+    (226.07834890929527, (156, 7, 95)),
+    (228.8469936949347, (190, 31, 133)),
+    (231.61563848057412, (216, 33, 184)),
+    (234.38428326621354, (224, 94, 226)),
+    (237.15292805185297, (208, 143, 208)),
+    (239.9215728374924, (198, 174, 206)),
+    (242.71111221757047, (177, 149, 200)),
+    (245.48274194527255, (153, 122, 186)),
+    (248.25437167297463, (120, 90, 160)),
+    (251.02600140067673, (95, 67, 136)),
+    (253.7976311283788, (75, 44, 128)),
+    (256.5692608560809, (52, 34, 130)),
+    (259.2740222360249, (44, 54, 150)),
+    (262.11252031148507, (62, 73, 174)),
+    (264.88415003918715, (79, 90, 198)),
+    (267.13811875987665, (90, 128, 206)),
+    (269.1251668409579, (100, 165, 214)),
+    (271.1122149220392, (94, 194, 212)),
+    (273.0992630031204, (40, 142, 160)),
+    (275.0863110842017, (24, 105, 120)),
+    (279.0604072463642, (28, 108, 79)),
+    (283.03450340852675, (39, 132, 85)),
+    (286.97216346781227, (60, 150, 83)),
+    (289.741977590991, (112, 172, 91)),
+    (292.5117917141697, (159, 190, 91)),
+    (295.2816058373485, (208, 200, 84)),
+    (298.0514199605272, (204, 172, 70)),
+    (300.8212340837059, (212, 146, 61)),
+    (303.5910482068847, (218, 121, 35)),
+    (306.3608623300634, (208, 90, 31)),
+    (309.13067645324213, (216, 59, 32)),
+    (311.9004905764209, (182, 32, 7)),
+    (314.6703046995996, (142, 36, 19)),
+    (317.44011882277835, (102, 23, 10)),
+    (320.20993294595706, (142, 15, 54)),
+    (322.9797470691358, (194, 50, 94)),
+    (325.74956119231456, (216, 120, 149)),
+    (332.71070543555834, (204, 16, 171)),
+]
+
+DEW_POINT_COLOR_TABLE = [
+    (183, (0, 0, 0)),
+    (213, (59, 35, 0)),
+    (253, (66, 50, 34)),
+    (273, (122, 107, 95)),
+    (280, (204, 201, 199)),
+    (283, (108, 176, 99)),
+    (291, (16, 99, 16)),
+    (296, (0, 64, 18)),
+    (301, (143, 143, 0)),
+    (308, (179, 107, 0)),
+]
+
+
+def fahrenheit_to_kelvin(f):
+    return (f - 32) * 5 / 9 + 273.15
+
+
+def interp_color(value_k, table):
+    """Linearly interpolates an (R, G, B) 0-255 triple from a sorted
+    (K, (R, G, B)) table, clamping to the end colors outside its range."""
+    if value_k <= table[0][0]:
+        return table[0][1]
+    if value_k >= table[-1][0]:
+        return table[-1][1]
+    for (k0, c0), (k1, c1) in zip(table, table[1:]):
+        if k0 <= value_k <= k1:
+            frac = (value_k - k0) / (k1 - k0)
+            return tuple(c0[i] + frac * (c1[i] - c0[i]) for i in range(3))
+    return table[-1][1]
+
+
+def text_color_for_bg(rgb):
+    """Black or white, whichever reads better against an (R, G, B) 0-255
+    background -- ITU-R BT.601 perceptual luminance, the standard
+    black/white text contrast heuristic."""
+    r, g, b = rgb
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return "black" if luminance > 140 else "white"
+
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Render today's Tempest station temperature chart.")
@@ -90,6 +179,7 @@ def main():
 
     times = [datetime.fromisoformat(o["time"]) for o in data["observations"]]
     temps = [o["air_temp_f"] for o in data["observations"]]
+    dew_points = [o.get("dew_point_f") for o in data["observations"]]
 
     day_start = datetime.fromisoformat(data["date"]).replace(tzinfo=tz)
     day_end = day_start + timedelta(days=1)
@@ -109,7 +199,10 @@ def main():
     # ---------- figure (same footprint as the other temp charts) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
-    ax = fig.add_axes([0.075, 0.10, 0.87, 0.65])
+    # Shorter than the other temp charts' 0.65 -- the current-conditions
+    # stat boxes below take the freed vertical space, in the band between
+    # here and the (now fig-position-fixed, not axes-derived) subtitle.
+    ax = fig.add_axes([0.075, 0.10, 0.87, 0.56])
     ax.set_facecolor("white")
 
     axpos = ax.get_position()
@@ -289,13 +382,53 @@ def main():
         tick.set_fontsize(10)
 
     # ---------- title / subtitle ----------
-    subtitle_y = top_y + 0.058
+    # Fixed rather than derived from top_y (axpos.y1) -- now that the axes
+    # is shorter than the other temp charts, the stat boxes below sit in
+    # the freed band at their own fixed height, not one that scales with
+    # wherever the (now shorter) axes' own top happens to land.
+    subtitle_y = 0.815
     title_y = subtitle_y + 0.035
     date_str = day_start.strftime("%B %-d, %Y")
     fig.text(left_x, title_y, f"Today's Temperature — {data['label']}",
               fontproperties=f_bold, fontsize=22, color=INK)
     subtitle = date_str
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
+
+    # ---------- current-conditions stat boxes ----------
+    # Sit in the band freed up by shrinking the axes above, between the
+    # plot's top and the subtitle. Each box's background is the current
+    # reading's own color-table lookup (temp/dew point converted to
+    # Kelvin, interpolated); the bold value text is black or white,
+    # whichever contrasts against that particular background.
+    if times:
+        current_temp_f = temps[-1]
+        current_dew_point_f = dew_points[-1]
+
+        stat_y0, stat_height = 0.685, 0.105
+        stat_gap = 0.02
+        box_width = (right_x - left_x - stat_gap) / 2
+
+        def draw_stat_box(x0, value_f, label, table):
+            box_ax = fig.add_axes([x0, stat_y0, box_width, stat_height], zorder=15)
+            if value_f is not None:
+                rgb = interp_color(fahrenheit_to_kelvin(value_f), table)
+                box_ax.set_facecolor(tuple(c / 255 for c in rgb))
+                text_color = text_color_for_bg(rgb)
+                text = f"{label}: {value_f:.1f}°F"
+            else:
+                box_ax.set_facecolor(BG)
+                text_color = INK_SECONDARY
+                text = f"{label}: N/A"
+            box_ax.set_xticks([])
+            box_ax.set_yticks([])
+            for spine in box_ax.spines.values():
+                spine.set_visible(False)
+            box_ax.text(0.5, 0.5, text, transform=box_ax.transAxes, ha="center", va="center",
+                        fontproperties=f_bold, fontsize=19, color=text_color)
+
+        draw_stat_box(left_x, current_temp_f, "Current Temp", TEMP_COLOR_TABLE)
+        draw_stat_box(left_x + box_width + stat_gap, current_dew_point_f,
+                      "Current Dew Point", DEW_POINT_COLOR_TABLE)
 
     # ---------- attribution ----------
     fig.text(center_x, 0.02, "Ingalls Weather",
