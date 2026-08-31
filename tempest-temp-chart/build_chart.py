@@ -273,8 +273,11 @@ def main():
         ax.set_ylim(day_low - 3, day_high + 3)
         ax.set_xlim(day_start, day_end)
 
-        legend = ax.legend(loc="upper left", frameon=False, fontsize=10.5, prop=f_reg,
+        legend = ax.legend(loc="upper left", frameon=True, fontsize=10.5, prop=f_reg,
                             handlelength=1.6, borderaxespad=0.8)
+        legend.get_frame().set_facecolor("white")
+        legend.get_frame().set_edgecolor("none")
+        legend.set_zorder(Z_TEMP + 1)
         for text in legend.get_texts():
             text.set_color(INK_SECONDARY)
     else:

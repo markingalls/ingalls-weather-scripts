@@ -132,9 +132,13 @@ python3 build_chart.py --mark-low --mark-high
   before plotting, so a lone missing reading breaks the line the same way
   a real outage does, rather than crashing or silently interpolating
   across it.
-- A small legend (top-left, unobtrusive, no frame) distinguishes the two
-  lines -- added once there were two series to tell apart; the original
-  single-line version didn't need one (the y-axis label alone was enough).
+- A small legend (top-left, unobtrusive) distinguishes the two lines --
+  added once there were two series to tell apart; the original
+  single-line version didn't need one (the y-axis label alone was
+  enough). It has a plain white background (no border) so it stays
+  readable over the gridlines and, on a day the line happens to pass
+  through that corner, over the data itself -- drawn above the plotted
+  lines (`zorder` one above `Z_TEMP`) so it never gets covered.
 - Chart styling (fonts, dimensions, logo placement) mirrors
   `850-700-temp-chart/build_chart.py` and `tri-cities-temp-chart/build_chart.py`
   -- edit `build_chart.py` directly to adjust. The temperature line is the
