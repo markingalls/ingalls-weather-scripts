@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
 import matplotlib.patheffects as pe
+from matplotlib.transforms import Bbox
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -83,10 +84,53 @@ def main():
     left_x, right_x, top_y = axpos.x0, axpos.x1, axpos.y1
     center_x = (axpos.x0 + axpos.x1) / 2
 
-    # ---------- logo (bottom-right, matching the other temp chart placement) ----------
-    # Placed early (before the data-dependent plotting below) so the
-    # --mark-low label-placement check further down can treat its
-    # footprint as off-limits too, not just the axes' own edges.
+    temp_line = None
+    if times:
+        temp_line = ax.plot(times, temps, color=TEMP_COLOR, linewidth=2.6, zorder=Z_TEMP,
+                             label="Air temperature")[0]
+
+        # The line legitimately stops partway through the day on a same-day
+        # chart -- a dotted marker at the last observation makes that read
+        # as current, not as missing data.
+        ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
+
+        # Day's high is the observed max so far, extended to the forecast
+        # high (if fetch_forecast.py's forecast.json is present) so the
+        # axis has headroom for the afternoon high before it's actually
+        # been observed -- once it has, the observed max takes over since
+        # it'll be the larger of the two (max() itself is the override: a
+        # forecast is only ever a floor on the axis, never a ceiling that
+        # could clip an observation that runs hotter). Fixed 3°F padding
+        # both directions rather than a proportional one, so the line never
+        # crowds the axis edges. Set here (rather than down in "axes
+        # styling") so the logo-placement and --mark-low logic below can
+        # both work against the final plot bounds.
+        #
+        # NOTE for future reference: if a forecast *low* is ever wired in
+        # here too (there's currently only a forecast high, from NWS's
+        # daytime period -- see fetch_forecast.py), apply the same
+        # observed-wins rule symmetrically: day_low = min(day_low,
+        # forecast_low), not the reverse. An actual observation should
+        # always be able to override a forecast in whichever direction it
+        # turns out to be more extreme, above or below.
+        day_low, day_high = min(temps), max(temps)
+        if forecast_high is not None:
+            day_high = max(day_high, forecast_high)
+        ax.set_ylim(day_low - 3, day_high + 3)
+        ax.set_xlim(day_start, day_end)
+    else:
+        ax.text(0.5, 0.5, "No observations yet today", transform=ax.transAxes,
+                 ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
+        ax.set_ylim(0, 1)
+        ax.set_xlim(day_start, day_end)
+
+    # ---------- logo ----------
+    # Defaults bottom-right, matching the other temp charts. Checked against
+    # the final axis bounds above, so it can tell whether the plotted line
+    # actually passes through that corner (a late-day reading near the axis
+    # floor can land right under it, especially once a forecast high has
+    # stretched the axis a lot) and use the top-right corner instead when
+    # it would otherwise sit on top of real data.
     LOGO_PATH = "../assets/ingalls_weather_logo.png"
     logo_ax = None
     if os.path.exists(LOGO_PATH):
@@ -104,97 +148,78 @@ def main():
         logo_height_fig = logo_height_in / fig_h_in
 
         logo_x0 = axpos.x1 - inset_x - logo_width_fig
-        logo_y0 = axpos.y0 + inset_y
+        bottom_y0 = axpos.y0 + inset_y
+        top_y0 = axpos.y1 - inset_y - logo_height_fig
+        logo_y0 = bottom_y0
+
+        if temp_line is not None:
+            # Checked against the line's actual drawn path (every segment,
+            # via Path.intersects_bbox), not just the raw data points --
+            # Tempest data is dense enough (1-minute samples) that the two
+            # are equivalent in practice, but a segment between two widely
+            # spaced points can cut through the corner without either
+            # endpoint landing inside it.
+            fig_w_px, fig_h_px = fig_w_in * dpi, fig_h_in * dpi
+            pad = 6  # a little slack for line width, not just the bare path
+            rect = Bbox.from_extents(logo_x0 * fig_w_px - pad, bottom_y0 * fig_h_px - pad,
+                                      (logo_x0 + logo_width_fig) * fig_w_px + pad,
+                                      (bottom_y0 + logo_height_fig) * fig_h_px + pad)
+            display_path = temp_line.get_transform().transform_path(temp_line.get_path())
+            if display_path.intersects_bbox(rect, filled=False):
+                logo_y0 = top_y0
+
         logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
         logo_ax.axis("off")
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
-    if times:
-        ax.plot(times, temps, color=TEMP_COLOR, linewidth=2.6, zorder=Z_TEMP, label="Air temperature")
+    if times and args.mark_low:
+        low_idx = min(range(len(temps)), key=lambda i: temps[i])
+        low_time, low_temp = times[low_idx], temps[low_idx]
+        ax.scatter([low_time], [low_temp], s=160, facecolors="none", edgecolors=LOW_COLOR,
+                   linewidths=2.2, zorder=Z_LOW)
 
-        # The line legitimately stops partway through the day on a same-day
-        # chart -- a dotted marker at the last observation makes that read
-        # as current, not as missing data.
-        ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
+        label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
+        label_text = f"Low: {low_temp:.1f}°F at {low_time.strftime('%H:%M')}"
 
-        # Day's high is the observed max so far, extended to the forecast
-        # high (if fetch_forecast.py's forecast.json is present) so the
-        # axis has headroom for the afternoon high before it's actually
-        # been observed -- once it has, the observed max takes over since
-        # it'll be the larger of the two (max() itself is the override: a
-        # forecast is only ever a floor on the axis, never a ceiling that
-        # could clip an observation that runs hotter). Fixed 3°F padding
-        # both directions rather than a proportional one, so the line never
-        # crowds the axis edges. Set here (rather than down in "axes
-        # styling") so the --mark-low block below can check its label
-        # against the final plot bounds.
-        #
-        # NOTE for future reference: if a forecast *low* is ever wired in
-        # here too (there's currently only a forecast high, from NWS's
-        # daytime period -- see fetch_forecast.py), apply the same
-        # observed-wins rule symmetrically: day_low = min(day_low,
-        # forecast_low), not the reverse. An actual observation should
-        # always be able to override a forecast in whichever direction it
-        # turns out to be more extreme, above or below.
-        day_low, day_high = min(temps), max(temps)
-        if forecast_high is not None:
-            day_high = max(day_high, forecast_high)
-        ax.set_ylim(day_low - 3, day_high + 3)
-        ax.set_xlim(day_start, day_end)
+        def place_low_label(ha, va, x_off, y_off):
+            t = ax.annotate(label_text, xy=(low_time, low_temp), xytext=(x_off, y_off),
+                             textcoords="offset points", ha=ha, va=va,
+                             fontproperties=f_bold, fontsize=12, color=LOW_COLOR, zorder=Z_LOW)
+            t.set_path_effects(label_stroke)
+            return t
 
-        if args.mark_low:
-            low_idx = min(range(len(temps)), key=lambda i: temps[i])
-            low_time, low_temp = times[low_idx], temps[low_idx]
-            ax.scatter([low_time], [low_temp], s=160, facecolors="none", edgecolors=LOW_COLOR,
-                       linewidths=2.2, zorder=Z_LOW)
-
-            label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
-            label_text = f"Low: {low_temp:.1f}°F at {low_time.strftime('%H:%M')}"
-
-            def place_low_label(ha, va, x_off, y_off):
-                t = ax.annotate(label_text, xy=(low_time, low_temp), xytext=(x_off, y_off),
-                                 textcoords="offset points", ha=ha, va=va,
-                                 fontproperties=f_bold, fontsize=12, color=LOW_COLOR, zorder=Z_LOW)
-                t.set_path_effects(label_stroke)
-                return t
-
-            # Below-right is the preferred placement; fall back through
-            # above-right, below-left, above-left in that order, keeping
-            # the first whose actual rendered extent stays inside the plot
-            # and clear of the logo -- rather than guess a threshold, since
-            # a forecast-driven axis can leave very little room below the
-            # low (its bottom padding is a flat 3°F regardless of how tall
-            # the axis gets above it), and the low can in principle land
-            # anywhere in the day, including right in the logo's corner.
-            candidates = [
-                ("left", "center", 10, -8),
-                ("left", "bottom", 10, 10),
-                ("right", "center", -10, -8),
-                ("right", "bottom", -10, 10),
-            ]
+        # Below-right is the preferred placement; fall back through
+        # above-right, below-left, above-left in that order, keeping
+        # the first whose actual rendered extent stays inside the plot
+        # and clear of the logo -- rather than guess a threshold, since
+        # a forecast-driven axis can leave very little room below the
+        # low (its bottom padding is a flat 3°F regardless of how tall
+        # the axis gets above it), and the low can in principle land
+        # anywhere in the day, including right in the logo's corner.
+        candidates = [
+            ("left", "center", 10, -8),
+            ("left", "bottom", 10, 10),
+            ("right", "center", -10, -8),
+            ("right", "bottom", -10, 10),
+        ]
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        ax_box = ax.get_window_extent(renderer)
+        logo_box = logo_ax.get_window_extent(renderer) if logo_ax is not None else None
+        txt = None
+        for ha, va, x_off, y_off in candidates:
+            if txt is not None:
+                txt.remove()
+            txt = place_low_label(ha, va, x_off, y_off)
             fig.canvas.draw()
-            renderer = fig.canvas.get_renderer()
-            ax_box = ax.get_window_extent(renderer)
-            logo_box = logo_ax.get_window_extent(renderer) if logo_ax is not None else None
-            txt = None
-            for ha, va, x_off, y_off in candidates:
-                if txt is not None:
-                    txt.remove()
-                txt = place_low_label(ha, va, x_off, y_off)
-                fig.canvas.draw()
-                txt_box = txt.get_window_extent(renderer)
-                fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
-                        and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
-                clear_of_logo = logo_box is None or not txt_box.overlaps(logo_box)
-                if fits and clear_of_logo:
-                    break
-    else:
-        ax.text(0.5, 0.5, "No observations yet today", transform=ax.transAxes,
-                 ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
-        ax.set_ylim(0, 1)
-        ax.set_xlim(day_start, day_end)
+            txt_box = txt.get_window_extent(renderer)
+            fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
+                    and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
+            clear_of_logo = logo_box is None or not txt_box.overlaps(logo_box)
+            if fits and clear_of_logo:
+                break
 
     # ---------- axes styling ----------
     ax.set_ylabel("Air Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)

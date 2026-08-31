@@ -109,6 +109,18 @@ python3 build_chart.py --mark-low
   blue (`#0b3d91`) `hrrr-smoke-chart` uses for its second location line. No
   legend -- there's only the one series, labeled directly in the
   title/y-axis instead.
+- **Logo placement defaults bottom-right**, matching those other temp
+  charts, but moves to the top-right corner instead whenever the
+  temperature line's actual drawn path (every segment, via
+  `Path.intersects_bbox` -- not just the raw data points, since a segment
+  between two widely spaced samples can cut through the corner without
+  either endpoint landing inside it) would pass behind it there. A
+  same-day chart's line only ever reaches that corner when "now" is late
+  in the day and the temperature happens to be low then too, but it does
+  happen (and more so once a forecast high has stretched the axis down
+  into that corner's territory) -- checked once per render against the
+  final axis bounds, before `--mark-low`'s own placement logic runs (which
+  then sees the logo whichever corner it ended up in).
 - **Forecast source**: `fetch_forecast.py` resolves a lat/lon to its NWS
   forecast office/grid via `/points`, then reads today's first daytime
   period's `temperature` from the standard `/forecast` endpoint (already
