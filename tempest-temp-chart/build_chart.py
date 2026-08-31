@@ -40,6 +40,10 @@ Z_LOW = 5
 def parse_args():
     ap = argparse.ArgumentParser(description="Render today's Tempest station temperature chart.")
     ap.add_argument("--data", default="tempest_obs.json")
+    ap.add_argument("--forecast", default="forecast.json",
+                     help="Optional forecast.json from fetch_forecast.py -- if present and for "
+                          "the same date, its forecast high extends the y-axis past the observed "
+                          "high for the part of the day not observed yet")
     ap.add_argument("--output", default="tempest_temp_chart.png")
     ap.add_argument("--mark-low", action="store_true",
                      help="Circle and label the day's lowest observation")
@@ -56,6 +60,18 @@ def main():
 
     day_start = datetime.fromisoformat(data["date"]).replace(tzinfo=tz)
     day_end = day_start + timedelta(days=1)
+
+    forecast_high = None
+    if os.path.exists(args.forecast):
+        fdata = json.load(open(args.forecast))
+        if fdata.get("date") == data["date"]:
+            forecast_high = fdata.get("forecast_high_f")
+        else:
+            print(f"NOTE: {args.forecast} is for {fdata.get('date')}, not {data['date']} "
+                  f"-- ignoring it for axis scaling.")
+    else:
+        print(f"NOTE: no forecast file at {args.forecast} -- axis scaled to observed data only. "
+              f"Run fetch_forecast.py to also cover today's forecast high.")
 
     # ---------- figure (same footprint as the other temp charts) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
@@ -77,17 +93,26 @@ def main():
             ax.scatter([low_time], [low_temp], s=160, facecolors="none", edgecolors=LOW_COLOR,
                        linewidths=2.2, zorder=Z_LOW)
             label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
+            # A small offset -- the y-axis's bottom padding is a flat 3°F
+            # regardless of how far a forecast high (see below) stretches
+            # the top, so a large stretch leaves little room below the low
+            # for the label; va="center" keeps its footprint within that.
             txt = ax.annotate(f"Low: {low_temp:.1f}°F at {low_time.strftime('%H:%M')}",
-                               xy=(low_time, low_temp), xytext=(12, -14), textcoords="offset points",
-                               ha="left", va="top", fontproperties=f_bold, fontsize=12,
+                               xy=(low_time, low_temp), xytext=(10, -8), textcoords="offset points",
+                               ha="left", va="center", fontproperties=f_bold, fontsize=12,
                                color=LOW_COLOR, zorder=Z_LOW)
             txt.set_path_effects(label_stroke)
 
-        # No forecast source is wired into this project -- the day's high is
-        # just the observed max so far, which by afternoon/evening is the
-        # actual daily high. Fixed 3°F padding both directions rather than a
-        # proportional one, so the line never crowds the axis edges.
+        # Day's high is the observed max so far, extended to the forecast
+        # high (if fetch_forecast.py's forecast.json is present) so the
+        # axis has headroom for the afternoon high before it's actually
+        # been observed -- once it has, the observed max takes over since
+        # it'll be the larger of the two. Fixed 3°F padding both directions
+        # rather than a proportional one, so the line never crowds the axis
+        # edges.
         day_low, day_high = min(temps), max(temps)
+        if forecast_high is not None:
+            day_high = max(day_high, forecast_high)
         ax.set_ylim(day_low - 3, day_high + 3)
     else:
         ax.text(0.5, 0.5, "No observations yet today", transform=ax.transAxes,

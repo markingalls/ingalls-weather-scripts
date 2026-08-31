@@ -20,8 +20,13 @@ API key's account has a Tempest ("ST") device on.
   `tempest_obs.json`. Requires `TEMPEST_API_KEY` in the environment (get
   one at https://tempestwx.com/settings/tokens). Run this any time you
   want the chart to reflect the latest observation.
-- `build_chart.py` -- renders `tempest_obs.json` into
-  `tempest_temp_chart.png`.
+- `fetch_forecast.py` -- pulls today's NWS forecast high temperature for a
+  point and writes `forecast.json`. Optional -- `build_chart.py` runs fine
+  without it -- but if present (and for the same date), it extends the
+  y-axis to cover the forecast high, not just what's been observed so far.
+  No API key needed.
+- `build_chart.py` -- renders `tempest_obs.json` (+ `forecast.json`, if
+  present) into `tempest_temp_chart.png`.
 - `requirements.txt` / `setup.sh` -- Python dependencies (no system
   packages needed here, unlike the map projects).
 
@@ -33,6 +38,7 @@ export TEMPEST_API_KEY=...         # your Tempest API key
 
 # Default: today, the account's Tempest station
 python3 fetch_tempest.py
+python3 fetch_forecast.py          # optional -- extends the y-axis to today's forecast high
 python3 build_chart.py
 
 # A specific day or station (if the account has more than one)
@@ -67,15 +73,22 @@ python3 build_chart.py --mark-low
   in 24-hour time (`00:00`/`03:00`/.../`21:00`); a dotted vertical marker at
   the last observation makes the stopping point read as current, not as
   missing data.
-- **Y-axis** is fixed to 3°F below the day's observed low and 3°F above
-  the day's observed high -- both are simply `min`/`max` of whatever's been
-  observed so far, so before the actual overnight low or afternoon high has
-  happened yet, the axis just reflects the partial day and widens as later
-  observations come in. No forecast source is wired into this project, so
-  there's no forward-looking high/low to pad toward in the meantime.
+- **Y-axis** is fixed to 3°F below the day's low and 3°F above its high.
+  The low is simply `min` of whatever's been observed so far -- before the
+  actual overnight low has happened yet, the axis just reflects the
+  partial day and widens as later observations come in. The high is
+  `max(observed high, forecast high)`: `fetch_forecast.py`'s NWS forecast
+  high (if `forecast.json` is present and for the same date) gives the
+  axis headroom for the afternoon high before it's actually been observed;
+  once it has, the observed max takes over as the larger of the two. With
+  no `forecast.json`, the high is just the observed max so far, same as
+  the low.
 - **`--mark-low`** (off by default) circles the day's lowest observation
-  and labels it `Low: XX.X°F at HH:MM`, offset below-and-right of the point
-  so it clears both the temperature line and the "now" marker.
+  and labels it `Low: XX.X°F at HH:MM`, offset below-and-right of the
+  point. The label's vertical offset is small and centered on the point
+  (`va="center"`) rather than stacked below it, since the bottom padding
+  is a flat 3°F regardless of how far a forecast high stretches the top --
+  a tall axis leaves little room below the low for anything larger.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `850-700-temp-chart/build_chart.py` and `tri-cities-temp-chart/build_chart.py`
   -- edit `build_chart.py` directly to adjust. The temperature line reuses
@@ -84,6 +97,15 @@ python3 build_chart.py --mark-low
   blue (`#0b3d91`) `hrrr-smoke-chart` uses for its second location line. No
   legend -- there's only the one series, labeled directly in the
   title/y-axis instead.
+- **Forecast source**: `fetch_forecast.py` resolves a lat/lon to its NWS
+  forecast office/grid via `/points`, then reads today's first daytime
+  period's `temperature` from the standard `/forecast` endpoint (already
+  in °F, no conversion). Defaults to Highland Hills' own coordinates --
+  pass `--lat`/`--lon` for a different point. If today's daytime period
+  has already scrolled out of the forecast (it's evening and the next
+  daytime period is tomorrow's), `forecast_high_f` comes back `null` and
+  `build_chart.py` just falls back to the observed max, which by then is
+  the real high anyway.
 - **Display label**: `fetch_tempest.py` writes both the Tempest API's raw
   station name (`station_name`) and a display `label` used in the chart
   title. `STATION_LABEL_OVERRIDES` in `fetch_tempest.py` maps known raw

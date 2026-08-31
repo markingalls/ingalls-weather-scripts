@@ -100,10 +100,11 @@ tri-cities-temp-chart/forecast.json
 tri-cities-temp-chart/climatology.json
 tri-cities-temp-chart/tri_cities_temp_chart*.png
 # --- tempest-temp-chart ---
-# tempest_obs.json is live data fetch_tempest.py regenerates every run, and
-# the rendered chart is an output too -- neither is source, so don't track
-# them.
+# tempest_obs.json/forecast.json are live data fetch_tempest.py and
+# fetch_forecast.py regenerate every run, and the rendered chart is an
+# output too -- none of these are source, so don't track them.
 tempest-temp-chart/tempest_obs.json
+tempest-temp-chart/forecast.json
 tempest-temp-chart/tempest_temp_chart*.png
 
 # --- tpw-wm6-ensemble-map ---
