@@ -80,15 +80,27 @@ python3 build_chart.py --mark-low
   `max(observed high, forecast high)`: `fetch_forecast.py`'s NWS forecast
   high (if `forecast.json` is present and for the same date) gives the
   axis headroom for the afternoon high before it's actually been observed;
-  once it has, the observed max takes over as the larger of the two. With
-  no `forecast.json`, the high is just the observed max so far, same as
-  the low.
+  once it has, the observed max takes over as the larger of the two --
+  `max()` is itself the override: a forecast is only ever a floor on the
+  axis, never a ceiling that could clip an observation running hotter than
+  it. With no `forecast.json`, the high is just the observed max so far,
+  same as the low.
+  **For future reference**: there's currently no forecast *low* (only a
+  forecast high, from NWS's daytime period), but if one is ever added, it
+  should follow the same rule symmetrically -- `day_low = min(day_low,
+  forecast_low)`, so an actual cold observation can still override the
+  forecast rather than the other way around. An observation should always
+  be able to override a forecast in whichever direction it turns out to be
+  more extreme, above or below.
 - **`--mark-low`** (off by default) circles the day's lowest observation
-  and labels it `Low: XX.X°F at HH:MM`, offset below-and-right of the
-  point. The label's vertical offset is small and centered on the point
-  (`va="center"`) rather than stacked below it, since the bottom padding
-  is a flat 3°F regardless of how far a forecast high stretches the top --
-  a tall axis leaves little room below the low for anything larger.
+  and labels it `Low: XX.X°F at HH:MM`. Prefers below-and-right of the
+  point, but tries above-right, below-left, and above-left in turn,
+  keeping the first whose actual rendered extent stays inside the plot and
+  clear of the logo -- rather than guessing a fixed offset, since a
+  forecast-driven axis can leave very little room below the low (the
+  bottom padding is a flat 3°F regardless of how tall the axis gets above
+  it), and the low could in principle land anywhere in the day, including
+  the logo's own corner.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `850-700-temp-chart/build_chart.py` and `tri-cities-temp-chart/build_chart.py`
   -- edit `build_chart.py` directly to adjust. The temperature line reuses
