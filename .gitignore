@@ -112,9 +112,11 @@ tempest-temp-chart/lookback/
 # --- tempest-wind-chart ---
 # tempest_wind_obs.json is live data fetch_tempest.py regenerates every
 # run, and the rendered chart is an output too -- neither is source, so
-# don't track them.
+# don't track them. Same for build_lookback_charts.py's per-day obs/chart
+# files under lookback/.
 tempest-wind-chart/tempest_wind_obs.json
 tempest-wind-chart/tempest_wind_chart*.png
+tempest-wind-chart/lookback/
 
 # --- tpw-wm6-ensemble-map ---
 # build_map.py fetches its source grid live; output/ only holds saved

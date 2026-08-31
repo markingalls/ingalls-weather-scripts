@@ -14,6 +14,11 @@ sibling chart for the same station, wind instead of temperature.
 Defaults to today (station-local calendar day) and to whichever station the
 API key's account has a Tempest ("ST") device on.
 
+`build_lookback_charts.py` renders the same style of chart for each of the
+past 5 station-local days (not including today) -- a "look back" companion
+to the always-current today chart, same idea as `tempest-temp-chart`'s own
+look-back tool.
+
 ## Files
 
 - `fetch_tempest.py` -- pulls a day's 1-minute-resolution wind
@@ -28,6 +33,11 @@ API key's account has a Tempest ("ST") device on.
 - `build_chart.py` -- renders `tempest_wind_obs.json` into
   `tempest_wind_chart.png`. See `--no-current-conditions` in Notes below
   for rendering a past, complete (archive) day instead of today's.
+- `build_lookback_charts.py` -- fetches and renders the past 5 days (not
+  including today), one file per day, into `lookback/`. Shells out to
+  `fetch_tempest.py` and `build_chart.py` for each day rather than
+  reimplementing their logic, so every day's chart behaves exactly like
+  running them by hand would.
 - `requirements.txt` / `setup.sh` -- Python dependencies (no system
   packages needed here, unlike the map projects).
 
@@ -47,6 +57,11 @@ python3 build_chart.py
 
 # That same past day as an archive chart -- no current-conditions boxes
 python3 build_chart.py --no-current-conditions
+
+# Past 5 days, one chart per day, into lookback/ -- no current-conditions
+# boxes, peak gust always marked
+python3 build_lookback_charts.py
+python3 build_lookback_charts.py --days 10          # a longer look back
 ```
 
 ## Notes
@@ -146,7 +161,6 @@ python3 build_chart.py --no-current-conditions
   same reasoning, and the same flag name, as `tempest-temp-chart`'s own
   archive-day mode; see that project's README for the full writeup. The
   plot reclaims the stat boxes' vertical space, back to the full
-  0.65-of-figure height. Not (yet) included: an actual look-back archive
-  script (`tempest-temp-chart`'s 5-day rolling window, `deploy/publish_daily.py`)
-  that drives this flag automatically -- ask, and it can be added the
-  same way it exists on the temp chart.
+  0.65-of-figure height. `build_lookback_charts.py` always passes this --
+  pass it to `build_chart.py` directly to render a single past day the
+  same way, e.g. after `fetch_tempest.py --date 2026-08-30`.
