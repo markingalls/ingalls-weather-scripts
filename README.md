@@ -52,6 +52,10 @@ workflows. Each project lives in its own directory with its own README.
   same-day temperature chart from a personal WeatherFlow Tempest station:
   a single air-temperature line across the full 24-hour local calendar
   day, with the most recent observation marked and labeled.
+- [`tempest-wind-chart/`](tempest-wind-chart/) — sibling to
+  `tempest-temp-chart/`, same station and same styling: wind speed and
+  gust lines across the full 24-hour local calendar day, with
+  current-conditions wind speed (direction + mph) and gust readouts.
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
