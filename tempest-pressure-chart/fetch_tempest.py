@@ -30,8 +30,6 @@ BASE_URL = "https://swd.weatherflow.com/swd/rest"
 STATION_PRESSURE_MB_INDEX = 6
 AIR_TEMP_C_INDEX = 7
 
-MB_TO_INHG = 0.0295300
-
 # Standard barometric formula for reducing station pressure to sea level
 # (the same reduction NWS-style METAR/altimeter-style readings use,
 # ignoring humidity/virtual-temperature effects -- a station-elevation-only
@@ -47,10 +45,6 @@ def sea_level_pressure_mb(station_pressure_mb, elevation_m, temp_c):
     lapse_term = BAROMETRIC_LAPSE_RATE_K_PER_M * elevation_m
     denom = temp_c + lapse_term + 273.15
     return station_pressure_mb * (1 - lapse_term / denom) ** (-BAROMETRIC_EXPONENT)
-
-
-def mb_to_inhg(mb):
-    return mb * MB_TO_INHG
 
 
 # Known-station display-name overrides -- the API's own "public_name" is
@@ -132,7 +126,7 @@ if __name__ == "__main__":
         slp_mb = sea_level_pressure_mb(station_pressure_mb, elevation_m, air_temp_c)
         observations.append({
             "time": local_time.isoformat(),
-            "sea_level_pressure_inhg": round(mb_to_inhg(slp_mb), 2),
+            "sea_level_pressure_mb": round(slp_mb, 1),
         })
 
     station_name = station.get("public_name") or station.get("name")

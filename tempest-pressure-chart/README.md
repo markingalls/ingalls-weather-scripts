@@ -68,12 +68,28 @@ python3 build_chart.py --no-current-conditions
   *concurrent* air temperature in °C from that same observation (`obs_st`
   index 7), and `5.257 = g*M/(R*L)` for that same standard atmosphere.
   Verified by hand against a real reading: 992.5 mb station pressure at
-  153.3 m with 25.6°C air temp reduces to ~1010.0 mb (~29.83 inHg) --
-  a plausible sea-level value for typical late-summer conditions, not
-  the implausibly-low ~992 mb the unreduced station pressure alone would
-  suggest. Reduced to millibars, then converted to inches of mercury
-  (`MB_TO_INHG = 0.02953`) for display, matching the rest of this
-  station's chart family's US-customary-units convention (°F, mph).
+  153.3 m with 25.6°C air temp reduces to ~1010.0 mb -- a plausible
+  sea-level value for typical late-summer conditions, not the
+  implausibly-low ~992 mb the unreduced station pressure alone would
+  suggest. Displayed in millibars, not inches of mercury -- unlike the
+  rest of this station's chart family's US-customary-units convention
+  (°F, mph), mb is the more familiar unit for pressure specifically.
+- **Line smoothing**: a centered simple moving average (`smooth()`,
+  `SMOOTHING_WINDOW = 15` samples, ~15 minutes at the hub's ~1/minute
+  cadence) is applied to the plotted line before gap-breaking --
+  pressure sensor noise between individual 1-minute samples is small in
+  absolute terms but reads as a distracting staircase/jitter at this
+  chart's scale, since a whole day's real diurnal swing is often not
+  much bigger than the noise itself. Edges use whatever partial window
+  is actually available rather than padding with NaN or truncating, so
+  the line's start and end stay exactly as long as the data itself.
+  Smoothing happens *before* `insert_gaps()`, not after -- otherwise the
+  inserted NaN points would fall inside a smoothing window and poison
+  every average that touches them. The current-conditions stat box still
+  reads the single latest *raw* sample, same as the temp/wind charts'
+  own "current" readouts, and the y-axis bounds pad the raw (unsmoothed)
+  range too, so smoothing only affects the drawn line, not what's
+  reported as "current" or how tall the axis is.
 - **Day boundary is station-local, not UTC** -- see
   `tempest-temp-chart/README.md`'s own note on this; the logic is
   identical here.
@@ -82,10 +98,10 @@ python3 build_chart.py --no-current-conditions
 - **Data outages show as a break in the line, not a straight line across
   them** -- same `insert_gaps()` NaN-insertion approach as
   `tempest-temp-chart`/`tempest-wind-chart`.
-- **Y-axis** pads a flat +-0.05 inHg around the day's observed range --
+- **Y-axis** pads a flat +-1.5 mb around the day's observed range --
   much smaller than the temp chart's +-3°F, since a whole day's sea-level
-  pressure swing is usually tiny (a calm day might only span ~0.1-0.2
-  inHg) compared to temperature's; a pad sized like temperature's would
+  pressure swing is usually tiny (a calm day might only span ~3-7 mb)
+  compared to temperature's; a pad sized like temperature's would
   flatten the day's actual diurnal wobble into an imperceptible sliver.
 - Chart styling (fonts, dimensions, logo placement, current-conditions
   stat box mechanics) mirrors `tempest-temp-chart/build_chart.py` -- edit
@@ -104,11 +120,14 @@ python3 build_chart.py --no-current-conditions
   `tempest-temp-chart/README.md` for the full writeup), but as a single
   box centered on the figure's own midpoint rather than the two-column
   layout the temp/wind charts use, since there's only the one series
-  here. Its chip background is a **fixed** color (`PRESSURE_COLOR`, the
-  same green as the line) rather than a reading-driven color-table lookup
-  the way the other charts' stat boxes work -- no color table was
-  supplied for pressure, so this just carries the line's own color
-  through consistently instead of inventing a gradient.
+  here. Its chip background comes from `PRESSURE_COLOR_TABLE`, a
+  Pa-keyed `(Pa, (R, G, B))` control-point table linearly interpolated
+  by `interp_color()` (same mechanism as the temp/wind charts' own
+  K- and m/s-keyed tables) -- the current mb reading is converted to Pa
+  via `mb_to_pa()` at the call site, keeping `interp_color()` itself
+  unit-agnostic. `PRESSURE_COLOR` (the line's own forest green) is
+  unrelated to the chip now -- it's still used for the line itself, just
+  no longer for the stat box.
 - **`--no-current-conditions`** renders a plain historical-day (archive)
   chart: no stat box, no "Updated" clause in the subtitle (just the
   date), title drops "Today's", and no dotted last-observation marker --

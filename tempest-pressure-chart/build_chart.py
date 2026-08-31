@@ -31,6 +31,40 @@ AXIS_COLOR = "#000000"
 # rather than needing its own new hue.
 PRESSURE_COLOR = "#164f29"
 
+# ---------- current-conditions stat box ----------
+# Background color table for the stat box -- (Pa, (R, G, B)) control
+# points sorted by Pa -- interp_color() linearly interpolates between
+# them. Alpha is uniformly opaque in the source table, so it's dropped
+# here. Keyed by Pa (not mb, this chart's own display unit) since that's
+# the source table's own unit -- interp_color() itself is unit-agnostic,
+# so mb_to_pa() below converts the display value into the table's units
+# at the call site, same pattern as the temp/wind charts' own
+# fahrenheit_to_kelvin()/mph_to_ms().
+PRESSURE_COLOR_TABLE = [
+    (90000, (196, 37, 160)),
+    (92000, (230, 60, 160)),
+    (93000.16666666667, (230, 132, 236)),
+    (94000.22222222222, (206, 82, 222)),
+    (95000.27777777778, (147, 39, 160)),
+    (96000.33333333333, (76, 2, 100)),
+    (97000.38888888889, (111, 34, 216)),
+    (98000.44444444444, (191, 164, 220)),
+    (98800.48888888888, (34, 60, 176)),
+    (99300, (113, 160, 196)),
+    (99800, (165, 197, 226)),
+    (100300, (130, 204, 135)),
+    (100800, (21, 126, 24)),
+    (101325, (226, 219, 123)),
+    (101800, (184, 114, 51)),
+    (102300, (106, 12, 12)),
+    (102800, (80, 53, 25)),
+    (103300, (156, 86, 86)),
+    (104000.77777777778, (124, 25, 35)),
+    (105000.83333333333, (82, 82, 82)),
+    (106000.88888888889, (150, 145, 145)),
+    (108001, (226, 220, 220)),
+]
+
 Z_GRID = 2
 Z_PRESSURE = 4
 
@@ -40,6 +74,16 @@ Z_PRESSURE = 4
 # drawing a straight segment across a period with no real data.
 MAX_GAP = timedelta(minutes=6)
 
+# Pressure sensor noise between individual 1-minute samples is small in
+# absolute terms but reads as a distracting staircase/jitter at this
+# chart's scale (a whole day's real diurnal swing is often not much
+# bigger than the noise itself) -- smoothed over a window this wide
+# (samples, ~minutes at the hub's ~1/minute cadence) before plotting.
+# Only the line is smoothed; the current-conditions stat box below still
+# reads the single latest raw sample, same as the temp/wind charts'
+# own "current" readouts.
+SMOOTHING_WINDOW = 15
+
 
 def text_color_for_bg(rgb):
     """Black or white, whichever reads better against an (R, G, B) 0-255
@@ -48,6 +92,24 @@ def text_color_for_bg(rgb):
     r, g, b = rgb
     luminance = 0.299 * r + 0.587 * g + 0.114 * b
     return "black" if luminance > 140 else "white"
+
+
+def mb_to_pa(mb):
+    return mb * 100
+
+
+def interp_color(value, table):
+    """Linearly interpolates an (R, G, B) 0-255 triple from a sorted
+    (x, (R, G, B)) table, clamping to the end colors outside its range."""
+    if value <= table[0][0]:
+        return table[0][1]
+    if value >= table[-1][0]:
+        return table[-1][1]
+    for (x0, c0), (x1, c1) in zip(table, table[1:]):
+        if x0 <= value <= x1:
+            frac = (value - x0) / (x1 - x0)
+            return tuple(c0[i] + frac * (c1[i] - c0[i]) for i in range(3))
+    return table[-1][1]
 
 
 def parse_args():
@@ -85,13 +147,29 @@ def insert_gaps(times, values, max_gap):
     return out_times, out_values
 
 
+def smooth(values, window):
+    """Centered simple moving average, window in samples. Edges use
+    whatever partial window is actually available (shrinking toward a
+    single sample right at the very first/last point) rather than
+    padding with NaN or truncating -- the line's start and end stay
+    exactly as long as the data itself, just less averaged right at the
+    tips."""
+    n = len(values)
+    half = window // 2
+    smoothed = []
+    for i in range(n):
+        window_vals = values[max(0, i - half):min(n, i + half + 1)]
+        smoothed.append(sum(window_vals) / len(window_vals))
+    return smoothed
+
+
 def main():
     args = parse_args()
     data = json.load(open(args.data))
     tz = ZoneInfo(data["timezone"])
 
     times = [datetime.fromisoformat(o["time"]) for o in data["observations"]]
-    pressures = [o["sea_level_pressure_inhg"] for o in data["observations"]]
+    pressures = [o["sea_level_pressure_mb"] for o in data["observations"]]
 
     day_start = datetime.fromisoformat(data["date"]).replace(tzinfo=tz)
     day_end = day_start + timedelta(days=1)
@@ -116,7 +194,16 @@ def main():
 
     pressure_line = None
     if times:
-        plot_times, plot_pressures = insert_gaps(times, pressures, MAX_GAP)
+        # Smoothed before gap-breaking, not after -- insert_gaps()'s
+        # inserted NaNs would otherwise fall inside a smoothing window
+        # and NaN-poison every average that touches them. Smoothing
+        # across a real gap's edges blends a couple of samples from
+        # before/after it as if they were continuous, but gaps are rare
+        # and the window is short relative to what counts as a gap
+        # (MAX_GAP), so the effect is minor and local to the break itself
+        # -- the break still shows up as a visible break either way.
+        smoothed_pressures = smooth(pressures, SMOOTHING_WINDOW)
+        plot_times, plot_pressures = insert_gaps(times, smoothed_pressures, MAX_GAP)
         pressure_line = ax.plot(plot_times, plot_pressures, color=PRESSURE_COLOR, linewidth=2.6,
                                  zorder=Z_PRESSURE, label="Sea level pressure")[0]
 
@@ -132,13 +219,16 @@ def main():
             ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
         # Pressure's whole-day range is usually tiny (a calm day might
-        # only span ~0.1-0.2 inHg) compared to temperature's, so this uses
-        # a much smaller flat pad than the temp chart's +-3 deg -- enough
+        # only span ~3-7 mb) compared to temperature's, so this uses a
+        # much smaller flat pad than the temp chart's +-3 deg -- enough
         # to keep the line off the axis edges without flattening out the
         # day's actual diurnal wobble into an even thinner sliver of the
-        # plot than it already is.
+        # plot than it already is. Off the raw (unsmoothed) readings, not
+        # the smoothed line -- the axis should always cover what was
+        # actually observed, even where smoothing pulls the drawn line
+        # itself a little short of a real spike.
         day_low, day_high = min(pressures), max(pressures)
-        pad = 0.05
+        pad = 1.5
         ax.set_ylim(day_low - pad, day_high + pad)
         ax.set_xlim(day_start, day_end)
     else:
@@ -195,9 +285,9 @@ def main():
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
     # ---------- axes styling ----------
-    ax.set_ylabel("Sea Level Pressure (inHg)", fontproperties=f_med, fontsize=12, color=INK)
+    ax.set_ylabel("Sea Level Pressure (mb)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_xlabel("Time", fontproperties=f_med, fontsize=12, color=INK)
-    ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.2f"))
+    ax.yaxis.set_major_formatter(mticker.FormatStrFormatter("%.1f"))
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
     for spine in ("top", "right"):
@@ -250,13 +340,14 @@ def main():
     # temp/wind charts' two-column layout, there's only the one series
     # here): a two-line regular-weight, right-aligned label ("Current" /
     # "Pressure") immediately to the left of a bold value readout. The
-    # chip's background is a fixed color (the same PRESSURE_COLOR as the
-    # line itself) rather than a reading-driven color-table lookup the
-    # way the other charts' stat boxes work -- no color table was
-    # supplied for pressure, so this just carries the line's own color
-    # through consistently instead of inventing a gradient.
+    # chip's small colored background comes from interpolating
+    # PRESSURE_COLOR_TABLE (Pa -> RGB control points, linearly
+    # interpolated by interp_color()) against the reading converted from
+    # mb to Pa, and the bold text itself is black or white via
+    # text_color_for_bg()'s ITU-R BT.601 luminance check -- same
+    # mechanism as the temp/wind charts' own stat boxes.
     if times and not args.no_current_conditions:
-        current_pressure_inhg = pressures[-1]
+        current_pressure_mb = pressures[-1]
 
         stat_center_y = 0.685 + 0.105 / 2
         label_fontsize = 14
@@ -268,7 +359,7 @@ def main():
         renderer = fig.canvas.get_renderer()
 
         label_text = "Current\nPressure"
-        value_text = f"{current_pressure_inhg:.2f} in"
+        value_text = f"{current_pressure_mb:.1f} mb"
 
         # Label width at its actual (tight) line spacing.
         label_probe = fig.text(0, stat_center_y, label_text, fontproperties=f_reg,
@@ -295,7 +386,7 @@ def main():
         num_probe.remove()
         number_fontsize = probe_size * (label_height_px / probe_height_px)
 
-        rgb = tuple(int(PRESSURE_COLOR[i:i + 2], 16) for i in (1, 3, 5))
+        rgb = interp_color(mb_to_pa(current_pressure_mb), PRESSURE_COLOR_TABLE)
         text_color = text_color_for_bg(rgb)
         chip_color = tuple(c / 255 for c in rgb)
 
