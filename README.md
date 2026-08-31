@@ -60,6 +60,14 @@ workflows. Each project lives in its own directory with its own README.
   `images.ingallswx.com/hermiston_temp.png` (refreshed every 5 minutes)
   plus a rolling 5-day look-back archive at `..._day1.png` through
   `..._day5.png` (rotated nightly).
+- [`tempest-wind-chart/`](tempest-wind-chart/) — sibling to
+  `tempest-temp-chart/`, same station and same styling: a wind speed
+  line plus gust dots across the full 24-hour local calendar day, with
+  current-conditions wind (direction + mph) and gust readouts and the
+  day's peak gust circled and labeled. Deployed live at
+  `images.ingallswx.com/hermiston_wind.png` (refreshed every 5 minutes)
+  plus a rolling 5-day look-back archive at `..._day1.png` through
+  `..._day5.png` (rotated nightly).
 
 ## Shared resources
 

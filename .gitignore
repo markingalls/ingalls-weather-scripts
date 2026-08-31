@@ -198,3 +198,20 @@ tempest-temp-chart/forecast_daily_unused.json
 tempest-temp-chart/tempest_temp_chart*.png
 tempest-temp-chart/lookback/
 tempest-temp-chart/state/
+
+# --- tempest-wind-chart ---
+# tempest_wind_obs.json is live data fetch_tempest.py regenerates every
+# run, and the rendered chart is an output too -- neither is source, so
+# don't track them. Same for publish_wind_daily.py's own
+# tempest_wind_obs_daily.json, and for build_lookback_charts.py's per-day
+# obs/chart files under lookback/ (a local testing / one-time-backfill
+# tool -- the published day1-5 images normally live on the droplet's
+# WEB_ROOT, not here). state/ is the droplet-deploy guard's runtime state
+# (lock files, logs, and the last-rotation-date marker
+# publish_wind_daily.py's idempotency depends on) -- created on the
+# server, not source.
+tempest-wind-chart/tempest_wind_obs.json
+tempest-wind-chart/tempest_wind_obs_daily.json
+tempest-wind-chart/tempest_wind_chart*.png
+tempest-wind-chart/lookback/
+tempest-wind-chart/state/

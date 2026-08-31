@@ -73,6 +73,7 @@ CATEGORY_PATTERNS = [
     (re.compile(r"^western_us_wpc_precip\.png$"), "WPC Excessive Rainfall"),
     (re.compile(r"^western_us_extreme_heat_hazard\.png$"), "CPC Extreme Heat"),
     (re.compile(r"^hermiston_temp(_day[1-5])?\.png$"), "Tempest Temp Chart"),
+    (re.compile(r"^hermiston_wind(_day[1-5])?\.png$"), "Tempest Wind Chart"),
 ]
 
 
