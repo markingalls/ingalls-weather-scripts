@@ -1,11 +1,12 @@
 # Tempest Wind Chart
 
 Generates a styled same-day wind chart from a personal WeatherFlow Tempest
-station for Ingalls Weather's Instagram: wind speed and gust lines across
-the full 24-hour local calendar day, in 24-hour time -- since this is a
-same-day chart, the lines legitimately stop partway through the day rather
-than reaching the right edge, marked with a dotted vertical line at the
-most recent observation. Two current-conditions stat boxes (Current Wind /
+station for Ingalls Weather's Instagram: a wind speed line plus individual
+gust dots across the full 24-hour local calendar day, in 24-hour time --
+since this is a same-day chart, the line legitimately stops partway through
+the day rather than reaching the right edge, marked with a dotted vertical
+line at the most recent observation. The day's single highest gust is
+circled and labeled. Two current-conditions stat boxes (Current Wind /
 Current Gusts) sit above the plot. Same canvas footprint, fonts, and
 overall layout as [`tempest-temp-chart/`](../tempest-temp-chart/) -- a
 sibling chart for the same station, wind instead of temperature.
@@ -59,16 +60,34 @@ python3 build_chart.py
   identical here.
 - **X-axis spans the full 24-hour local day**, same reasoning and tick
   layout as `tempest-temp-chart`.
-- **Data outages show as a break in the line, not a straight line across
-  them** -- same `insert_gaps()` NaN-insertion approach as
-  `tempest-temp-chart`, applied independently to both the wind speed and
-  gust lines.
+- **Wind speed is a line, gust is dots, not a second line** -- a gust is
+  its own brief spike, not a continuous quantity the way sustained wind
+  speed is, so plotting it as a scatter reads as "these moments gusted"
+  rather than implying a connected trend between them. Only the wind
+  speed line uses `insert_gaps()`'s NaN-insertion approach to show data
+  outages as a break rather than a straight line across them (see
+  `tempest-temp-chart`'s own README for how and why); gust dots need no
+  equivalent -- a missing reading there is simply not plotted, no
+  different from a real outage.
+- **Peak gust** is circled and labeled (`Peak Gust: XX.X mph at HH:MM`,
+  dark red, same hue `tempest-temp-chart`/`tri-cities-temp-chart` use for
+  their own daily-high callouts) -- gust rather than wind speed, since a
+  gust burst is the more newsworthy extreme for a wind chart (a day's low
+  wind speed is usually just calm/near-zero, not worth calling out the
+  way temperature's daily low is). Always on, unlike
+  `tempest-temp-chart`'s opt-in `--mark-low`/`--mark-high` -- there's
+  only ever one marker here, so there's no on/off combination to expose
+  as a flag. Label placement tries below-right first, then above-right,
+  below-left, above-left, keeping the first whose actual rendered extent
+  stays inside the plot and clear of the logo -- same fallback approach
+  as `tempest-temp-chart`'s own extreme-marking, just for a single
+  always-on marker instead of up to two optional ones.
 - **Y-axis** floors at a flat 0 mph rather than padding below the day's
   low the way the temp chart does -- wind speed can't go negative, so
   there's no meaningful "3 mph below calm" to pad for. The ceiling is the
-  day's highest reading across *both* lines (gust is almost always >= wind
-  speed, but both are checked rather than assuming that holds for every
-  sample), padded a flat +3 mph so the line never crowds the axis edge.
+  day's highest reading across *both* series (gust is almost always >=
+  wind speed, but both are checked rather than assuming that holds for
+  every sample), padded a flat +3 mph so nothing crowds the axis edge.
 - Chart styling (fonts, dimensions, logo placement, current-conditions
   stat box mechanics) mirrors `tempest-temp-chart/build_chart.py` --
   edit `build_chart.py` directly to adjust. Wind speed is teal
@@ -76,9 +95,12 @@ python3 build_chart.py
   pairing, distinct from every color `tempest-temp-chart` itself uses so
   the two charts don't visually blend together if shown side by side.
 - **Logo placement defaults bottom-right**, matching `tempest-temp-chart`,
-  moving to the top-right corner under the same line-path-intersection
-  check (both wind speed and gust lines are checked, same reasoning as
-  `tempest-temp-chart` checking both its temperature and dew point lines).
+  moving to the top-right corner if either series would pass behind it
+  there: the wind speed line via the same actual-drawn-path check
+  `tempest-temp-chart` uses (`Path.intersects_bbox`, not just the raw
+  data points), and the gust dots via a simpler point-in-rect test per
+  dot, since a scattered point has no path of its own for that check to
+  apply to.
 - **Current-conditions stat boxes** reuse `tempest-temp-chart`'s stat-box
   design wholesale (two-line right-aligned label, bold color-chip value,
   centered per column, `stat_visual_shift` nudge, the `get_window_extent()`
@@ -93,7 +115,6 @@ python3 build_chart.py
   direction or a lone speed reads as `N/A`) -- Current Gusts is speed-only,
   since gust has no direction of its own in the Tempest API.
 - **Not (yet) included**: a `--no-current-conditions` mode / look-back
-  archive (`tempest-temp-chart`'s 5-day rolling window) and a
-  `--mark-*`-style peak-gust callout both fit this project's existing
-  design well if wanted later -- ask, and they can be added the same way
-  they exist on the temp chart.
+  archive (`tempest-temp-chart`'s 5-day rolling window) fits this
+  project's existing design well if wanted later -- ask, and it can be
+  added the same way it exists on the temp chart.

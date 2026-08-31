@@ -9,6 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
+import matplotlib.patheffects as pe
 from matplotlib.transforms import Bbox
 
 # ---------- fonts ----------
@@ -28,13 +29,18 @@ AXIS_COLOR = "#000000"
 # gust's warmer, more attention-grabbing color below.
 WIND_SPEED_COLOR = "#0e7c86"
 
-# Amber for the gust line -- a burst of wind reads as the "hotter" of the
+# Amber for the gust dots -- a burst of wind reads as the "hotter" of the
 # two, so it gets the warmer color, same pairing logic as e.g. a low/high
 # callout using a cool/warm split elsewhere in this repo.
 GUST_COLOR = "#d97706"
 
+# Dark red for the peak-gust callout -- same hue tri-cities-temp-chart /
+# tempest-temp-chart use for their own daily-high markers.
+PEAK_GUST_COLOR = "#a3242b"
+
 Z_GRID = 2
 Z_WIND = 4
+Z_MARKER = 5
 
 # The Tempest hub reports roughly once a minute -- a gap much longer than
 # that means the station (or its internet connection) was actually down,
@@ -160,21 +166,24 @@ def main():
     center_x = (axpos.x0 + axpos.x1) / 2
 
     wind_speed_line = None
-    gust_line = None
+    gust_times, gust_values = [], []
     if times:
         plot_times, plot_speeds = insert_gaps(times, wind_speeds, MAX_GAP)
         wind_speed_line = ax.plot(plot_times, plot_speeds, color=WIND_SPEED_COLOR, linewidth=2.6,
                                    zorder=Z_WIND, label="Wind speed")[0]
 
-        # Gust is plotted the same way as wind speed: missing readings
-        # already come through as None from fetch_tempest.py, substituted
-        # with NaN here so matplotlib skips them the same way insert_gaps()
-        # skips a real time gap, then run through insert_gaps() itself for
-        # actual outages.
-        gust_values = [g if g is not None else float("nan") for g in wind_gusts]
-        plot_times_gust, plot_gusts = insert_gaps(times, gust_values, MAX_GAP)
-        gust_line = ax.plot(plot_times_gust, plot_gusts, color=GUST_COLOR, linewidth=2.0,
-                             zorder=Z_WIND - 1, label="Gust")[0]
+        # Gust is dots rather than a line -- each individual gust reading
+        # is its own brief spike, not a continuous quantity the way wind
+        # speed is, so plotting it as a scatter reads as "these moments
+        # gusted" rather than implying a connected trend between them. No
+        # gap-breaking needed here (unlike the line above) since there's
+        # no line to break -- a missing reading is simply not plotted, no
+        # different from a real outage.
+        gust_times = [t for t, g in zip(times, wind_gusts) if g is not None]
+        gust_values = [g for g in wind_gusts if g is not None]
+        if gust_times:
+            ax.scatter(gust_times, gust_values, color=GUST_COLOR, s=10, zorder=Z_WIND - 1,
+                       label="Gust")
 
         # The line legitimately stops partway through the day on a same-day
         # chart -- a dotted marker at the last observation makes that read
@@ -184,13 +193,12 @@ def main():
         # Wind speed can't go negative, so the axis floor is a flat 0
         # rather than a padded-below-the-low the way the temp chart pads
         # both directions -- there's no meaningful "3 mph below calm."
-        # The ceiling is the day's highest reading across both lines (gust
-        # is almost always >= wind speed, but checking both rather than
-        # assuming it holds for every single sample), padded the same
-        # fixed +3 mph the temp chart uses so the line never crowds the
+        # The ceiling is the day's highest reading across both series
+        # (gust is almost always >= wind speed, but checking both rather
+        # than assuming it holds for every single sample), padded the
+        # same fixed +3 mph the temp chart uses so nothing crowds the
         # axis edge.
-        valid_gusts = [g for g in wind_gusts if g is not None]
-        day_high = max(wind_speeds + valid_gusts) if valid_gusts else max(wind_speeds)
+        day_high = max(wind_speeds + gust_values) if gust_values else max(wind_speeds)
         ax.set_ylim(0, day_high + 3)
         ax.set_xlim(day_start, day_end)
 
@@ -233,30 +241,86 @@ def main():
         top_y0 = axpos.y1 - inset_y - logo_height_fig
         logo_y0 = bottom_y0
 
-        # Checked against both lines' actual drawn paths (every segment,
-        # via Path.intersects_bbox), not just the raw data points -- a
-        # segment between two widely spaced points can cut through the
-        # corner without either endpoint landing inside it. Since the axis
-        # floor is a flat 0, the bottom-right corner is only ever at risk
-        # late in the day during a calm spell, but it can happen.
-        for line in (wind_speed_line, gust_line):
-            if line is None:
-                continue
-            fig_w_px, fig_h_px = fig_w_in * dpi, fig_h_in * dpi
-            pad = 6  # a little slack for line width, not just the bare path
-            rect = Bbox.from_extents(logo_x0 * fig_w_px - pad, bottom_y0 * fig_h_px - pad,
-                                      (logo_x0 + logo_width_fig) * fig_w_px + pad,
-                                      (bottom_y0 + logo_height_fig) * fig_h_px + pad)
-            display_path = line.get_transform().transform_path(line.get_path())
-            if display_path.intersects_bbox(rect, filled=False):
-                logo_y0 = top_y0
-                break
+        # Checked against the wind speed line's actual drawn path (every
+        # segment, via Path.intersects_bbox, not just the raw data points
+        # -- a segment between two widely spaced points can cut through
+        # the corner without either endpoint landing inside it) and,
+        # separately, whether any individual gust dot falls inside the
+        # corner (a dot has no path to intersect a rect the way a line
+        # does, so it's just a point-in-rect test per point instead).
+        # Since the axis floor is a flat 0, the bottom-right corner is
+        # only ever at risk late in the day during a calm spell, but it
+        # can happen.
+        fig_w_px, fig_h_px = fig_w_in * dpi, fig_h_in * dpi
+        pad = 6  # a little slack for line width/dot radius, not just the bare path/point
+        rect = Bbox.from_extents(logo_x0 * fig_w_px - pad, bottom_y0 * fig_h_px - pad,
+                                  (logo_x0 + logo_width_fig) * fig_w_px + pad,
+                                  (bottom_y0 + logo_height_fig) * fig_h_px + pad)
+        collides = False
+        if wind_speed_line is not None:
+            display_path = wind_speed_line.get_transform().transform_path(wind_speed_line.get_path())
+            collides = display_path.intersects_bbox(rect, filled=False)
+        if not collides and gust_times:
+            gust_xy_px = ax.transData.transform(list(zip(mdates.date2num(gust_times), gust_values)))
+            collides = any(rect.contains(x, y) for x, y in gust_xy_px)
+        if collides:
+            logo_y0 = top_y0
 
         logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
         logo_ax.axis("off")
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
+
+    # ---------- peak gust ----------
+    # Circles and labels the day's single highest gust -- gust, not wind
+    # speed, since a gust burst is the more newsworthy extreme for a wind
+    # chart (a day's low wind speed is usually just calm/near-zero, not
+    # worth calling out the way temperature's daily low is).
+    if gust_times:
+        peak_idx = max(range(len(gust_values)), key=lambda i: gust_values[i])
+        peak_time, peak_gust = gust_times[peak_idx], gust_values[peak_idx]
+        ax.scatter([peak_time], [peak_gust], s=160, facecolors="none", edgecolors=PEAK_GUST_COLOR,
+                   linewidths=2.2, zorder=Z_MARKER)
+        label_text = f"Peak Gust: {peak_gust:.1f} mph at {peak_time.strftime('%H:%M')}"
+        label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
+
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        ax_box = ax.get_window_extent(renderer)
+        occupied = [logo_ax.get_window_extent(renderer)] if logo_ax is not None else []
+
+        def place(ha, va, x_off, y_off):
+            a = ax.annotate(label_text, xy=(peak_time, peak_gust), xytext=(x_off, y_off),
+                             textcoords="offset points", ha=ha, va=va,
+                             fontproperties=f_bold, fontsize=12, color=PEAK_GUST_COLOR, zorder=Z_MARKER)
+            a.set_path_effects(label_stroke)
+            return a
+
+        # Below-right is the preferred placement; fall back through
+        # above-right, below-left, above-left in that order, keeping the
+        # first whose actual rendered extent stays inside the plot and
+        # clear of the logo -- same fallback approach as
+        # tempest-temp-chart's --mark-low/--mark-high, just for a single
+        # always-on marker instead of up to two optional ones.
+        candidates = [
+            ("left", "center", 15, -8),
+            ("left", "bottom", 15, 10),
+            ("right", "center", -15, -8),
+            ("right", "bottom", -15, 10),
+        ]
+        txt = None
+        for ha, va, x_off, y_off in candidates:
+            if txt is not None:
+                txt.remove()
+            txt = place(ha, va, x_off, y_off)
+            fig.canvas.draw()
+            txt_box = txt.get_window_extent(renderer)
+            fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
+                    and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
+            clear = not any(txt_box.overlaps(b) for b in occupied)
+            if fits and clear:
+                break
 
     # ---------- axes styling ----------
     ax.set_ylabel("Wind Speed (mph)", fontproperties=f_med, fontsize=12, color=INK)
