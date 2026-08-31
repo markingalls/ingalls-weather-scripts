@@ -2,10 +2,10 @@
 
 Generates a styled same-day temperature chart from a personal WeatherFlow
 Tempest station for Ingalls Weather's Instagram: a single air-temperature
-line across the full 24-hour local calendar day, with the most recent
-observation marked and labeled -- since this is a same-day chart, the line
-legitimately stops partway through the day rather than reaching the right
-edge. Same canvas footprint and fonts as the
+line across the full 24-hour local calendar day, in 24-hour time -- since
+this is a same-day chart, the line legitimately stops partway through the
+day rather than reaching the right edge, marked with a dotted vertical line
+at the most recent observation. Same canvas footprint and fonts as the
 [850/700 mb temp chart](../850-700-temp-chart/) and
 [Tri-Cities temp chart](../tri-cities-temp-chart/), just one station's raw
 observations instead of a forecast/climatology blend.
@@ -38,6 +38,9 @@ python3 build_chart.py
 # A specific day or station (if the account has more than one)
 python3 fetch_tempest.py --date 2026-08-30 --station-id 12345
 python3 build_chart.py
+
+# Circle and label the day's lowest observation
+python3 build_chart.py --mark-low
 ```
 
 ## Notes
@@ -60,16 +63,30 @@ python3 build_chart.py
 - **X-axis spans the full 24-hour local day** (midnight to midnight) even
   when run mid-day, per the same-day-chart use case this project is built
   for -- the line simply stops at the most recent observation rather than
-  the axis being cropped to only the elapsed hours. A dotted vertical
-  marker plus a `"<temp>°F now"` label at the last point makes that read as
-  current, not as missing data.
-- **Y-axis** is fixed to the day's own observed min/max plus a proportional
-  pad (15% of the range, floored at 3°F) so a quiet, low-variance day still
-  gets a readable amount of headroom instead of a flat line filling the
-  whole plot.
+  the axis being cropped to only the elapsed hours. Ticks are every 6 hours
+  in 24-hour time (`00:00`/`06:00`/`12:00`/`18:00`); a dotted vertical
+  marker at the last observation makes the stopping point read as current,
+  not as missing data.
+- **Y-axis** is fixed to 3°F below the day's observed low and 3°F above
+  the day's observed high -- both are simply `min`/`max` of whatever's been
+  observed so far, so before the actual overnight low or afternoon high has
+  happened yet, the axis just reflects the partial day and widens as later
+  observations come in. No forecast source is wired into this project, so
+  there's no forward-looking high/low to pad toward in the meantime.
+- **`--mark-low`** (off by default) circles the day's lowest observation
+  and labels it `Low: XX.X°F at HH:MM`, offset up-and-left of the point so
+  it clears both the temperature line and the "now" marker.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `850-700-temp-chart/build_chart.py` and `tri-cities-temp-chart/build_chart.py`
   -- edit `build_chart.py` directly to adjust. The temperature line reuses
   the same forest green (`#164f29`) those charts use for their own
-  observed-temperature series. No legend -- there's only the one series,
-  labeled directly in the title/y-axis instead.
+  observed-temperature series; the `--mark-low` callout uses the same dark
+  red (`#a3242b`) `tri-cities-temp-chart` uses for record highs. No
+  legend -- there's only the one series, labeled directly in the
+  title/y-axis instead.
+- **Display label**: `fetch_tempest.py` writes both the Tempest API's raw
+  station name (`station_name`) and a display `label` used in the chart
+  title. `STATION_LABEL_OVERRIDES` in `fetch_tempest.py` maps known raw
+  names to a more recognizable label (e.g. `"Highland Hills"` →
+  `"Highland Hills (Hermiston)"`, the property name plus its town); pass
+  `--label` to override for any station, known or not.

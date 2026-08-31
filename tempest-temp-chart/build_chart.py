@@ -28,15 +28,21 @@ AXIS_COLOR = "#000000"
 # tri-cities-temp-chart) use for their primary observed-temperature line.
 TEMP_COLOR = "#164f29"
 
+# Dark red for the daily-low callout, distinct from the temperature line
+# itself so the circled point reads as an annotation, not just more data.
+LOW_COLOR = "#a3242b"
+
 Z_GRID = 2
-Z_NOW = 3
 Z_TEMP = 4
+Z_LOW = 5
 
 
 def parse_args():
     ap = argparse.ArgumentParser(description="Render today's Tempest station temperature chart.")
     ap.add_argument("--data", default="tempest_obs.json")
     ap.add_argument("--output", default="tempest_temp_chart.png")
+    ap.add_argument("--mark-low", action="store_true",
+                     help="Circle and label the day's lowest observation")
     return ap.parse_args()
 
 
@@ -61,18 +67,28 @@ def main():
         ax.plot(times, temps, color=TEMP_COLOR, linewidth=2.6, zorder=Z_TEMP, label="Air temperature")
 
         # The line legitimately stops partway through the day on a same-day
-        # chart -- a dotted "now" marker plus the value labeled at the last
-        # observation makes that read as current, not as missing data.
+        # chart -- a dotted marker at the last observation makes that read
+        # as current, not as missing data.
         ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
-        label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
-        txt = ax.annotate(f"{temps[-1]:.0f}°F now", xy=(times[-1], temps[-1]), xytext=(8, 0),
-                           textcoords="offset points", ha="left", va="center",
-                           fontproperties=f_bold, fontsize=13, color=TEMP_COLOR, zorder=Z_TEMP + 1)
-        txt.set_path_effects(label_stroke)
 
-        y_min, y_max = min(temps), max(temps)
-        pad = max((y_max - y_min) * 0.15, 3)
-        ax.set_ylim(y_min - pad, y_max + pad)
+        if args.mark_low:
+            low_idx = min(range(len(temps)), key=lambda i: temps[i])
+            low_time, low_temp = times[low_idx], temps[low_idx]
+            ax.scatter([low_time], [low_temp], s=160, facecolors="none", edgecolors=LOW_COLOR,
+                       linewidths=2.2, zorder=Z_LOW)
+            label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
+            txt = ax.annotate(f"Low: {low_temp:.1f}°F at {low_time.strftime('%H:%M')}",
+                               xy=(low_time, low_temp), xytext=(-12, 14), textcoords="offset points",
+                               ha="right", va="bottom", fontproperties=f_bold, fontsize=12,
+                               color=LOW_COLOR, zorder=Z_LOW)
+            txt.set_path_effects(label_stroke)
+
+        # No forecast source is wired into this project -- the day's high is
+        # just the observed max so far, which by afternoon/evening is the
+        # actual daily high. Fixed 3°F padding both directions rather than a
+        # proportional one, so the line never crowds the axis edges.
+        day_low, day_high = min(temps), max(temps)
+        ax.set_ylim(day_low - 3, day_high + 3)
     else:
         ax.text(0.5, 0.5, "No observations yet today", transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
@@ -80,7 +96,7 @@ def main():
 
     # ---------- axes styling ----------
     ax.set_ylabel("Air Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)
-    ax.set_xlabel(f"Time ({data['timezone']})", fontproperties=f_med, fontsize=12, color=INK)
+    ax.set_xlabel("Time (24h, local)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
     for spine in ("top", "right"):
@@ -89,8 +105,8 @@ def main():
         ax.spines[spine].set_color(AXIS_COLOR)
         ax.spines[spine].set_linewidth(1.0)
 
-    ax.xaxis.set_major_locator(mdates.HourLocator(interval=3, tz=tz))
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%-I %p", tz=tz))
+    ax.xaxis.set_major_locator(mdates.HourLocator(interval=6, tz=tz))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=tz))
     ax.set_xlim(day_start, day_end)
     ax.tick_params(axis="both", colors=AXIS_COLOR, labelsize=10, length=4)
     for tick in ax.get_xticklabels():
@@ -135,7 +151,7 @@ def main():
     subtitle_y = top_y + 0.058
     title_y = subtitle_y + 0.035
     date_str = day_start.strftime("%B %-d, %Y")
-    fig.text(left_x, title_y, f"Today's Temperature — {data['station_name']}",
+    fig.text(left_x, title_y, f"Today's Temperature — {data['label']}",
               fontproperties=f_bold, fontsize=22, color=INK)
     subtitle = f"{date_str} • {data['timezone']} • Tempest Station"
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)

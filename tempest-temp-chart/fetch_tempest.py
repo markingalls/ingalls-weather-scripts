@@ -25,6 +25,14 @@ BASE_URL = "https://swd.weatherflow.com/swd/rest"
 # 9 illuminance, 10 UV, 11 solar radiation, 12 rain accumulated, ...
 AIR_TEMP_C_INDEX = 7
 
+# Known-station display-name overrides -- the API's own "public_name" is
+# sometimes just the property name, without the nearby town that makes it
+# recognizable to an Instagram audience. Falls back to the raw API name for
+# any station not listed here.
+STATION_LABEL_OVERRIDES = {
+    "Highland Hills": "Highland Hills (Hermiston)",
+}
+
 
 def fetch_stations(api_key):
     r = requests.get(f"{BASE_URL}/stations", params={"api_key": api_key}, timeout=30)
@@ -66,6 +74,9 @@ if __name__ == "__main__":
                      help="Pin a specific station id (default: first station with a Tempest device)")
     ap.add_argument("--date", default=None,
                      help="YYYY-MM-DD, station-local calendar day (default: today, station-local)")
+    ap.add_argument("--label", default=None,
+                     help="Display label override, e.g. 'Highland Hills (Hermiston)' "
+                          "(default: STATION_LABEL_OVERRIDES entry for the API's name, else the API name itself)")
     ap.add_argument("--output", default="tempest_obs.json")
     args = ap.parse_args()
 
@@ -96,10 +107,14 @@ if __name__ == "__main__":
             "air_temp_f": round(c_to_f(air_temp_c), 1),
         })
 
+    station_name = station.get("public_name") or station.get("name")
+    label = args.label or STATION_LABEL_OVERRIDES.get(station_name, station_name)
+
     out = {
         "source": "WeatherFlow Tempest API, /observations/device (obs_st)",
         "station_id": station["station_id"],
-        "station_name": station.get("public_name") or station.get("name"),
+        "station_name": station_name,
+        "label": label,
         "device_id": device["device_id"],
         "timezone": station["timezone"],
         "date": target_date.isoformat(),
@@ -109,7 +124,7 @@ if __name__ == "__main__":
         json.dump(out, f, indent=2)
 
     if observations:
-        print(f"Saved {args.output}: {len(observations)} obs for {out['station_name']} on "
+        print(f"Saved {args.output}: {len(observations)} obs for {label} on "
               f"{target_date} ({observations[0]['time']} .. {observations[-1]['time']})")
     else:
-        print(f"Saved {args.output}: 0 observations returned for {target_date}")
+        print(f"Saved {args.output}: 0 observations returned for {label} on {target_date}")
