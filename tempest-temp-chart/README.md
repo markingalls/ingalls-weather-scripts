@@ -122,10 +122,10 @@ python3 build_chart.py --mark-low --mark-high
   little room below the low (the bottom padding is a flat 3°F regardless
   of how tall the axis gets above it), and either point could in
   principle land anywhere in the day, including the logo's own corner.
-- **Dew point line**: plotted alongside temperature (terra-cotta, `#c9531c`
-  -- the same climatology-line color `850-700-temp-chart`/
-  `tri-cities-temp-chart` use), same gap-breaking treatment as
-  temperature (see above), but deliberately has no `--mark-low`/
+- **Dew point line**: plotted alongside temperature (forest green,
+  `#164f29` -- the same green `TEMP_COLOR` used before it was changed to
+  the logo's blue), same gap-breaking treatment as temperature (see
+  above), but deliberately has no `--mark-low`/
   `--mark-high` equivalent -- those stay temperature-only. Missing-RH
   observations (rare) come back from `fetch_tempest.py` with no
   `dew_point_f` key at all; `build_chart.py` substitutes `NaN` for those

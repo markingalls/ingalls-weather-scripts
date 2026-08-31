@@ -30,11 +30,11 @@ AXIS_COLOR = "#000000"
 # pixel color, not its lighter highlight swoosh or dark outline).
 TEMP_COLOR = "#1d7db0"
 
-# Warm terra-cotta for the dew point line -- same hue the climatology
-# lines in 850-700-temp-chart/tri-cities-temp-chart use, reused here to
-# keep it visually distinct from the (now blue) temperature line and from
-# the low/high callout colors below.
-DEW_POINT_LINE_COLOR = "#c9531c"
+# Forest green for the dew point line -- this is the same green TEMP_COLOR
+# used to hold before it was changed to the logo's blue above; reused here
+# so it stays visually distinct from the (now blue) temperature line and
+# from the low/high callout colors below.
+DEW_POINT_LINE_COLOR = "#164f29"
 
 # Deep blue for the daily-low callout, distinct from the temperature line
 # itself so the circled point reads as an annotation, not just more data.
