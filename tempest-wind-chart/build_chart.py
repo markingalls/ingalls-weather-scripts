@@ -24,14 +24,15 @@ INK_SECONDARY = "#5a584f"
 GRID_COLOR = "#000000"
 AXIS_COLOR = "#000000"
 
-# Teal for the sustained wind speed line -- calm/steady, paired against
-# gust's warmer, more attention-grabbing color below.
-WIND_SPEED_COLOR = "#0e7c86"
+# Same blue tempest-temp-chart uses for its own primary (temperature)
+# line -- keeps the two Tempest station charts reading as one visual
+# family rather than each picking its own arbitrary primary-series hue.
+WIND_SPEED_COLOR = "#1d7db0"
 
-# Amber for the gust dots -- a burst of wind reads as the "hotter" of the
-# two, so it gets the warmer color, same pairing logic as e.g. a low/high
-# callout using a cool/warm split elsewhere in this repo.
-GUST_COLOR = "#d97706"
+# Same forest green tempest-temp-chart uses for its own secondary (dew
+# point) line -- same family-consistency reasoning as the wind speed
+# color above, just for the secondary series.
+GUST_COLOR = "#164f29"
 
 # Dark red for the peak-gust callout -- same hue tri-cities-temp-chart /
 # tempest-temp-chart use for their own daily-high markers.

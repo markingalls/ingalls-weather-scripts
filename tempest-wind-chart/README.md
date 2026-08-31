@@ -107,10 +107,12 @@ python3 build_chart.py --no-current-conditions
   a genuinely windy day's line/dots never crowd or clip past the edge.
 - Chart styling (fonts, dimensions, logo placement, current-conditions
   stat box mechanics) mirrors `tempest-temp-chart/build_chart.py` --
-  edit `build_chart.py` directly to adjust. Wind speed is teal
-  (`#0e7c86`), gust is amber (`#d97706`) -- a cool/calm vs. warm/burst
-  pairing, distinct from every color `tempest-temp-chart` itself uses so
-  the two charts don't visually blend together if shown side by side.
+  edit `build_chart.py` directly to adjust. Wind speed is the same blue
+  (`#1d7db0`) `tempest-temp-chart` uses for its own temperature line,
+  gust is the same forest green (`#164f29`) it uses for dew point --
+  same primary/secondary color pairing as that chart, rather than this
+  one picking its own arbitrary hues, so the two Tempest station charts
+  read as one visual family.
 - **Logo placement defaults bottom-right**, matching `tempest-temp-chart`,
   moving to the top-right corner if either series would pass behind it
   there: the wind speed line via the same actual-drawn-path check
