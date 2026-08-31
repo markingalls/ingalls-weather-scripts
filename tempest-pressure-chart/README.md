@@ -14,6 +14,11 @@ chart for the same station.
 Defaults to today (station-local calendar day) and to whichever station the
 API key's account has a Tempest ("ST") device on.
 
+`build_lookback_charts.py` renders the same style of chart for each of the
+past 5 station-local days (not including today) -- a "look back" companion
+to the always-current today chart, same idea as `tempest-temp-chart`'s and
+`tempest-wind-chart`'s own look-back tools.
+
 ## Files
 
 - `fetch_tempest.py` -- pulls a day's 1-minute-resolution station pressure
@@ -28,6 +33,11 @@ API key's account has a Tempest ("ST") device on.
 - `build_chart.py` -- renders `tempest_pressure_obs.json` into
   `tempest_pressure_chart.png`. See `--no-current-conditions` in Notes
   below for rendering a past, complete (archive) day instead of today's.
+- `build_lookback_charts.py` -- fetches and renders the past 5 days (not
+  including today), one file per day, into `lookback/`. Shells out to
+  `fetch_tempest.py` and `build_chart.py` for each day rather than
+  reimplementing their logic, so every day's chart behaves exactly like
+  running them by hand would.
 - `requirements.txt` / `setup.sh` -- Python dependencies (no system
   packages needed here, unlike the map projects).
 
@@ -47,6 +57,11 @@ python3 build_chart.py
 
 # That same past day as an archive chart -- no current-conditions box
 python3 build_chart.py --no-current-conditions
+
+# Past 5 days, one chart per day, into lookback/ -- no current-conditions
+# box, high/low always marked
+python3 build_lookback_charts.py
+python3 build_lookback_charts.py --days 10          # a longer look back
 ```
 
 ## Notes
@@ -157,7 +172,3 @@ python3 build_chart.py --no-current-conditions
   same reasoning, and the same flag name, as the sibling charts' own
   archive-day mode. The plot reclaims the stat box's vertical space, back
   to the full 0.65-of-figure height.
-- **Not (yet) included**: a `build_lookback_charts.py` local-testing /
-  backfill tool and the droplet deploy scripts (`deploy/publish_*.py`,
-  `deploy/crontab.example`) that the temp and wind charts both have --
-  this project hasn't been asked to go through that yet.
