@@ -11,6 +11,7 @@ pins a specific one (useful if the account has more than one station).
 """
 import argparse
 import json
+import math
 import os
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -24,6 +25,18 @@ BASE_URL = "https://swd.weatherflow.com/swd/rest"
 # interval, 6 station pressure, 7 air temperature (C), 8 relative humidity,
 # 9 illuminance, 10 UV, 11 solar radiation, 12 rain accumulated, ...
 AIR_TEMP_C_INDEX = 7
+RELATIVE_HUMIDITY_INDEX = 8
+
+# Magnus-Tetens dew point approximation (Alduchov-Eskridge 1996 coefficients,
+# the same ones NWS uses) -- Tempest's obs_st only reports temperature +
+# relative humidity, not dew point directly, so this derives it.
+MAGNUS_A = 17.625
+MAGNUS_B = 243.04  # deg C
+
+
+def dew_point_c(temp_c, relative_humidity):
+    gamma = math.log(relative_humidity / 100) + (MAGNUS_A * temp_c) / (MAGNUS_B + temp_c)
+    return MAGNUS_B * gamma / (MAGNUS_A - gamma)
 
 # Known-station display-name overrides -- the API's own "public_name" is
 # sometimes just the property name, without the nearby town that makes it
@@ -98,14 +111,17 @@ if __name__ == "__main__":
 
     observations = []
     for row in obs_resp.get("obs") or []:
-        epoch, air_temp_c = row[0], row[AIR_TEMP_C_INDEX]
+        epoch, air_temp_c, rh = row[0], row[AIR_TEMP_C_INDEX], row[RELATIVE_HUMIDITY_INDEX]
         if epoch is None or air_temp_c is None:
             continue
         local_time = datetime.fromtimestamp(epoch, tz)
-        observations.append({
+        obs = {
             "time": local_time.isoformat(),
             "air_temp_f": round(c_to_f(air_temp_c), 1),
-        })
+        }
+        if rh is not None:
+            obs["dew_point_f"] = round(c_to_f(dew_point_c(air_temp_c, rh)), 1)
+        observations.append(obs)
 
     station_name = station.get("public_name") or station.get("name")
     label = args.label or STATION_LABEL_OVERRIDES.get(station_name, station_name)

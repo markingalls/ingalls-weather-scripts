@@ -25,9 +25,16 @@ INK_SECONDARY = "#5a584f"
 GRID_COLOR = "#000000"
 AXIS_COLOR = "#000000"
 
-# Forest green, same hue the other temp charts (850-700-temp-chart,
-# tri-cities-temp-chart) use for their primary observed-temperature line.
-TEMP_COLOR = "#164f29"
+# Same blue as the cloud in the Ingalls Weather logo (sampled directly
+# from assets/ingalls_weather_logo.png -- the cloud's dominant solid-fill
+# pixel color, not its lighter highlight swoosh or dark outline).
+TEMP_COLOR = "#1d7db0"
+
+# Forest green for the dew point line -- this is the same green TEMP_COLOR
+# used to hold before it was changed to the logo's blue above; reused here
+# so it stays visually distinct from the (now blue) temperature line and
+# from the low/high callout colors below.
+DEW_POINT_LINE_COLOR = "#164f29"
 
 # Deep blue for the daily-low callout, distinct from the temperature line
 # itself so the circled point reads as an annotation, not just more data.
@@ -47,11 +54,103 @@ Z_MARKER = 5
 # drawing a straight segment across a period with no real data.
 MAX_GAP = timedelta(minutes=6)
 
+# ---------- current-conditions stat boxes ----------
+# Background color tables for the two stat boxes, each a list of (Kelvin,
+# (R, G, B)) control points sorted by K -- interp_color() linearly
+# interpolates between them. Alpha is uniformly opaque in both source
+# tables, so it's dropped here.
+TEMP_COLOR_TABLE = [
+    (205.53962824635747, (20, 1, 11)),
+    (220.54105933801642, (72, 2, 42)),
+    (223.30970412365585, (114, 5, 69)),
+    (226.07834890929527, (156, 7, 95)),
+    (228.8469936949347, (190, 31, 133)),
+    (231.61563848057412, (216, 33, 184)),
+    (234.38428326621354, (224, 94, 226)),
+    (237.15292805185297, (208, 143, 208)),
+    (239.9215728374924, (198, 174, 206)),
+    (242.71111221757047, (177, 149, 200)),
+    (245.48274194527255, (153, 122, 186)),
+    (248.25437167297463, (120, 90, 160)),
+    (251.02600140067673, (95, 67, 136)),
+    (253.7976311283788, (75, 44, 128)),
+    (256.5692608560809, (52, 34, 130)),
+    (259.2740222360249, (44, 54, 150)),
+    (262.11252031148507, (62, 73, 174)),
+    (264.88415003918715, (79, 90, 198)),
+    (267.13811875987665, (90, 128, 206)),
+    (269.1251668409579, (100, 165, 214)),
+    (271.1122149220392, (94, 194, 212)),
+    (273.0992630031204, (40, 142, 160)),
+    (275.0863110842017, (24, 105, 120)),
+    (279.0604072463642, (28, 108, 79)),
+    (283.03450340852675, (39, 132, 85)),
+    (286.97216346781227, (60, 150, 83)),
+    (289.741977590991, (112, 172, 91)),
+    (292.5117917141697, (159, 190, 91)),
+    (295.2816058373485, (208, 200, 84)),
+    (298.0514199605272, (204, 172, 70)),
+    (300.8212340837059, (212, 146, 61)),
+    (303.5910482068847, (218, 121, 35)),
+    (306.3608623300634, (208, 90, 31)),
+    (309.13067645324213, (216, 59, 32)),
+    (311.9004905764209, (182, 32, 7)),
+    (314.6703046995996, (142, 36, 19)),
+    (317.44011882277835, (102, 23, 10)),
+    (320.20993294595706, (142, 15, 54)),
+    (322.9797470691358, (194, 50, 94)),
+    (325.74956119231456, (216, 120, 149)),
+    (332.71070543555834, (204, 16, 171)),
+]
+
+DEW_POINT_COLOR_TABLE = [
+    (183, (0, 0, 0)),
+    (213, (59, 35, 0)),
+    (253, (66, 50, 34)),
+    (273, (122, 107, 95)),
+    (280, (204, 201, 199)),
+    (283, (108, 176, 99)),
+    (291, (16, 99, 16)),
+    (296, (0, 64, 18)),
+    (301, (143, 143, 0)),
+    (308, (179, 107, 0)),
+]
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def fahrenheit_to_kelvin(f):
+    return (f - 32) * 5 / 9 + 273.15
+
+
+def interp_color(value_k, table):
+    """Linearly interpolates an (R, G, B) 0-255 triple from a sorted
+    (K, (R, G, B)) table, clamping to the end colors outside its range."""
+    if value_k <= table[0][0]:
+        return table[0][1]
+    if value_k >= table[-1][0]:
+        return table[-1][1]
+    for (k0, c0), (k1, c1) in zip(table, table[1:]):
+        if k0 <= value_k <= k1:
+            frac = (value_k - k0) / (k1 - k0)
+            return tuple(c0[i] + frac * (c1[i] - c0[i]) for i in range(3))
+    return table[-1][1]
+
+
+def text_color_for_bg(rgb):
+    """Black or white, whichever reads better against an (R, G, B) 0-255
+    background -- ITU-R BT.601 perceptual luminance, the standard
+    black/white text contrast heuristic."""
+    r, g, b = rgb
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return "black" if luminance > 140 else "white"
+
+
 def parse_args():
-    ap = argparse.ArgumentParser(description="Render today's Tempest station temperature chart.")
+    ap = argparse.ArgumentParser(description="Render a Tempest station temperature chart for "
+                                               "whichever day --data holds observations for "
+                                               "(today's, by default) -- see --no-current-"
+                                               "conditions for a past, complete day.")
     ap.add_argument("--data", default="tempest_obs.json")
     ap.add_argument("--forecast", default="forecast.json",
                      help="Optional forecast.json from fetch_forecast.py -- if present and for "
@@ -62,6 +161,11 @@ def parse_args():
                      help="Circle and label the day's lowest observation")
     ap.add_argument("--mark-high", action="store_true",
                      help="Circle and label the day's highest observation")
+    ap.add_argument("--no-current-conditions", action="store_true",
+                     help="Skip the current-conditions stat boxes and reclaim their vertical "
+                          "space for the plot -- for a past, complete day (see "
+                          "build_lookback_charts.py) where there's no 'current' reading to "
+                          "highlight, as opposed to today's still-in-progress chart")
     return ap.parse_args()
 
 
@@ -85,12 +189,14 @@ def insert_gaps(times, temps, max_gap):
     return out_times, out_temps
 
 
-def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high=False):
+def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high=False,
+                 no_current_conditions=False):
     data = json.load(open(data_path))
     tz = ZoneInfo(data["timezone"])
 
     times = [datetime.fromisoformat(o["time"]) for o in data["observations"]]
     temps = [o["air_temp_f"] for o in data["observations"]]
+    dew_points = [o.get("dew_point_f") for o in data["observations"]]
 
     day_start = datetime.fromisoformat(data["date"]).replace(tzinfo=tz)
     day_end = day_start + timedelta(days=1)
@@ -110,7 +216,14 @@ def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high
     # ---------- figure (same footprint as the other temp charts) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
-    ax = fig.add_axes([0.075, 0.10, 0.87, 0.65])
+    # Shorter than the other temp charts' 0.65 whenever the current-
+    # conditions stat boxes are shown -- they take the freed vertical
+    # space, in the band between here and the (fig-position-fixed, not
+    # axes-derived) subtitle. A no_current_conditions chart has no stat
+    # boxes to make room for, so its axes uses the full 0.65, same as the
+    # other temp charts.
+    ax_height = 0.65 if no_current_conditions else 0.56
+    ax = fig.add_axes([0.075, 0.10, 0.87, ax_height])
     ax.set_facecolor("white")
 
     axpos = ax.get_position()
@@ -118,15 +231,33 @@ def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high
     center_x = (axpos.x0 + axpos.x1) / 2
 
     temp_line = None
+    dew_point_line = None
     if times:
         plot_times, plot_temps = insert_gaps(times, temps, MAX_GAP)
         temp_line = ax.plot(plot_times, plot_temps, color=TEMP_COLOR, linewidth=2.6, zorder=Z_TEMP,
                              label="Air temperature")[0]
 
+        # Dew point is plotted (no mark_low/mark_high equivalent for it --
+        # those stay temperature-only) but otherwise treated the same as
+        # the temperature line: missing-RH observations already come
+        # through as None from fetch_tempest.py, substituted with NaN here
+        # so matplotlib skips them the same way insert_gaps() skips a real
+        # time gap, then run through insert_gaps() itself for actual
+        # outages.
+        dew_point_values = [dp if dp is not None else float("nan") for dp in dew_points]
+        plot_times_dp, plot_dew_points = insert_gaps(times, dew_point_values, MAX_GAP)
+        dew_point_line = ax.plot(plot_times_dp, plot_dew_points, color=DEW_POINT_LINE_COLOR,
+                                  linewidth=2.0, zorder=Z_TEMP - 1, label="Dew point")[0]
+
         # The line legitimately stops partway through the day on a same-day
         # chart -- a dotted marker at the last observation makes that read
-        # as current, not as missing data.
-        ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
+        # as current, not as missing data. Skipped for a no_current_conditions
+        # (complete, past) day: its line already runs the full 24 hours
+        # (the last observation lands a minute before midnight, not
+        # literally at it), so the same marker there would misleadingly
+        # read as "cut short" rather than "complete."
+        if not no_current_conditions:
+            ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
         # Day's high is the observed max so far, extended to the forecast
         # high (if fetch_forecast.py's forecast.json is present) so the
@@ -137,8 +268,13 @@ def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high
         # could clip an observation that runs hotter). Fixed 3°F padding
         # both directions rather than a proportional one, so the line never
         # crowds the axis edges. Set here (rather than down in "axes
-        # styling") so the logo-placement and --mark-low/--mark-high logic
+        # styling") so the logo-placement and mark_low/mark_high logic
         # below can both work against the final plot bounds.
+        #
+        # Day's low also has to account for dew point, not just
+        # temperature -- dew point is always <= air temperature, so its
+        # own minimum can (and often does) fall below the day's low
+        # temperature reading.
         #
         # NOTE for future reference: if a forecast *low* is ever wired in
         # here too (there's currently only a forecast high, from NWS's
@@ -148,12 +284,24 @@ def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high
         # always be able to override a forecast in whichever direction it
         # turns out to be more extreme, above or below.
         day_low, day_high = min(temps), max(temps)
+        valid_dew_points = [dp for dp in dew_points if dp is not None]
+        if valid_dew_points:
+            day_low = min(day_low, min(valid_dew_points))
         if forecast_high is not None:
             day_high = max(day_high, forecast_high)
         ax.set_ylim(day_low - 3, day_high + 3)
         ax.set_xlim(day_start, day_end)
+
+        legend = ax.legend(loc="upper left", frameon=True, fontsize=10.5, prop=f_reg,
+                            handlelength=1.6, borderaxespad=0.8)
+        legend.get_frame().set_facecolor("white")
+        legend.get_frame().set_edgecolor("none")
+        legend.set_zorder(Z_TEMP + 1)
+        for text in legend.get_texts():
+            text.set_color(INK_SECONDARY)
     else:
-        ax.text(0.5, 0.5, "No observations yet today", transform=ax.transAxes,
+        no_obs_text = "No observations that day" if no_current_conditions else "No observations yet today"
+        ax.text(0.5, 0.5, no_obs_text, transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
         ax.set_ylim(0, 1)
         ax.set_xlim(day_start, day_end)
@@ -186,21 +334,26 @@ def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high
         top_y0 = axpos.y1 - inset_y - logo_height_fig
         logo_y0 = bottom_y0
 
-        if temp_line is not None:
-            # Checked against the line's actual drawn path (every segment,
-            # via Path.intersects_bbox), not just the raw data points --
-            # Tempest data is dense enough (1-minute samples) that the two
-            # are equivalent in practice, but a segment between two widely
-            # spaced points can cut through the corner without either
-            # endpoint landing inside it.
+        # Checked against both lines' actual drawn paths (every segment,
+        # via Path.intersects_bbox), not just the raw data points --
+        # Tempest data is dense enough (1-minute samples) that the two
+        # are equivalent in practice, but a segment between two widely
+        # spaced points can cut through the corner without either
+        # endpoint landing inside it. Dew point is checked too, not just
+        # temperature -- it's often the lower of the two curves, and so
+        # the more likely one to actually reach the bottom-right corner.
+        for line in (temp_line, dew_point_line):
+            if line is None:
+                continue
             fig_w_px, fig_h_px = fig_w_in * dpi, fig_h_in * dpi
             pad = 6  # a little slack for line width, not just the bare path
             rect = Bbox.from_extents(logo_x0 * fig_w_px - pad, bottom_y0 * fig_h_px - pad,
                                       (logo_x0 + logo_width_fig) * fig_w_px + pad,
                                       (bottom_y0 + logo_height_fig) * fig_h_px + pad)
-            display_path = temp_line.get_transform().transform_path(temp_line.get_path())
+            display_path = line.get_transform().transform_path(line.get_path())
             if display_path.intersects_bbox(rect, filled=False):
                 logo_y0 = top_y0
+                break
 
         logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
@@ -267,7 +420,7 @@ def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high
             mark_extreme(max(range(len(temps)), key=lambda i: temps[i]), HIGH_COLOR, "High")
 
     # ---------- axes styling ----------
-    ax.set_ylabel("Air Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)
+    ax.set_ylabel("Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_xlabel("Time", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
@@ -290,13 +443,131 @@ def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high
         tick.set_fontsize(10)
 
     # ---------- title / subtitle ----------
-    subtitle_y = top_y + 0.058
-    title_y = subtitle_y + 0.035
     date_str = day_start.strftime("%B %-d, %Y")
-    fig.text(left_x, title_y, f"Today's Temperature — {data['label']}",
-              fontproperties=f_bold, fontsize=22, color=INK)
-    subtitle = date_str
+    if no_current_conditions:
+        # Derived from top_y (axpos.y1) same as the other temp charts --
+        # there's no stat-box band below to reserve a fixed gap for, since
+        # this axes already uses their same full 0.65 height.
+        subtitle_y = top_y + 0.058
+        title_y = subtitle_y + 0.035
+        title = f"Temperature — {data['label']}"
+        # No "Updated: HH:MM" clause -- that phrasing implies a still-live
+        # reading, which doesn't apply to a complete, past calendar day.
+        subtitle = date_str
+    else:
+        # Fixed rather than derived from top_y -- the axes here is shorter
+        # than the other temp charts, with the stat boxes below sitting in
+        # the freed band at their own fixed height, not one that scales
+        # with wherever the (now shorter) axes' own top happens to land.
+        subtitle_y = 0.815
+        title_y = subtitle_y + 0.035
+        title = f"Today's Temperature — {data['label']}"
+        subtitle = f"{date_str} • Updated: {times[-1].strftime('%H:%M')} PT" if times else date_str
+    fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
+
+    # ---------- current-conditions stat boxes ----------
+    # Sit in the band freed up by shrinking the axes above, between the
+    # plot's top and the subtitle: a two-line regular-weight, right-aligned
+    # label ("Current" / "Temperature") immediately to the left of a bold
+    # value readout, the pair centered as a unit within its own column
+    # (temp centered in the left half, dew point in the right half). The
+    # number's own small colored backdrop (not the whole row) comes from
+    # the current reading's color-table lookup (temp/dew point converted
+    # to Kelvin, interpolated); the bold text itself is black or white,
+    # whichever contrasts against that particular background.
+    if times and not no_current_conditions:
+        current_temp_f = temps[-1]
+        current_dew_point_f = dew_points[-1]
+
+        stat_center_y = 0.685 + 0.105 / 2
+        stat_gap = 0.02
+        col_width = (right_x - left_x - stat_gap) / 2
+        # A geometrically-centered pair still reads as sitting a bit right
+        # of center -- the bold, colored chip carries more visual weight
+        # than the plain label to its left, pulling the eye rightward -- so
+        # nudge the centering target left by a small fixed amount.
+        stat_visual_shift = 0.012
+        label_fontsize = 14
+        label_linespacing = 0.85
+        fig_w_px = fig.get_size_inches()[0] * fig.get_dpi()
+        label_number_gap_px = 0.012 * fig_w_px
+
+        def draw_stat_pair(column_center_x, label_text, value_f, table):
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+
+            # Label width at its actual (tight) line spacing.
+            label_probe = fig.text(0, stat_center_y, label_text, fontproperties=f_reg,
+                                     fontsize=label_fontsize, linespacing=label_linespacing)
+            fig.canvas.draw()
+            label_width_px = label_probe.get_window_extent(renderer).width
+            label_probe.remove()
+
+            # Number fontsize is matched to the label block's height at
+            # linespacing=1.2 (its original, wider spacing) rather than
+            # the tighter spacing it's actually drawn with now -- keeps
+            # the number the same size it was before the label spacing
+            # was tightened.
+            height_probe = fig.text(0, 0, label_text, fontproperties=f_reg,
+                                      fontsize=label_fontsize, linespacing=1.2)
+            fig.canvas.draw()
+            label_height_px = height_probe.get_window_extent(renderer).height
+            height_probe.remove()
+
+            value_text = f"{value_f:.1f}°F" if value_f is not None else "N/A"
+            probe_size = 24
+            num_probe = fig.text(0, 0, value_text, fontproperties=f_bold, fontsize=probe_size)
+            fig.canvas.draw()
+            probe_height_px = num_probe.get_window_extent(renderer).height
+            num_probe.remove()
+            number_fontsize = probe_size * (label_height_px / probe_height_px)
+
+            if value_f is not None:
+                rgb = interp_color(fahrenheit_to_kelvin(value_f), table)
+                text_color = text_color_for_bg(rgb)
+                chip_color = tuple(c / 255 for c in rgb)
+            else:
+                text_color = INK_SECONDARY
+                chip_color = BG
+
+            chip_pad = 0.35
+            chip_kwargs = dict(fontproperties=f_bold, fontsize=number_fontsize, color=text_color,
+                                va="center", bbox=dict(boxstyle=f"round,pad={chip_pad}",
+                                                        facecolor=chip_color, edgecolor="none"))
+            # get_window_extent() on bbox-styled text reports only the bare
+            # text's box, ignoring the padded patch drawn behind it (verified:
+            # its x0 lands exactly on the ha="left" anchor, not the patch's
+            # actual left edge) -- so the patch's pad has to be added back in
+            # by hand. "pad" in a boxstyle spec is in font-size units, i.e.
+            # chip_pad * fontsize *points*, converted to pixels via dpi/72.
+            num_probe2 = fig.text(0, stat_center_y, value_text, ha="left", **chip_kwargs)
+            fig.canvas.draw()
+            text_width_px = num_probe2.get_window_extent(renderer).width
+            num_probe2.remove()
+            pad_px = chip_pad * number_fontsize * (fig.get_dpi() / 72)
+            chip_width_px = text_width_px + 2 * pad_px
+
+            # Center the whole (label + gap + chip) unit on the column's
+            # own midpoint, rather than pinning it to the column's left edge.
+            total_width_px = label_width_px + label_number_gap_px + chip_width_px
+            start_x_px = column_center_x * fig_w_px - total_width_px / 2
+            label_right_px = start_x_px + label_width_px
+            # anchor = desired visual left edge of the padded chip + pad_px,
+            # since the chip's actual left edge sits pad_px left of the anchor.
+            number_anchor_px = label_right_px + label_number_gap_px + pad_px
+
+            fig.text(label_right_px / fig_w_px, stat_center_y, label_text, fontproperties=f_reg,
+                      fontsize=label_fontsize, color=INK, ha="right", va="center",
+                      linespacing=label_linespacing, multialignment="right")
+            fig.text(number_anchor_px / fig_w_px, stat_center_y, value_text, ha="left",
+                      zorder=15, **chip_kwargs)
+
+        temp_column_center = left_x + col_width / 2 - stat_visual_shift
+        dew_column_center = left_x + col_width + stat_gap + col_width / 2 - stat_visual_shift
+        draw_stat_pair(temp_column_center, "Current\nTemperature", current_temp_f, TEMP_COLOR_TABLE)
+        draw_stat_pair(dew_column_center, "Current\nDew Point",
+                        current_dew_point_f, DEW_POINT_COLOR_TABLE)
 
     # ---------- attribution ----------
     fig.text(center_x, 0.02, "Ingalls Weather",
@@ -309,7 +580,8 @@ def build_chart(data_path, forecast_path, output_path, mark_low=False, mark_high
 
 def main():
     args = parse_args()
-    build_chart(args.data, args.forecast, args.output, args.mark_low, args.mark_high)
+    build_chart(args.data, args.forecast, args.output, args.mark_low, args.mark_high,
+                args.no_current_conditions)
 
 
 if __name__ == "__main__":

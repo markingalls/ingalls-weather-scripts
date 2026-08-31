@@ -54,9 +54,12 @@ workflows. Each project lives in its own directory with its own README.
   corner of Saskatchewan.
 - [`tempest-temp-chart/`](tempest-temp-chart/) — generates a styled
   same-day temperature chart from a personal WeatherFlow Tempest station:
-  a single air-temperature line across the full 24-hour local calendar
-  day, with the day's low and high circled and labeled. Deployed live at
-  `images.ingallswx.com/hermiston_temp.png`, refreshed every 5 minutes.
+  air temperature and dew point lines across the full 24-hour local
+  calendar day, with current-conditions readouts and the day's low and
+  high circled and labeled. Deployed live at
+  `images.ingallswx.com/hermiston_temp.png` (refreshed every 5 minutes)
+  plus a rolling 5-day look-back archive at `..._day1.png` through
+  `..._day5.png` (rotated nightly).
 
 ## Shared resources
 
