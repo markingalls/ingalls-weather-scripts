@@ -86,6 +86,17 @@ python3 build_chart.py --mark-low --mark-high
   in 24-hour time (`00:00`/`03:00`/.../`21:00`); a dotted vertical marker at
   the last observation makes the stopping point read as current, not as
   missing data.
+- **Data outages show as a break in the line, not a straight line across
+  them.** The Tempest hub reports roughly once a minute; `build_chart.py`'s
+  `insert_gaps()` walks the observations and, wherever two consecutive
+  ones are more than `MAX_GAP` (6 minutes) apart, inserts a NaN-valued
+  point at the gap's midpoint before plotting -- matplotlib breaks a line
+  at a NaN y-value rather than connecting across it, so a real outage
+  (station offline, hub lost power/WiFi, etc.) reads as a visible gap
+  instead of implying data that doesn't exist. Only the plotted line uses
+  the gap-inserted series -- the day's low/high, the "now" marker, and the
+  y-axis bounds all still come from the real observations (`times`/`temps`
+  as fetched, unmodified), so a gap never affects what those report.
 - **Y-axis** is fixed to 3°F below the day's low and 3°F above its high.
   The low is simply `min` of whatever's been observed so far -- before the
   actual overnight low has happened yet, the axis just reflects the
