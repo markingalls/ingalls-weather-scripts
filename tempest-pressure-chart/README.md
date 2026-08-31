@@ -1,0 +1,124 @@
+# Tempest Sea Level Pressure Chart
+
+Generates a styled same-day sea-level-pressure chart from a personal
+WeatherFlow Tempest station for Ingalls Weather's Instagram: a single
+pressure line across the full 24-hour local calendar day, in 24-hour time
+-- since this is a same-day chart, the line legitimately stops partway
+through the day rather than reaching the right edge, marked with a dotted
+vertical line at the most recent observation. A single current-conditions
+stat box (Current Pressure) sits above the plot. Same canvas footprint,
+fonts, and overall layout as [`tempest-temp-chart/`](../tempest-temp-chart/)
+and [`tempest-wind-chart/`](../tempest-wind-chart/) -- a third sibling
+chart for the same station.
+
+Defaults to today (station-local calendar day) and to whichever station the
+API key's account has a Tempest ("ST") device on.
+
+## Files
+
+- `fetch_tempest.py` -- pulls a day's 1-minute-resolution station pressure
+  observations for a Tempest station from the WeatherFlow Tempest API,
+  reduces each reading to sea level (see Notes below), and writes
+  `tempest_pressure_obs.json`. Requires `TEMPEST_API_KEY` in the
+  environment (get one at https://tempestwx.com/settings/tokens). Run
+  this any time you want the chart to reflect the latest observation.
+  Same station-discovery and station-local-day-boundary handling as
+  `tempest-temp-chart/fetch_tempest.py` -- see that project's README for
+  why the day boundary is computed the way it is.
+- `build_chart.py` -- renders `tempest_pressure_obs.json` into
+  `tempest_pressure_chart.png`. See `--no-current-conditions` in Notes
+  below for rendering a past, complete (archive) day instead of today's.
+- `requirements.txt` / `setup.sh` -- Python dependencies (no system
+  packages needed here, unlike the map projects).
+
+## Usage
+
+```bash
+bash setup.sh                      # first time / fresh environment only
+export TEMPEST_API_KEY=...         # your Tempest API key
+
+# Default: today, the account's Tempest station
+python3 fetch_tempest.py
+python3 build_chart.py
+
+# A specific day or station (if the account has more than one)
+python3 fetch_tempest.py --date 2026-08-30 --station-id 12345
+python3 build_chart.py
+
+# That same past day as an archive chart -- no current-conditions box
+python3 build_chart.py --no-current-conditions
+```
+
+## Notes
+
+- **Source**: WeatherFlow's Tempest REST API
+  (`swd.weatherflow.com/swd/rest`), same `/stations` + `/observations/device`
+  flow as `tempest-temp-chart/fetch_tempest.py`. Station pressure comes
+  from `obs_st` field index 6, already in millibars.
+- **Sea-level reduction**: Tempest's `obs_st` only reports *station*
+  pressure (absolute pressure at the sensor's own elevation), not a
+  sea-level-adjusted reading -- `fetch_tempest.py` reduces it itself,
+  using the standard barometric formula (the same station-elevation-only
+  reduction NWS-style altimeter/QFF-style readings use, ignoring
+  humidity/virtual-temperature effects): `P0 = P * (1 - L*h / (T + L*h +
+  273.15)) ^ -5.257`, where `h` is the station's own elevation in meters
+  (`/stations`' `station_meta.elevation` -- confirmed present and in
+  meters against this account's real station: 153.3 m), `L` = 0.0065 K/m
+  (the ICAO standard atmosphere's tropospheric lapse rate), `T` is the
+  *concurrent* air temperature in °C from that same observation (`obs_st`
+  index 7), and `5.257 = g*M/(R*L)` for that same standard atmosphere.
+  Verified by hand against a real reading: 992.5 mb station pressure at
+  153.3 m with 25.6°C air temp reduces to ~1010.0 mb (~29.83 inHg) --
+  a plausible sea-level value for typical late-summer conditions, not
+  the implausibly-low ~992 mb the unreduced station pressure alone would
+  suggest. Reduced to millibars, then converted to inches of mercury
+  (`MB_TO_INHG = 0.02953`) for display, matching the rest of this
+  station's chart family's US-customary-units convention (°F, mph).
+- **Day boundary is station-local, not UTC** -- see
+  `tempest-temp-chart/README.md`'s own note on this; the logic is
+  identical here.
+- **X-axis spans the full 24-hour local day**, same reasoning and tick
+  layout as `tempest-temp-chart`.
+- **Data outages show as a break in the line, not a straight line across
+  them** -- same `insert_gaps()` NaN-insertion approach as
+  `tempest-temp-chart`/`tempest-wind-chart`.
+- **Y-axis** pads a flat +-0.05 inHg around the day's observed range --
+  much smaller than the temp chart's +-3°F, since a whole day's sea-level
+  pressure swing is usually tiny (a calm day might only span ~0.1-0.2
+  inHg) compared to temperature's; a pad sized like temperature's would
+  flatten the day's actual diurnal wobble into an imperceptible sliver.
+- Chart styling (fonts, dimensions, logo placement, current-conditions
+  stat box mechanics) mirrors `tempest-temp-chart/build_chart.py` -- edit
+  `build_chart.py` directly to adjust. The line is the same forest green
+  (`#164f29`) `tempest-temp-chart` uses for dew point and
+  `tempest-wind-chart` uses for gust -- pressure has only the one series,
+  so it just takes the family's green outright rather than needing a new
+  hue of its own.
+- **Logo placement defaults bottom-right**, matching the sibling charts,
+  moving to the top-right corner if the pressure line's actual drawn path
+  would pass behind it there (`Path.intersects_bbox`, not just the raw
+  data points).
+- **Current-conditions stat box** reuses the sibling charts' stat-box
+  design (two-line right-aligned label, bold color-chip value, the
+  `get_window_extent()` bbox-padding gotcha -- see
+  `tempest-temp-chart/README.md` for the full writeup), but as a single
+  box centered on the figure's own midpoint rather than the two-column
+  layout the temp/wind charts use, since there's only the one series
+  here. Its chip background is a **fixed** color (`PRESSURE_COLOR`, the
+  same green as the line) rather than a reading-driven color-table lookup
+  the way the other charts' stat boxes work -- no color table was
+  supplied for pressure, so this just carries the line's own color
+  through consistently instead of inventing a gradient.
+- **`--no-current-conditions`** renders a plain historical-day (archive)
+  chart: no stat box, no "Updated" clause in the subtitle (just the
+  date), title drops "Today's", and no dotted last-observation marker --
+  same reasoning, and the same flag name, as the sibling charts' own
+  archive-day mode. The plot reclaims the stat box's vertical space, back
+  to the full 0.65-of-figure height.
+- **Not (yet) included**: a `build_lookback_charts.py` local-testing /
+  backfill tool and the droplet deploy scripts (`deploy/publish_*.py`,
+  `deploy/crontab.example`) that the temp and wind charts both have --
+  this project hasn't been asked to go through that yet. Also not
+  included: extremes marking (a `--mark-low`/`--mark-high`-style peak/
+  trough callout) -- ask, and either can be added the same way they
+  exist on the sibling charts.

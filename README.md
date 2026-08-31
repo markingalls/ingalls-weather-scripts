@@ -56,6 +56,11 @@ workflows. Each project lives in its own directory with its own README.
   `tempest-temp-chart/`, same station and same styling: wind speed and
   gust lines across the full 24-hour local calendar day, with
   current-conditions wind speed (direction + mph) and gust readouts.
+- [`tempest-pressure-chart/`](tempest-pressure-chart/) — sibling to
+  `tempest-temp-chart/`, same station and same styling: a sea-level
+  pressure line (station pressure reduced via the standard barometric
+  formula and the station's own elevation) across the full 24-hour local
+  calendar day, with a current-conditions pressure readout.
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
