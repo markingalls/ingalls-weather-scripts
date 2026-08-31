@@ -396,11 +396,13 @@ def main():
 
     # ---------- current-conditions stat boxes ----------
     # Sit in the band freed up by shrinking the axes above, between the
-    # plot's top and the subtitle: a two-line regular-weight label
-    # ("Current" / "Temperature") to the left of a bold value readout,
-    # whose own small colored backdrop (not the whole row) comes from the
-    # current reading's color-table lookup (temp/dew point converted to
-    # Kelvin, interpolated); the bold text itself is black or white,
+    # plot's top and the subtitle: a two-line regular-weight, right-aligned
+    # label ("Current" / "Temperature") immediately to the left of a bold
+    # value readout, the pair centered as a unit within its own column
+    # (temp centered in the left half, dew point in the right half). The
+    # number's own small colored backdrop (not the whole row) comes from
+    # the current reading's color-table lookup (temp/dew point converted
+    # to Kelvin, interpolated); the bold text itself is black or white,
     # whichever contrasts against that particular background.
     if times:
         current_temp_f = temps[-1]
@@ -410,27 +412,39 @@ def main():
         stat_gap = 0.02
         col_width = (right_x - left_x - stat_gap) / 2
         label_fontsize = 14
+        label_linespacing = 0.85
         fig_w_px = fig.get_size_inches()[0] * fig.get_dpi()
+        label_number_gap_px = 0.012 * fig_w_px
 
-        def draw_stat_pair(label_x, label_text, value_f, table):
-            label_artist = fig.text(label_x, stat_center_y, label_text, fontproperties=f_reg,
-                                     fontsize=label_fontsize, color=INK, ha="left", va="center",
-                                     linespacing=0.85)
+        def draw_stat_pair(column_center_x, label_text, value_f, table):
             fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
-            label_box = label_artist.get_window_extent(renderer)
 
-            value_text = f"{value_f:.1f}°" if value_f is not None else "N/A"
-
-            # The number's fontsize is picked so its own rendered text
-            # height matches the two-line label's, not guessed -- render
-            # once at a probe size, measure, then rescale proportionally.
-            probe_size = 24
-            probe = fig.text(0, 0, value_text, fontproperties=f_bold, fontsize=probe_size)
+            # Label width at its actual (tight) line spacing.
+            label_probe = fig.text(0, stat_center_y, label_text, fontproperties=f_reg,
+                                     fontsize=label_fontsize, linespacing=label_linespacing)
             fig.canvas.draw()
-            probe_height_px = probe.get_window_extent(renderer).height
-            probe.remove()
-            number_fontsize = probe_size * (label_box.height / probe_height_px)
+            label_width_px = label_probe.get_window_extent(renderer).width
+            label_probe.remove()
+
+            # Number fontsize is matched to the label block's height at
+            # linespacing=1.2 (its original, wider spacing) rather than
+            # the tighter spacing it's actually drawn with now -- keeps
+            # the number the same size it was before the label spacing
+            # was tightened.
+            height_probe = fig.text(0, 0, label_text, fontproperties=f_reg,
+                                      fontsize=label_fontsize, linespacing=1.2)
+            fig.canvas.draw()
+            label_height_px = height_probe.get_window_extent(renderer).height
+            height_probe.remove()
+
+            value_text = f"{value_f:.1f}°F" if value_f is not None else "N/A"
+            probe_size = 24
+            num_probe = fig.text(0, 0, value_text, fontproperties=f_bold, fontsize=probe_size)
+            fig.canvas.draw()
+            probe_height_px = num_probe.get_window_extent(renderer).height
+            num_probe.remove()
+            number_fontsize = probe_size * (label_height_px / probe_height_px)
 
             if value_f is not None:
                 rgb = interp_color(fahrenheit_to_kelvin(value_f), table)
@@ -440,19 +454,42 @@ def main():
                 text_color = INK_SECONDARY
                 chip_color = BG
 
-            # \mathbf keeps the superscript F upright and bold (mathtext's
-            # default is an italic "variable" style) -- mathtext auto-scales
-            # a superscript smaller than the surrounding fontsize, matching
-            # how a real superscript reads next to the value.
-            display_text = value_text + r"$\mathbf{^{F}}$" if value_f is not None else value_text
-            number_x = label_box.x1 / fig_w_px + 0.012  # close behind the label's widest line
-            fig.text(number_x, stat_center_y, display_text, fontproperties=f_bold,
-                      fontsize=number_fontsize, color=text_color, ha="left", va="center",
-                      bbox=dict(boxstyle="round,pad=0.35", facecolor=chip_color, edgecolor="none"),
-                      zorder=15)
+            chip_pad = 0.35
+            chip_kwargs = dict(fontproperties=f_bold, fontsize=number_fontsize, color=text_color,
+                                va="center", bbox=dict(boxstyle=f"round,pad={chip_pad}",
+                                                        facecolor=chip_color, edgecolor="none"))
+            # get_window_extent() on bbox-styled text reports only the bare
+            # text's box, ignoring the padded patch drawn behind it (verified:
+            # its x0 lands exactly on the ha="left" anchor, not the patch's
+            # actual left edge) -- so the patch's pad has to be added back in
+            # by hand. "pad" in a boxstyle spec is in font-size units, i.e.
+            # chip_pad * fontsize *points*, converted to pixels via dpi/72.
+            num_probe2 = fig.text(0, stat_center_y, value_text, ha="left", **chip_kwargs)
+            fig.canvas.draw()
+            text_width_px = num_probe2.get_window_extent(renderer).width
+            num_probe2.remove()
+            pad_px = chip_pad * number_fontsize * (fig.get_dpi() / 72)
+            chip_width_px = text_width_px + 2 * pad_px
 
-        draw_stat_pair(left_x, "Current\nTemperature", current_temp_f, TEMP_COLOR_TABLE)
-        draw_stat_pair(left_x + col_width + stat_gap, "Current\nDew Point",
+            # Center the whole (label + gap + chip) unit on the column's
+            # own midpoint, rather than pinning it to the column's left edge.
+            total_width_px = label_width_px + label_number_gap_px + chip_width_px
+            start_x_px = column_center_x * fig_w_px - total_width_px / 2
+            label_right_px = start_x_px + label_width_px
+            # anchor = desired visual left edge of the padded chip + pad_px,
+            # since the chip's actual left edge sits pad_px left of the anchor.
+            number_anchor_px = label_right_px + label_number_gap_px + pad_px
+
+            fig.text(label_right_px / fig_w_px, stat_center_y, label_text, fontproperties=f_reg,
+                      fontsize=label_fontsize, color=INK, ha="right", va="center",
+                      linespacing=label_linespacing, multialignment="right")
+            fig.text(number_anchor_px / fig_w_px, stat_center_y, value_text, ha="left",
+                      zorder=15, **chip_kwargs)
+
+        temp_column_center = left_x + col_width / 2
+        dew_column_center = left_x + col_width + stat_gap + col_width / 2
+        draw_stat_pair(temp_column_center, "Current\nTemperature", current_temp_f, TEMP_COLOR_TABLE)
+        draw_stat_pair(dew_column_center, "Current\nDew Point",
                         current_dew_point_f, DEW_POINT_COLOR_TABLE)
 
     # ---------- attribution ----------
