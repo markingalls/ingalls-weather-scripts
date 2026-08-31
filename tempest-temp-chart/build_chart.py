@@ -33,9 +33,13 @@ TEMP_COLOR = "#164f29"
 # itself so the circled point reads as an annotation, not just more data.
 LOW_COLOR = "#0b3d91"
 
+# Dark red for the daily-high callout -- same hue tri-cities-temp-chart
+# uses for its record-high markers.
+HIGH_COLOR = "#a3242b"
+
 Z_GRID = 2
 Z_TEMP = 4
-Z_LOW = 5
+Z_MARKER = 5
 
 
 def parse_args():
@@ -48,6 +52,8 @@ def parse_args():
     ap.add_argument("--output", default="tempest_temp_chart.png")
     ap.add_argument("--mark-low", action="store_true",
                      help="Circle and label the day's lowest observation")
+    ap.add_argument("--mark-high", action="store_true",
+                     help="Circle and label the day's highest observation")
     return ap.parse_args()
 
 
@@ -103,8 +109,8 @@ def main():
         # could clip an observation that runs hotter). Fixed 3°F padding
         # both directions rather than a proportional one, so the line never
         # crowds the axis edges. Set here (rather than down in "axes
-        # styling") so the logo-placement and --mark-low logic below can
-        # both work against the final plot bounds.
+        # styling") so the logo-placement and --mark-low/--mark-high logic
+        # below can both work against the final plot bounds.
         #
         # NOTE for future reference: if a forecast *low* is ever wired in
         # here too (there's currently only a forecast high, from NWS's
@@ -174,52 +180,63 @@ def main():
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
-    if times and args.mark_low:
-        low_idx = min(range(len(temps)), key=lambda i: temps[i])
-        low_time, low_temp = times[low_idx], temps[low_idx]
-        ax.scatter([low_time], [low_temp], s=160, facecolors="none", edgecolors=LOW_COLOR,
-                   linewidths=2.2, zorder=Z_LOW)
-
+    if times and (args.mark_low or args.mark_high):
         label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
-        label_text = f"Low: {low_temp:.1f}°F at {low_time.strftime('%H:%M')}"
-
-        def place_low_label(ha, va, x_off, y_off):
-            t = ax.annotate(label_text, xy=(low_time, low_temp), xytext=(x_off, y_off),
-                             textcoords="offset points", ha=ha, va=va,
-                             fontproperties=f_bold, fontsize=12, color=LOW_COLOR, zorder=Z_LOW)
-            t.set_path_effects(label_stroke)
-            return t
-
-        # Below-right is the preferred placement; fall back through
-        # above-right, below-left, above-left in that order, keeping
-        # the first whose actual rendered extent stays inside the plot
-        # and clear of the logo -- rather than guess a threshold, since
-        # a forecast-driven axis can leave very little room below the
-        # low (its bottom padding is a flat 3°F regardless of how tall
-        # the axis gets above it), and the low can in principle land
-        # anywhere in the day, including right in the logo's corner.
-        candidates = [
-            ("left", "center", 10, -8),
-            ("left", "bottom", 10, 10),
-            ("right", "center", -10, -8),
-            ("right", "bottom", -10, 10),
-        ]
+        # Circled markers already placed this render (starts with just the
+        # logo, if any) -- each new one avoids all of these, and adds its
+        # own final position to the list before the next one is placed, so
+        # a low and a high shown together don't land on top of each other.
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
         ax_box = ax.get_window_extent(renderer)
-        logo_box = logo_ax.get_window_extent(renderer) if logo_ax is not None else None
-        txt = None
-        for ha, va, x_off, y_off in candidates:
-            if txt is not None:
-                txt.remove()
-            txt = place_low_label(ha, va, x_off, y_off)
-            fig.canvas.draw()
-            txt_box = txt.get_window_extent(renderer)
-            fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
-                    and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
-            clear_of_logo = logo_box is None or not txt_box.overlaps(logo_box)
-            if fits and clear_of_logo:
-                break
+        occupied = [logo_ax.get_window_extent(renderer)] if logo_ax is not None else []
+
+        def mark_extreme(idx, color, prefix):
+            t_val, v_val = times[idx], temps[idx]
+            ax.scatter([t_val], [v_val], s=160, facecolors="none", edgecolors=color,
+                       linewidths=2.2, zorder=Z_MARKER)
+            label_text = f"{prefix}: {v_val:.1f}°F at {t_val.strftime('%H:%M')}"
+
+            def place(ha, va, x_off, y_off):
+                a = ax.annotate(label_text, xy=(t_val, v_val), xytext=(x_off, y_off),
+                                 textcoords="offset points", ha=ha, va=va,
+                                 fontproperties=f_bold, fontsize=12, color=color, zorder=Z_MARKER)
+                a.set_path_effects(label_stroke)
+                return a
+
+            # Below-right is the preferred placement; fall back through
+            # above-right, below-left, above-left in that order, keeping
+            # the first whose actual rendered extent stays inside the plot
+            # and clear of the logo/other marker -- rather than guess a
+            # threshold, since a forecast-driven axis can leave very
+            # little room below the low (its bottom padding is a flat
+            # 3°F regardless of how tall the axis gets above it), and
+            # either point can in principle land anywhere in the day,
+            # including right in the logo's corner or near each other.
+            candidates = [
+                ("left", "center", 10, -8),
+                ("left", "bottom", 10, 10),
+                ("right", "center", -10, -8),
+                ("right", "bottom", -10, 10),
+            ]
+            txt = None
+            for ha, va, x_off, y_off in candidates:
+                if txt is not None:
+                    txt.remove()
+                txt = place(ha, va, x_off, y_off)
+                fig.canvas.draw()
+                txt_box = txt.get_window_extent(renderer)
+                fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
+                        and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
+                clear = not any(txt_box.overlaps(b) for b in occupied)
+                if fits and clear:
+                    break
+            occupied.append(txt.get_window_extent(renderer))
+
+        if args.mark_low:
+            mark_extreme(min(range(len(temps)), key=lambda i: temps[i]), LOW_COLOR, "Low")
+        if args.mark_high:
+            mark_extreme(max(range(len(temps)), key=lambda i: temps[i]), HIGH_COLOR, "High")
 
     # ---------- axes styling ----------
     ax.set_ylabel("Air Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)

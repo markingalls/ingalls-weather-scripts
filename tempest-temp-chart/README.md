@@ -45,8 +45,10 @@ python3 build_chart.py
 python3 fetch_tempest.py --date 2026-08-30 --station-id 12345
 python3 build_chart.py
 
-# Circle and label the day's lowest observation
+# Circle and label the day's lowest and/or highest observation
 python3 build_chart.py --mark-low
+python3 build_chart.py --mark-high
+python3 build_chart.py --mark-low --mark-high
 ```
 
 ## Notes
@@ -92,23 +94,28 @@ python3 build_chart.py --mark-low
   forecast rather than the other way around. An observation should always
   be able to override a forecast in whichever direction it turns out to be
   more extreme, above or below.
-- **`--mark-low`** (off by default) circles the day's lowest observation
-  and labels it `Low: XX.X°F at HH:MM`. Prefers below-and-right of the
-  point, but tries above-right, below-left, and above-left in turn,
-  keeping the first whose actual rendered extent stays inside the plot and
-  clear of the logo -- rather than guessing a fixed offset, since a
-  forecast-driven axis can leave very little room below the low (the
-  bottom padding is a flat 3°F regardless of how tall the axis gets above
-  it), and the low could in principle land anywhere in the day, including
-  the logo's own corner.
+- **`--mark-low` / `--mark-high`** (both off by default, independently
+  toggleable) circle the day's lowest/highest observation and label them
+  `Low: XX.X°F at HH:MM` / `High: XX.X°F at HH:MM`. Each prefers
+  below-and-right of its point, but tries above-right, below-left, and
+  above-left in turn, keeping the first whose actual rendered extent stays
+  inside the plot and clear of the logo *and* the other marker (if both
+  are on -- the high is placed after the low, so it also avoids the low's
+  final position; they're normally hours apart in a real diurnal curve,
+  but this holds even when they land close together) -- rather than
+  guessing a fixed offset, since a forecast-driven axis can leave very
+  little room below the low (the bottom padding is a flat 3°F regardless
+  of how tall the axis gets above it), and either point could in
+  principle land anywhere in the day, including the logo's own corner.
 - Chart styling (fonts, colors, dimensions, logo placement) mirrors
   `850-700-temp-chart/build_chart.py` and `tri-cities-temp-chart/build_chart.py`
   -- edit `build_chart.py` directly to adjust. The temperature line reuses
   the same forest green (`#164f29`) those charts use for their own
-  observed-temperature series; the `--mark-low` callout uses the same deep
-  blue (`#0b3d91`) `hrrr-smoke-chart` uses for its second location line. No
-  legend -- there's only the one series, labeled directly in the
-  title/y-axis instead.
+  observed-temperature series; `--mark-low` uses the same deep blue
+  (`#0b3d91`) `hrrr-smoke-chart` uses for its second location line, and
+  `--mark-high` the same dark red (`#a3242b`) `tri-cities-temp-chart` uses
+  for record highs. No legend -- there's only the one series, labeled
+  directly in the title/y-axis instead.
 - **Logo placement defaults bottom-right**, matching those other temp
   charts, but moves to the top-right corner instead whenever the
   temperature line's actual drawn path (every segment, via
@@ -119,8 +126,8 @@ python3 build_chart.py --mark-low
   in the day and the temperature happens to be low then too, but it does
   happen (and more so once a forecast high has stretched the axis down
   into that corner's territory) -- checked once per render against the
-  final axis bounds, before `--mark-low`'s own placement logic runs (which
-  then sees the logo whichever corner it ended up in).
+  final axis bounds, before `--mark-low`/`--mark-high`'s own placement
+  logic runs (which then sees the logo whichever corner it ended up in).
 - **Forecast source**: `fetch_forecast.py` resolves a lat/lon to its NWS
   forecast office/grid via `/points`, then reads today's first daytime
   period's `temperature` from the standard `/forecast` endpoint (already
