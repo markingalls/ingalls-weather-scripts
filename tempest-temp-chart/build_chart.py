@@ -391,44 +391,63 @@ def main():
     date_str = day_start.strftime("%B %-d, %Y")
     fig.text(left_x, title_y, f"Today's Temperature — {data['label']}",
               fontproperties=f_bold, fontsize=22, color=INK)
-    subtitle = date_str
+    subtitle = f"{date_str} • Updated: {times[-1].strftime('%H:%M')} PT" if times else date_str
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- current-conditions stat boxes ----------
     # Sit in the band freed up by shrinking the axes above, between the
-    # plot's top and the subtitle. Each box's background is the current
-    # reading's own color-table lookup (temp/dew point converted to
-    # Kelvin, interpolated); the bold value text is black or white,
+    # plot's top and the subtitle: a two-line regular-weight label
+    # ("Current" / "Temperature") to the left of a bold value readout,
+    # whose own small colored backdrop (not the whole row) comes from the
+    # current reading's color-table lookup (temp/dew point converted to
+    # Kelvin, interpolated); the bold text itself is black or white,
     # whichever contrasts against that particular background.
     if times:
         current_temp_f = temps[-1]
         current_dew_point_f = dew_points[-1]
 
-        stat_y0, stat_height = 0.685, 0.105
+        stat_center_y = 0.685 + 0.105 / 2
         stat_gap = 0.02
-        box_width = (right_x - left_x - stat_gap) / 2
+        col_width = (right_x - left_x - stat_gap) / 2
+        label_fontsize = 14
 
-        def draw_stat_box(x0, value_f, label, table):
-            box_ax = fig.add_axes([x0, stat_y0, box_width, stat_height], zorder=15)
+        def draw_stat_pair(label_x, number_x, label_text, value_f, table):
+            label_artist = fig.text(label_x, stat_center_y, label_text, fontproperties=f_reg,
+                                     fontsize=label_fontsize, color=INK, ha="left", va="center",
+                                     linespacing=1.2)
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            label_height_px = label_artist.get_window_extent(renderer).height
+
+            value_text = f"{value_f:.1f}°F" if value_f is not None else "N/A"
+
+            # The number's fontsize is picked so its own rendered text
+            # height matches the two-line label's, not guessed -- render
+            # once at a probe size, measure, then rescale proportionally.
+            probe_size = 24
+            probe = fig.text(0, 0, value_text, fontproperties=f_bold, fontsize=probe_size)
+            fig.canvas.draw()
+            probe_height_px = probe.get_window_extent(renderer).height
+            probe.remove()
+            number_fontsize = probe_size * (label_height_px / probe_height_px)
+
             if value_f is not None:
                 rgb = interp_color(fahrenheit_to_kelvin(value_f), table)
-                box_ax.set_facecolor(tuple(c / 255 for c in rgb))
                 text_color = text_color_for_bg(rgb)
-                text = f"{label}: {value_f:.1f}°F"
+                chip_color = tuple(c / 255 for c in rgb)
             else:
-                box_ax.set_facecolor(BG)
                 text_color = INK_SECONDARY
-                text = f"{label}: N/A"
-            box_ax.set_xticks([])
-            box_ax.set_yticks([])
-            for spine in box_ax.spines.values():
-                spine.set_visible(False)
-            box_ax.text(0.5, 0.5, text, transform=box_ax.transAxes, ha="center", va="center",
-                        fontproperties=f_bold, fontsize=19, color=text_color)
+                chip_color = BG
 
-        draw_stat_box(left_x, current_temp_f, "Current Temp", TEMP_COLOR_TABLE)
-        draw_stat_box(left_x + box_width + stat_gap, current_dew_point_f,
-                      "Current Dew Point", DEW_POINT_COLOR_TABLE)
+            fig.text(number_x, stat_center_y, value_text, fontproperties=f_bold,
+                      fontsize=number_fontsize, color=text_color, ha="left", va="center",
+                      bbox=dict(boxstyle="round,pad=0.35", facecolor=chip_color, edgecolor="none"),
+                      zorder=15)
+
+        draw_stat_pair(left_x, left_x + col_width * 0.5,
+                        "Current\nTemperature", current_temp_f, TEMP_COLOR_TABLE)
+        draw_stat_pair(left_x + col_width + stat_gap, left_x + col_width + stat_gap + col_width * 0.5,
+                        "Current\nDew Point", current_dew_point_f, DEW_POINT_COLOR_TABLE)
 
     # ---------- attribution ----------
     fig.text(center_x, 0.02, "Ingalls Weather",
