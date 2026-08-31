@@ -63,10 +63,10 @@ python3 build_chart.py --mark-low
 - **X-axis spans the full 24-hour local day** (midnight to midnight) even
   when run mid-day, per the same-day-chart use case this project is built
   for -- the line simply stops at the most recent observation rather than
-  the axis being cropped to only the elapsed hours. Ticks are every 6 hours
-  in 24-hour time (`00:00`/`06:00`/`12:00`/`18:00`); a dotted vertical
-  marker at the last observation makes the stopping point read as current,
-  not as missing data.
+  the axis being cropped to only the elapsed hours. Ticks are every 3 hours
+  in 24-hour time (`00:00`/`03:00`/.../`21:00`); a dotted vertical marker at
+  the last observation makes the stopping point read as current, not as
+  missing data.
 - **Y-axis** is fixed to 3°F below the day's observed low and 3°F above
   the day's observed high -- both are simply `min`/`max` of whatever's been
   observed so far, so before the actual overnight low or afternoon high has
@@ -90,3 +90,6 @@ python3 build_chart.py --mark-low
   names to a more recognizable label (e.g. `"Highland Hills"` →
   `"Highland Hills (Hermiston)"`, the property name plus its town); pass
   `--label` to override for any station, known or not.
+- **Subtitle** is just the date; timezone and station-vs-property
+  distinctions live in the title's label and this file, not on the chart
+  itself.

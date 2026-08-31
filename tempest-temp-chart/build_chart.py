@@ -96,7 +96,7 @@ def main():
 
     # ---------- axes styling ----------
     ax.set_ylabel("Air Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)
-    ax.set_xlabel("Time (24h, local)", fontproperties=f_med, fontsize=12, color=INK)
+    ax.set_xlabel("Time", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
     for spine in ("top", "right"):
@@ -105,7 +105,7 @@ def main():
         ax.spines[spine].set_color(AXIS_COLOR)
         ax.spines[spine].set_linewidth(1.0)
 
-    ax.xaxis.set_major_locator(mdates.HourLocator(interval=6, tz=tz))
+    ax.xaxis.set_major_locator(mdates.HourLocator(interval=3, tz=tz))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=tz))
     ax.set_xlim(day_start, day_end)
     ax.tick_params(axis="both", colors=AXIS_COLOR, labelsize=10, length=4)
@@ -153,11 +153,11 @@ def main():
     date_str = day_start.strftime("%B %-d, %Y")
     fig.text(left_x, title_y, f"Today's Temperature — {data['label']}",
               fontproperties=f_bold, fontsize=22, color=INK)
-    subtitle = f"{date_str} • {data['timezone']} • Tempest Station"
+    subtitle = date_str
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
-    fig.text(center_x, 0.02, "WeatherFlow Tempest — Ingalls Weather",
+    fig.text(center_x, 0.02, "Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
     plt.savefig(args.output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
