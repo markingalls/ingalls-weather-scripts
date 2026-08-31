@@ -1,14 +1,15 @@
 # Tempest Temperature Chart
 
 Generates a styled same-day temperature chart from a personal WeatherFlow
-Tempest station for Ingalls Weather's Instagram: a single air-temperature
-line across the full 24-hour local calendar day, in 24-hour time -- since
-this is a same-day chart, the line legitimately stops partway through the
-day rather than reaching the right edge, marked with a dotted vertical line
-at the most recent observation. Same canvas footprint and fonts as the
-[850/700 mb temp chart](../850-700-temp-chart/) and
-[Tri-Cities temp chart](../tri-cities-temp-chart/), just one station's raw
-observations instead of a forecast/climatology blend.
+Tempest station for Ingalls Weather's Instagram: air temperature and dew
+point lines across the full 24-hour local calendar day, in 24-hour time --
+since this is a same-day chart, the lines legitimately stop partway through
+the day rather than reaching the right edge, marked with a dotted vertical
+line at the most recent observation. Two current-conditions stat boxes
+(Current Temperature / Current Dew Point) sit above the plot. Same canvas
+footprint and fonts as the [850/700 mb temp chart](../850-700-temp-chart/)
+and [Tri-Cities temp chart](../tri-cities-temp-chart/), just one station's
+raw observations instead of a forecast/climatology blend.
 
 Defaults to today (station-local calendar day) and to whichever station the
 API key's account has a Tempest ("ST") device on.
@@ -87,17 +88,20 @@ python3 build_chart.py --mark-low --mark-high
   y-axis bounds all still come from the real observations (`times`/`temps`
   as fetched, unmodified), so a gap never affects what those report.
 - **Y-axis** is fixed to 3°F below the day's low and 3°F above its high.
-  The low is simply `min` of whatever's been observed so far -- before the
-  actual overnight low has happened yet, the axis just reflects the
+  The low is `min` of whatever's been observed so far, across *both*
+  temperature and dew point (dew point is always <= air temperature, so
+  it's often the actual lower bound, not temperature's own low) -- before
+  the actual overnight low has happened yet, the axis just reflects the
   partial day and widens as later observations come in. The high is
-  `max(observed high, forecast high)`: `fetch_forecast.py`'s NWS forecast
-  high (if `forecast.json` is present and for the same date) gives the
-  axis headroom for the afternoon high before it's actually been observed;
-  once it has, the observed max takes over as the larger of the two --
-  `max()` is itself the override: a forecast is only ever a floor on the
-  axis, never a ceiling that could clip an observation running hotter than
-  it. With no `forecast.json`, the high is just the observed max so far,
-  same as the low.
+  `max(observed high, forecast high)` (temperature only -- dew point never
+  exceeds it, so it never affects the top bound): `fetch_forecast.py`'s
+  NWS forecast high (if `forecast.json` is present and for the same date)
+  gives the axis headroom for the afternoon high before it's actually been
+  observed; once it has, the observed max takes over as the larger of the
+  two -- `max()` is itself the override: a forecast is only ever a floor
+  on the axis, never a ceiling that could clip an observation running
+  hotter than it. With no `forecast.json`, the high is just the observed
+  max so far, same as the low.
   **For future reference**: there's currently no forecast *low* (only a
   forecast high, from NWS's daytime period), but if one is ever added, it
   should follow the same rule symmetrically -- `day_low = min(day_low,
@@ -118,27 +122,42 @@ python3 build_chart.py --mark-low --mark-high
   little room below the low (the bottom padding is a flat 3°F regardless
   of how tall the axis gets above it), and either point could in
   principle land anywhere in the day, including the logo's own corner.
-- Chart styling (fonts, colors, dimensions, logo placement) mirrors
+- **Dew point line**: plotted alongside temperature (terra-cotta, `#c9531c`
+  -- the same climatology-line color `850-700-temp-chart`/
+  `tri-cities-temp-chart` use), same gap-breaking treatment as
+  temperature (see above), but deliberately has no `--mark-low`/
+  `--mark-high` equivalent -- those stay temperature-only. Missing-RH
+  observations (rare) come back from `fetch_tempest.py` with no
+  `dew_point_f` key at all; `build_chart.py` substitutes `NaN` for those
+  before plotting, so a lone missing reading breaks the line the same way
+  a real outage does, rather than crashing or silently interpolating
+  across it.
+- A small legend (top-left, unobtrusive, no frame) distinguishes the two
+  lines -- added once there were two series to tell apart; the original
+  single-line version didn't need one (the y-axis label alone was enough).
+- Chart styling (fonts, dimensions, logo placement) mirrors
   `850-700-temp-chart/build_chart.py` and `tri-cities-temp-chart/build_chart.py`
-  -- edit `build_chart.py` directly to adjust. The temperature line reuses
-  the same forest green (`#164f29`) those charts use for their own
-  observed-temperature series; `--mark-low` uses the same deep blue
-  (`#0b3d91`) `hrrr-smoke-chart` uses for its second location line, and
-  `--mark-high` the same dark red (`#a3242b`) `tri-cities-temp-chart` uses
-  for record highs. No legend -- there's only the one series, labeled
-  directly in the title/y-axis instead.
+  -- edit `build_chart.py` directly to adjust. The temperature line is the
+  same blue as the cloud in the Ingalls Weather logo (`#1d7db0`, sampled
+  directly from `assets/ingalls_weather_logo.png`'s dominant cloud-fill
+  pixel color). `--mark-low` uses the same deep blue (`#0b3d91`)
+  `hrrr-smoke-chart` uses for its second location line, and `--mark-high`
+  the same dark red (`#a3242b`) `tri-cities-temp-chart` uses for record
+  highs.
 - **Logo placement defaults bottom-right**, matching those other temp
-  charts, but moves to the top-right corner instead whenever the
-  temperature line's actual drawn path (every segment, via
-  `Path.intersects_bbox` -- not just the raw data points, since a segment
-  between two widely spaced samples can cut through the corner without
-  either endpoint landing inside it) would pass behind it there. A
-  same-day chart's line only ever reaches that corner when "now" is late
-  in the day and the temperature happens to be low then too, but it does
-  happen (and more so once a forecast high has stretched the axis down
-  into that corner's territory) -- checked once per render against the
-  final axis bounds, before `--mark-low`/`--mark-high`'s own placement
-  logic runs (which then sees the logo whichever corner it ended up in).
+  charts, but moves to the top-right corner instead whenever either
+  line's actual drawn path (every segment, via `Path.intersects_bbox` --
+  not just the raw data points, since a segment between two widely spaced
+  samples can cut through the corner without either endpoint landing
+  inside it) would pass behind it there -- dew point is checked along
+  with temperature since it's often the lower of the two curves, and so
+  the more likely one to actually reach that corner. A same-day chart's
+  line only ever reaches that corner when "now" is late in the day and
+  the reading happens to be low then too, but it does happen (and more so
+  once a forecast high has stretched the axis down into that corner's
+  territory) -- checked once per render against the final axis bounds,
+  before `--mark-low`/`--mark-high`'s own placement logic runs (which
+  then sees the logo whichever corner it ended up in).
 - **Forecast source**: `fetch_forecast.py` resolves a lat/lon to its NWS
   forecast office/grid via `/points`, then reads today's first daytime
   period's `temperature` from the standard `/forecast` endpoint (already
@@ -154,6 +173,31 @@ python3 build_chart.py --mark-low --mark-high
   names to a more recognizable label (e.g. `"Highland Hills"` →
   `"Highland Hills (Hermiston)"`, the property name plus its town); pass
   `--label` to override for any station, known or not.
-- **Subtitle** is just the date; timezone and station-vs-property
-  distinctions live in the title's label and this file, not on the chart
-  itself.
+- **Subtitle** is the date plus `• Updated: HH:MM PT` (the last
+  observation's local time, 24-hour); timezone and station-vs-property
+  distinctions otherwise live in the title's label and this file, not on
+  the chart itself.
+- **Current-conditions stat boxes** sit in the band freed up by shrinking
+  the plot's own height (0.65 -> 0.56 of the figure, vs. the other temp
+  charts). Each is a two-line, regular-weight, right-aligned label
+  ("Current" / "Temperature", tight 0.85 linespacing) immediately left of
+  a bold value chip; the chip's small colored background (not the whole
+  row) comes from interpolating `TEMP_COLOR_TABLE`/`DEW_POINT_COLOR_TABLE`
+  (K -> RGB control points, linearly interpolated by `interp_color()`)
+  against the reading converted to Kelvin, and the bold text itself is
+  black or white via `text_color_for_bg()`'s ITU-R BT.601 luminance
+  check. The number's fontsize is matched (measure, don't guess) to the
+  label block's height at linespacing=1.2 specifically -- kept at that
+  original size even though the label itself now renders tighter, so
+  tightening the label's spacing didn't also shrink the number. Each
+  (label + chip) pair is centered as a unit within its own column,
+  nudged left slightly further (`stat_visual_shift`) since a geometrically
+  centered pair still reads as sitting a bit right of center -- the bold
+  chip carries more visual weight than the plain label next to it.
+  **Known matplotlib gotcha**: `Text.get_window_extent()` on a
+  `bbox=`-styled Text ignores the padded patch entirely and reports only
+  the bare text's box (confirmed empirically: its measured left edge
+  lands exactly on the `ha="left"` anchor) -- the pad has to be added
+  back by hand (`chip_pad * fontsize_pt * dpi/72`, since a boxstyle's
+  `pad` is in font-size units) wherever the chip's actual visual footprint
+  matters, or spacing/centering math will be off by the pad amount.

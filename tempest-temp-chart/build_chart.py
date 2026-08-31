@@ -25,9 +25,16 @@ INK_SECONDARY = "#5a584f"
 GRID_COLOR = "#000000"
 AXIS_COLOR = "#000000"
 
-# Forest green, same hue the other temp charts (850-700-temp-chart,
-# tri-cities-temp-chart) use for their primary observed-temperature line.
-TEMP_COLOR = "#164f29"
+# Same blue as the cloud in the Ingalls Weather logo (sampled directly
+# from assets/ingalls_weather_logo.png -- the cloud's dominant solid-fill
+# pixel color, not its lighter highlight swoosh or dark outline).
+TEMP_COLOR = "#1d7db0"
+
+# Warm terra-cotta for the dew point line -- same hue the climatology
+# lines in 850-700-temp-chart/tri-cities-temp-chart use, reused here to
+# keep it visually distinct from the (now blue) temperature line and from
+# the low/high callout colors below.
+DEW_POINT_LINE_COLOR = "#c9531c"
 
 # Deep blue for the daily-low callout, distinct from the temperature line
 # itself so the circled point reads as an annotation, not just more data.
@@ -210,10 +217,23 @@ def main():
     center_x = (axpos.x0 + axpos.x1) / 2
 
     temp_line = None
+    dew_point_line = None
     if times:
         plot_times, plot_temps = insert_gaps(times, temps, MAX_GAP)
         temp_line = ax.plot(plot_times, plot_temps, color=TEMP_COLOR, linewidth=2.6, zorder=Z_TEMP,
                              label="Air temperature")[0]
+
+        # Dew point is plotted (no --mark-low/--mark-high equivalent for
+        # it -- those stay temperature-only) but otherwise treated the
+        # same as the temperature line: missing-RH observations already
+        # come through as None from fetch_tempest.py, substituted with
+        # NaN here so matplotlib skips them the same way insert_gaps()
+        # skips a real time gap, then run through insert_gaps() itself for
+        # actual outages.
+        dew_point_values = [dp if dp is not None else float("nan") for dp in dew_points]
+        plot_times_dp, plot_dew_points = insert_gaps(times, dew_point_values, MAX_GAP)
+        dew_point_line = ax.plot(plot_times_dp, plot_dew_points, color=DEW_POINT_LINE_COLOR,
+                                  linewidth=2.0, zorder=Z_TEMP - 1, label="Dew point")[0]
 
         # The line legitimately stops partway through the day on a same-day
         # chart -- a dotted marker at the last observation makes that read
@@ -232,6 +252,11 @@ def main():
         # styling") so the logo-placement and --mark-low/--mark-high logic
         # below can both work against the final plot bounds.
         #
+        # Day's low also has to account for dew point, not just
+        # temperature -- dew point is always <= air temperature, so its
+        # own minimum can (and often does) fall below the day's low
+        # temperature reading.
+        #
         # NOTE for future reference: if a forecast *low* is ever wired in
         # here too (there's currently only a forecast high, from NWS's
         # daytime period -- see fetch_forecast.py), apply the same
@@ -240,10 +265,18 @@ def main():
         # always be able to override a forecast in whichever direction it
         # turns out to be more extreme, above or below.
         day_low, day_high = min(temps), max(temps)
+        valid_dew_points = [dp for dp in dew_points if dp is not None]
+        if valid_dew_points:
+            day_low = min(day_low, min(valid_dew_points))
         if forecast_high is not None:
             day_high = max(day_high, forecast_high)
         ax.set_ylim(day_low - 3, day_high + 3)
         ax.set_xlim(day_start, day_end)
+
+        legend = ax.legend(loc="upper left", frameon=False, fontsize=10.5, prop=f_reg,
+                            handlelength=1.6, borderaxespad=0.8)
+        for text in legend.get_texts():
+            text.set_color(INK_SECONDARY)
     else:
         ax.text(0.5, 0.5, "No observations yet today", transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
@@ -278,21 +311,26 @@ def main():
         top_y0 = axpos.y1 - inset_y - logo_height_fig
         logo_y0 = bottom_y0
 
-        if temp_line is not None:
-            # Checked against the line's actual drawn path (every segment,
-            # via Path.intersects_bbox), not just the raw data points --
-            # Tempest data is dense enough (1-minute samples) that the two
-            # are equivalent in practice, but a segment between two widely
-            # spaced points can cut through the corner without either
-            # endpoint landing inside it.
+        # Checked against both lines' actual drawn paths (every segment,
+        # via Path.intersects_bbox), not just the raw data points --
+        # Tempest data is dense enough (1-minute samples) that the two
+        # are equivalent in practice, but a segment between two widely
+        # spaced points can cut through the corner without either
+        # endpoint landing inside it. Dew point is checked too, not just
+        # temperature -- it's often the lower of the two curves, and so
+        # the more likely one to actually reach the bottom-right corner.
+        for line in (temp_line, dew_point_line):
+            if line is None:
+                continue
             fig_w_px, fig_h_px = fig_w_in * dpi, fig_h_in * dpi
             pad = 6  # a little slack for line width, not just the bare path
             rect = Bbox.from_extents(logo_x0 * fig_w_px - pad, bottom_y0 * fig_h_px - pad,
                                       (logo_x0 + logo_width_fig) * fig_w_px + pad,
                                       (bottom_y0 + logo_height_fig) * fig_h_px + pad)
-            display_path = temp_line.get_transform().transform_path(temp_line.get_path())
+            display_path = line.get_transform().transform_path(line.get_path())
             if display_path.intersects_bbox(rect, filled=False):
                 logo_y0 = top_y0
+                break
 
         logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
@@ -359,7 +397,7 @@ def main():
             mark_extreme(max(range(len(temps)), key=lambda i: temps[i]), HIGH_COLOR, "High")
 
     # ---------- axes styling ----------
-    ax.set_ylabel("Air Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)
+    ax.set_ylabel("Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_xlabel("Time", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
@@ -411,6 +449,11 @@ def main():
         stat_center_y = 0.685 + 0.105 / 2
         stat_gap = 0.02
         col_width = (right_x - left_x - stat_gap) / 2
+        # A geometrically-centered pair still reads as sitting a bit right
+        # of center -- the bold, colored chip carries more visual weight
+        # than the plain label to its left, pulling the eye rightward -- so
+        # nudge the centering target left by a small fixed amount.
+        stat_visual_shift = 0.012
         label_fontsize = 14
         label_linespacing = 0.85
         fig_w_px = fig.get_size_inches()[0] * fig.get_dpi()
@@ -486,8 +529,8 @@ def main():
             fig.text(number_anchor_px / fig_w_px, stat_center_y, value_text, ha="left",
                       zorder=15, **chip_kwargs)
 
-        temp_column_center = left_x + col_width / 2
-        dew_column_center = left_x + col_width + stat_gap + col_width / 2
+        temp_column_center = left_x + col_width / 2 - stat_visual_shift
+        dew_column_center = left_x + col_width + stat_gap + col_width / 2 - stat_visual_shift
         draw_stat_pair(temp_column_center, "Current\nTemperature", current_temp_f, TEMP_COLOR_TABLE)
         draw_stat_pair(dew_column_center, "Current\nDew Point",
                         current_dew_point_f, DEW_POINT_COLOR_TABLE)
