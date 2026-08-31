@@ -26,7 +26,8 @@ API key's account has a Tempest ("ST") device on.
   `tempest-temp-chart/fetch_tempest.py` -- see that project's README for
   why the day boundary is computed the way it is.
 - `build_chart.py` -- renders `tempest_wind_obs.json` into
-  `tempest_wind_chart.png`.
+  `tempest_wind_chart.png`. See `--no-current-conditions` in Notes below
+  for rendering a past, complete (archive) day instead of today's.
 - `requirements.txt` / `setup.sh` -- Python dependencies (no system
   packages needed here, unlike the map projects).
 
@@ -43,6 +44,9 @@ python3 build_chart.py
 # A specific day or station (if the account has more than one)
 python3 fetch_tempest.py --date 2026-08-30 --station-id 12345
 python3 build_chart.py
+
+# That same past day as an archive chart -- no current-conditions boxes
+python3 build_chart.py --no-current-conditions
 ```
 
 ## Notes
@@ -77,11 +81,19 @@ python3 build_chart.py
   way temperature's daily low is). Always on, unlike
   `tempest-temp-chart`'s opt-in `--mark-low`/`--mark-high` -- there's
   only ever one marker here, so there's no on/off combination to expose
-  as a flag. Label placement tries below-right first, then above-right,
-  below-left, above-left, keeping the first whose actual rendered extent
-  stays inside the plot and clear of the logo -- same fallback approach
-  as `tempest-temp-chart`'s own extreme-marking, just for a single
-  always-on marker instead of up to two optional ones.
+  as a flag. Label placement tries above-right first (reads better
+  sitting over the peak than crowding the generally busier area below,
+  where other gust dots tend to cluster), then above-left, below-right,
+  below-left, keeping the first whose actual rendered extent stays
+  inside the plot and clear of the logo -- same fallback approach as
+  `tempest-temp-chart`'s own extreme-marking, just for a single always-on
+  marker instead of up to two optional ones. The label sits on a solid
+  white backing patch rather than only a white path-effects stroke
+  around each glyph -- a stroke-only halo leaves the gaps between/inside
+  letters transparent, so a gridline crossing the label (this label can
+  land on one; a data value's own y-position has no reason to avoid a
+  round-number gridline) showed through as a visible strikethrough before
+  this fix.
 - **Y-axis** floors at a flat 0 mph rather than padding below the day's
   low the way the temp chart does -- wind speed can't go negative, so
   there's no meaningful "3 mph below calm" to pad for. The ceiling
@@ -119,7 +131,21 @@ python3 build_chart.py
   both a speed *and* a direction reading to show a real value (a lone
   direction or a lone speed reads as `N/A`) -- Current Gusts is speed-only,
   since gust has no direction of its own in the Tempest API.
-- **Not (yet) included**: a `--no-current-conditions` mode / look-back
-  archive (`tempest-temp-chart`'s 5-day rolling window) fits this
-  project's existing design well if wanted later -- ask, and it can be
-  added the same way it exists on the temp chart.
+  **Current Wind's speed number is the peak gust over the trailing
+  `RECENT_GUST_WINDOW` (5 minutes), not the single most recent 1-minute
+  sample** -- a lone sample is noisy from one moment to the next, while a
+  short trailing peak reads as a more meaningful "what's it doing right
+  now" without smoothing away real gustiness the way a longer average
+  would. Direction still comes from the single most recent reading, and
+  Current Gusts is unaffected (still the single most recent gust
+  reading) -- only Current Wind's own number changed.
+- **`--no-current-conditions`** renders a plain historical-day (archive)
+  chart: no stat boxes, no "Updated" clause in the subtitle (just the
+  date), title drops "Today's", and no dotted last-observation marker --
+  same reasoning, and the same flag name, as `tempest-temp-chart`'s own
+  archive-day mode; see that project's README for the full writeup. The
+  plot reclaims the stat boxes' vertical space, back to the full
+  0.65-of-figure height. Not (yet) included: an actual look-back archive
+  script (`tempest-temp-chart`'s 5-day rolling window, `deploy/publish_daily.py`)
+  that drives this flag automatically -- ask, and it can be added the
+  same way it exists on the temp chart.

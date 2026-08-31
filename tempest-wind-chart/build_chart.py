@@ -9,7 +9,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
-import matplotlib.patheffects as pe
 from matplotlib.transforms import Bbox
 
 # ---------- fonts ----------
@@ -47,6 +46,11 @@ Z_MARKER = 5
 # not just a skipped sample. Used to break the plotted line rather than
 # drawing a straight segment across a period with no real data.
 MAX_GAP = timedelta(minutes=6)
+
+# How far back "Current Wind" looks for its peak-gust value -- see the
+# current-conditions stat box section below for why it's a trailing peak
+# rather than the single most recent sample.
+RECENT_GUST_WINDOW = timedelta(minutes=5)
 
 # ---------- current-conditions stat boxes ----------
 # Background color table for both stat boxes (wind speed and gust each
@@ -112,9 +116,17 @@ def text_color_for_bg(rgb):
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Render today's Tempest station wind chart.")
+    ap = argparse.ArgumentParser(description="Render a Tempest station wind chart for whichever "
+                                               "day --data holds observations for (today's, by "
+                                               "default) -- see --no-current-conditions for a "
+                                               "past, complete day.")
     ap.add_argument("--data", default="tempest_wind_obs.json")
     ap.add_argument("--output", default="tempest_wind_chart.png")
+    ap.add_argument("--no-current-conditions", action="store_true",
+                     help="Skip the current-conditions stat boxes and reclaim their vertical "
+                          "space for the plot -- for a past, complete (archive) day, where "
+                          "there's no 'current' reading to highlight, as opposed to today's "
+                          "still-in-progress chart")
     return ap.parse_args()
 
 
@@ -154,11 +166,15 @@ def main():
     # ---------- figure (same footprint as tempest-temp-chart) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
-    # Shorter than a full-height chart -- the current-conditions stat
-    # boxes below take the freed vertical space, in the band between here
-    # and the (fig-position-fixed, not axes-derived) subtitle. Same
-    # proportions as tempest-temp-chart's own single-stat-row layout.
-    ax = fig.add_axes([0.075, 0.10, 0.87, 0.56])
+    # Shorter than a full-height chart whenever the current-conditions
+    # stat boxes are shown -- they take the freed vertical space, in the
+    # band between here and the (fig-position-fixed, not axes-derived)
+    # subtitle. Same proportions as tempest-temp-chart's own single-stat-
+    # row layout. A --no-current-conditions (archive) day has no stat
+    # boxes to make room for, so its axes uses the full 0.65 instead,
+    # same as tempest-temp-chart's own archive-day layout.
+    ax_height = 0.65 if args.no_current_conditions else 0.56
+    ax = fig.add_axes([0.075, 0.10, 0.87, ax_height])
     ax.set_facecolor("white")
 
     axpos = ax.get_position()
@@ -187,8 +203,14 @@ def main():
 
         # The line legitimately stops partway through the day on a same-day
         # chart -- a dotted marker at the last observation makes that read
-        # as current, not as missing data.
-        ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
+        # as current, not as missing data. Skipped for a
+        # --no-current-conditions (complete, past) day: its line already
+        # runs the full 24 hours (the last observation lands a minute
+        # before midnight, not literally at it), so the same marker there
+        # would misleadingly read as "cut short" rather than "complete" --
+        # same reasoning as tempest-temp-chart's own archive-day charts.
+        if not args.no_current_conditions:
+            ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
         # Wind speed can't go negative, so the axis floor is a flat 0
         # rather than a padded-below-the-low the way the temp chart pads
@@ -214,7 +236,8 @@ def main():
         for text in legend.get_texts():
             text.set_color(INK_SECONDARY)
     else:
-        ax.text(0.5, 0.5, "No observations yet today", transform=ax.transAxes,
+        no_obs_text = "No observations that day" if args.no_current_conditions else "No observations yet today"
+        ax.text(0.5, 0.5, no_obs_text, transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
         ax.set_ylim(0, 1)
         ax.set_xlim(day_start, day_end)
@@ -287,7 +310,6 @@ def main():
         ax.scatter([peak_time], [peak_gust], s=160, facecolors="none", edgecolors=PEAK_GUST_COLOR,
                    linewidths=2.2, zorder=Z_MARKER)
         label_text = f"Peak Gust: {peak_gust:.1f} mph at {peak_time.strftime('%H:%M')}"
-        label_stroke = [pe.withStroke(linewidth=2.5, foreground="white")]
 
         fig.canvas.draw()
         renderer = fig.canvas.get_renderer()
@@ -295,23 +317,33 @@ def main():
         occupied = [logo_ax.get_window_extent(renderer)] if logo_ax is not None else []
 
         def place(ha, va, x_off, y_off):
+            # A solid white backing patch, not just a white path-effects
+            # stroke around each glyph -- a stroke only outlines the
+            # letters themselves, leaving the gaps between/inside them
+            # transparent, so a gridline (or gust dot) crossing the label
+            # still shows through in those gaps. Confirmed by eye: this
+            # label can and does land squarely on a round-number gridline
+            # for some days' data, which produced a visible strikethrough
+            # before this fix.
             a = ax.annotate(label_text, xy=(peak_time, peak_gust), xytext=(x_off, y_off),
                              textcoords="offset points", ha=ha, va=va,
-                             fontproperties=f_bold, fontsize=12, color=PEAK_GUST_COLOR, zorder=Z_MARKER)
-            a.set_path_effects(label_stroke)
+                             fontproperties=f_bold, fontsize=12, color=PEAK_GUST_COLOR, zorder=Z_MARKER,
+                             bbox=dict(facecolor="white", edgecolor="none", pad=2))
             return a
 
-        # Below-right is the preferred placement; fall back through
-        # above-right, below-left, above-left in that order, keeping the
+        # Above-right is the preferred placement (reads better sitting
+        # over the peak than crowding the generally-busier area below,
+        # where other gust dots tend to cluster); falls back through
+        # above-left, below-right, below-left in that order, keeping the
         # first whose actual rendered extent stays inside the plot and
         # clear of the logo -- same fallback approach as
         # tempest-temp-chart's --mark-low/--mark-high, just for a single
         # always-on marker instead of up to two optional ones.
         candidates = [
-            ("left", "center", 15, -8),
             ("left", "bottom", 15, 10),
-            ("right", "center", -15, -8),
             ("right", "bottom", -15, 10),
+            ("left", "center", 15, -8),
+            ("right", "center", -15, -8),
         ]
         txt = None
         for ha, va, x_off, y_off in candidates:
@@ -350,16 +382,29 @@ def main():
         tick.set_fontsize(10)
 
     # ---------- title / subtitle ----------
-    # Fixed rather than derived from top_y (axpos.y1) -- the axes here is
-    # shorter than a full-height chart, with the stat boxes below sitting
-    # in the freed band at their own fixed height, not one that scales
-    # with wherever the (shorter) axes' own top happens to land.
-    subtitle_y = 0.815
-    title_y = subtitle_y + 0.035
     date_str = day_start.strftime("%B %-d, %Y")
-    fig.text(left_x, title_y, f"Today's Wind — {data['label']}",
-              fontproperties=f_bold, fontsize=22, color=INK)
-    subtitle = f"{date_str} • Updated: {times[-1].strftime('%H:%M')} PT" if times else date_str
+    if args.no_current_conditions:
+        # Derived from top_y (axpos.y1) same as tempest-temp-chart's own
+        # archive-day charts -- there's no stat-box band below to reserve
+        # a fixed gap for, since this axes already uses the same full
+        # 0.65 height.
+        subtitle_y = top_y + 0.058
+        title_y = subtitle_y + 0.035
+        title = f"Wind — {data['label']}"
+        # No "Updated: HH:MM" clause -- that phrasing implies a still-live
+        # reading, which doesn't apply to a complete, past calendar day.
+        subtitle = date_str
+    else:
+        # Fixed rather than derived from top_y -- the axes here is
+        # shorter than a full-height chart, with the stat boxes below
+        # sitting in the freed band at their own fixed height, not one
+        # that scales with wherever the (shorter) axes' own top happens
+        # to land.
+        subtitle_y = 0.815
+        title_y = subtitle_y + 0.035
+        title = f"Today's Wind — {data['label']}"
+        subtitle = f"{date_str} • Updated: {times[-1].strftime('%H:%M')} PT" if times else date_str
+    fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- current-conditions stat boxes ----------
@@ -375,8 +420,17 @@ def main():
     # ITU-R BT.601 luminance check. Wind speed and gust each look
     # themselves up against the same table independently -- there's only
     # one source table, covering both.
-    if times:
-        current_wind_mph = wind_speeds[-1]
+    if times and not args.no_current_conditions:
+        # "Current Wind" uses the peak gust of the last 5 minutes, not
+        # the single most recent 1-minute sample -- a lone sample is
+        # noisy/unrepresentative from one moment to the next, while the
+        # trailing peak reads as a more meaningful "what's it doing right
+        # now." Direction still comes from the single most recent
+        # reading. Current Gusts is unaffected -- still the single most
+        # recent gust reading.
+        window_start = times[-1] - RECENT_GUST_WINDOW
+        recent_gusts = [g for t, g in zip(times, wind_gusts) if g is not None and t >= window_start]
+        current_wind_mph = max(recent_gusts) if recent_gusts else None
         current_wind_dir_deg = wind_dirs[-1]
         current_gust_mph = wind_gusts[-1]
 
