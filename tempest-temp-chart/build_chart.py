@@ -410,16 +410,17 @@ def main():
         stat_gap = 0.02
         col_width = (right_x - left_x - stat_gap) / 2
         label_fontsize = 14
+        fig_w_px = fig.get_size_inches()[0] * fig.get_dpi()
 
-        def draw_stat_pair(label_x, number_x, label_text, value_f, table):
+        def draw_stat_pair(label_x, label_text, value_f, table):
             label_artist = fig.text(label_x, stat_center_y, label_text, fontproperties=f_reg,
                                      fontsize=label_fontsize, color=INK, ha="left", va="center",
-                                     linespacing=1.2)
+                                     linespacing=0.85)
             fig.canvas.draw()
             renderer = fig.canvas.get_renderer()
-            label_height_px = label_artist.get_window_extent(renderer).height
+            label_box = label_artist.get_window_extent(renderer)
 
-            value_text = f"{value_f:.1f}°F" if value_f is not None else "N/A"
+            value_text = f"{value_f:.1f}°" if value_f is not None else "N/A"
 
             # The number's fontsize is picked so its own rendered text
             # height matches the two-line label's, not guessed -- render
@@ -429,7 +430,7 @@ def main():
             fig.canvas.draw()
             probe_height_px = probe.get_window_extent(renderer).height
             probe.remove()
-            number_fontsize = probe_size * (label_height_px / probe_height_px)
+            number_fontsize = probe_size * (label_box.height / probe_height_px)
 
             if value_f is not None:
                 rgb = interp_color(fahrenheit_to_kelvin(value_f), table)
@@ -439,15 +440,20 @@ def main():
                 text_color = INK_SECONDARY
                 chip_color = BG
 
-            fig.text(number_x, stat_center_y, value_text, fontproperties=f_bold,
+            # \mathbf keeps the superscript F upright and bold (mathtext's
+            # default is an italic "variable" style) -- mathtext auto-scales
+            # a superscript smaller than the surrounding fontsize, matching
+            # how a real superscript reads next to the value.
+            display_text = value_text + r"$\mathbf{^{F}}$" if value_f is not None else value_text
+            number_x = label_box.x1 / fig_w_px + 0.012  # close behind the label's widest line
+            fig.text(number_x, stat_center_y, display_text, fontproperties=f_bold,
                       fontsize=number_fontsize, color=text_color, ha="left", va="center",
                       bbox=dict(boxstyle="round,pad=0.35", facecolor=chip_color, edgecolor="none"),
                       zorder=15)
 
-        draw_stat_pair(left_x, left_x + col_width * 0.5,
-                        "Current\nTemperature", current_temp_f, TEMP_COLOR_TABLE)
-        draw_stat_pair(left_x + col_width + stat_gap, left_x + col_width + stat_gap + col_width * 0.5,
-                        "Current\nDew Point", current_dew_point_f, DEW_POINT_COLOR_TABLE)
+        draw_stat_pair(left_x, "Current\nTemperature", current_temp_f, TEMP_COLOR_TABLE)
+        draw_stat_pair(left_x + col_width + stat_gap, "Current\nDew Point",
+                        current_dew_point_f, DEW_POINT_COLOR_TABLE)
 
     # ---------- attribution ----------
     fig.text(center_x, 0.02, "Ingalls Weather",
