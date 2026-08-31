@@ -1,0 +1,16 @@
+# Add these lines to the droplet's existing crontab (crontab -e) alongside
+# everything else already there.
+#
+# TEMPEST_API_KEY has to be set here (or sourced from a file
+# publish_tempest.py reads itself) because cron does not load your shell
+# profile.
+TEMPEST_API_KEY=your_tempest_api_key_here
+
+# Every 5 minutes -- well above the station's own ~1-minute native
+# sampling interval, but frequent enough that the published chart reads
+# as live for a casual viewer without hammering the Tempest API on every
+# render. No fixed issuance schedule to align to here (unlike the
+# scheduled-issuance products elsewhere in this repo), so this is a
+# polling interval, not a cycle time.
+
+*/5 * * * * /opt/ingalls-weather-scripts/tempest-temp-chart/venv/bin/python3 /opt/ingalls-weather-scripts/tempest-temp-chart/deploy/publish_tempest.py >> /opt/ingalls-weather-scripts/tempest-temp-chart/state/cron.log 2>&1

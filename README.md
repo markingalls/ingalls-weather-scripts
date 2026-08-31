@@ -52,6 +52,11 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`tempest-temp-chart/`](tempest-temp-chart/) — generates a styled
+  same-day temperature chart from a personal WeatherFlow Tempest station:
+  a single air-temperature line across the full 24-hour local calendar
+  day, with the day's low and high circled and labeled. Deployed live at
+  `images.ingallswx.com/hermiston_temp.png`, refreshed every 5 minutes.
 
 ## Shared resources
 
