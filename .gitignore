@@ -102,10 +102,12 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # --- tempest-temp-chart ---
 # tempest_obs.json/forecast.json are live data fetch_tempest.py and
 # fetch_forecast.py regenerate every run, and the rendered chart is an
-# output too -- none of these are source, so don't track them.
+# output too -- none of these are source, so don't track them. Same for
+# build_lookback_charts.py's per-day obs/chart files under lookback/.
 tempest-temp-chart/tempest_obs.json
 tempest-temp-chart/forecast.json
 tempest-temp-chart/tempest_temp_chart*.png
+tempest-temp-chart/lookback/
 
 # --- tpw-wm6-ensemble-map ---
 # build_map.py fetches its source grid live; output/ only holds saved

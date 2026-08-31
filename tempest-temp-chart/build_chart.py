@@ -145,7 +145,10 @@ def text_color_for_bg(rgb):
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Render today's Tempest station temperature chart.")
+    ap = argparse.ArgumentParser(description="Render a Tempest station temperature chart for "
+                                               "whichever day --data holds observations for "
+                                               "(today's, by default) -- see --no-current-"
+                                               "conditions for a past, complete day.")
     ap.add_argument("--data", default="tempest_obs.json")
     ap.add_argument("--forecast", default="forecast.json",
                      help="Optional forecast.json from fetch_forecast.py -- if present and for "
@@ -156,6 +159,11 @@ def parse_args():
                      help="Circle and label the day's lowest observation")
     ap.add_argument("--mark-high", action="store_true",
                      help="Circle and label the day's highest observation")
+    ap.add_argument("--no-current-conditions", action="store_true",
+                     help="Skip the current-conditions stat boxes and reclaim their vertical "
+                          "space for the plot -- for a past, complete day (see "
+                          "build_lookback_charts.py) where there's no 'current' reading to "
+                          "highlight, as opposed to today's still-in-progress chart")
     return ap.parse_args()
 
 
@@ -206,10 +214,14 @@ def main():
     # ---------- figure (same footprint as the other temp charts) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
-    # Shorter than the other temp charts' 0.65 -- the current-conditions
-    # stat boxes below take the freed vertical space, in the band between
-    # here and the (now fig-position-fixed, not axes-derived) subtitle.
-    ax = fig.add_axes([0.075, 0.10, 0.87, 0.56])
+    # Shorter than the other temp charts' 0.65 whenever the current-
+    # conditions stat boxes are shown -- they take the freed vertical
+    # space, in the band between here and the (fig-position-fixed, not
+    # axes-derived) subtitle. A --no-current-conditions chart has no stat
+    # boxes to make room for, so its axes uses the full 0.65, same as the
+    # other temp charts.
+    ax_height = 0.65 if args.no_current_conditions else 0.56
+    ax = fig.add_axes([0.075, 0.10, 0.87, ax_height])
     ax.set_facecolor("white")
 
     axpos = ax.get_position()
@@ -237,8 +249,13 @@ def main():
 
         # The line legitimately stops partway through the day on a same-day
         # chart -- a dotted marker at the last observation makes that read
-        # as current, not as missing data.
-        ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
+        # as current, not as missing data. Skipped for a --no-current-
+        # conditions (complete, past) day: its line already runs the full
+        # 24 hours (the last observation lands a minute before midnight,
+        # not literally at it), so the same marker there would misleadingly
+        # read as "cut short" rather than "complete."
+        if not args.no_current_conditions:
+            ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
         # Day's high is the observed max so far, extended to the forecast
         # high (if fetch_forecast.py's forecast.json is present) so the
@@ -281,7 +298,8 @@ def main():
         for text in legend.get_texts():
             text.set_color(INK_SECONDARY)
     else:
-        ax.text(0.5, 0.5, "No observations yet today", transform=ax.transAxes,
+        no_obs_text = "No observations that day" if args.no_current_conditions else "No observations yet today"
+        ax.text(0.5, 0.5, no_obs_text, transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
         ax.set_ylim(0, 1)
         ax.set_xlim(day_start, day_end)
@@ -423,16 +441,27 @@ def main():
         tick.set_fontsize(10)
 
     # ---------- title / subtitle ----------
-    # Fixed rather than derived from top_y (axpos.y1) -- now that the axes
-    # is shorter than the other temp charts, the stat boxes below sit in
-    # the freed band at their own fixed height, not one that scales with
-    # wherever the (now shorter) axes' own top happens to land.
-    subtitle_y = 0.815
-    title_y = subtitle_y + 0.035
     date_str = day_start.strftime("%B %-d, %Y")
-    fig.text(left_x, title_y, f"Today's Temperature — {data['label']}",
-              fontproperties=f_bold, fontsize=22, color=INK)
-    subtitle = f"{date_str} • Updated: {times[-1].strftime('%H:%M')} PT" if times else date_str
+    if args.no_current_conditions:
+        # Derived from top_y (axpos.y1) same as the other temp charts --
+        # there's no stat-box band below to reserve a fixed gap for, since
+        # this axes already uses their same full 0.65 height.
+        subtitle_y = top_y + 0.058
+        title_y = subtitle_y + 0.035
+        title = f"Temperature — {data['label']}"
+        # No "Updated: HH:MM" clause -- that phrasing implies a still-live
+        # reading, which doesn't apply to a complete, past calendar day.
+        subtitle = date_str
+    else:
+        # Fixed rather than derived from top_y -- the axes here is shorter
+        # than the other temp charts, with the stat boxes below sitting in
+        # the freed band at their own fixed height, not one that scales
+        # with wherever the (now shorter) axes' own top happens to land.
+        subtitle_y = 0.815
+        title_y = subtitle_y + 0.035
+        title = f"Today's Temperature — {data['label']}"
+        subtitle = f"{date_str} • Updated: {times[-1].strftime('%H:%M')} PT" if times else date_str
+    fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- current-conditions stat boxes ----------
@@ -445,7 +474,7 @@ def main():
     # the current reading's color-table lookup (temp/dew point converted
     # to Kelvin, interpolated); the bold text itself is black or white,
     # whichever contrasts against that particular background.
-    if times:
+    if times and not args.no_current_conditions:
         current_temp_f = temps[-1]
         current_dew_point_f = dew_points[-1]
 

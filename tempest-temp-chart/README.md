@@ -14,6 +14,14 @@ raw observations instead of a forecast/climatology blend.
 Defaults to today (station-local calendar day) and to whichever station the
 API key's account has a Tempest ("ST") device on.
 
+`build_lookback_charts.py` renders the same style of chart for each of the
+past 5 station-local days (not including today) -- a "look back" companion
+to the always-current today chart, the same idea as the lightning maps
+having both a realtime and a rolling-window view. Each day is complete, so
+there's no "current" reading to highlight: no stat boxes, no "Updated"
+clause, and the plot reclaims that space (see `--no-current-conditions`
+below).
+
 ## Files
 
 - `fetch_tempest.py` -- pulls a day's 1-minute-resolution observations for
@@ -28,6 +36,12 @@ API key's account has a Tempest ("ST") device on.
   No API key needed.
 - `build_chart.py` -- renders `tempest_obs.json` (+ `forecast.json`, if
   present) into `tempest_temp_chart.png`.
+- `build_lookback_charts.py` -- fetches and renders the past 5 days (not
+  including today), one file per day, into `lookback/`. Shells out to
+  `fetch_tempest.py` and `build_chart.py` for each day rather than
+  reimplementing their logic, so every day's chart behaves exactly like
+  running them by hand would. Requires `TEMPEST_API_KEY` same as
+  `fetch_tempest.py`.
 - `requirements.txt` / `setup.sh` -- Python dependencies (no system
   packages needed here, unlike the map projects).
 
@@ -50,6 +64,11 @@ python3 build_chart.py
 python3 build_chart.py --mark-low
 python3 build_chart.py --mark-high
 python3 build_chart.py --mark-low --mark-high
+
+# Past 5 days, one chart per day, into lookback/ -- no current-conditions
+# boxes (see --no-current-conditions), low/high always marked
+python3 build_lookback_charts.py
+python3 build_lookback_charts.py --days 10          # a longer look back
 ```
 
 ## Notes
@@ -75,7 +94,10 @@ python3 build_chart.py --mark-low --mark-high
   the axis being cropped to only the elapsed hours. Ticks are every 3 hours
   in 24-hour time (`00:00`/`03:00`/.../`21:00`); a dotted vertical marker at
   the last observation makes the stopping point read as current, not as
-  missing data.
+  missing data. Skipped under `--no-current-conditions`: a complete day's
+  line already runs the full 24 hours (its last observation lands a minute
+  before midnight, not literally at it), so the same marker there would
+  misleadingly read as "cut short" rather than "complete."
 - **Data outages show as a break in the line, not a straight line across
   them.** The Tempest hub reports roughly once a minute; `build_chart.py`'s
   `insert_gaps()` walks the observations and, wherever two consecutive
@@ -181,6 +203,21 @@ python3 build_chart.py --mark-low --mark-high
   observation's local time, 24-hour); timezone and station-vs-property
   distinctions otherwise live in the title's label and this file, not on
   the chart itself.
+- **`--no-current-conditions`** renders a plain historical-day chart: no
+  stat boxes, no "Updated" clause in the subtitle (just the date -- that
+  phrasing implies a still-live reading, which doesn't apply to a
+  complete, past day), title drops "Today's" (`"Temperature — {label}"`
+  instead of `"Today's Temperature — {label}"`), and no dotted
+  last-observation marker (see above). The plot reclaims the vertical
+  space the stat boxes would have used, back to the same 0.65-of-figure
+  height the other temp charts use, with the subtitle/title position
+  derived from the axes' own top edge the same way theirs is -- rather
+  than the fixed position the current-conditions layout uses, which
+  assumes a shorter, stat-box-reserving axes. `build_lookback_charts.py`
+  always passes this (plus `--mark-low --mark-high`, since a full day's
+  low/high are already known) -- pass it to `build_chart.py` directly to
+  render a single past day the same way, e.g. after
+  `fetch_tempest.py --date 2026-08-30`.
 - **Current-conditions stat boxes** sit in the band freed up by shrinking
   the plot's own height (0.65 -> 0.56 of the figure, vs. the other temp
   charts). Each is a two-line, regular-weight, right-aligned label
