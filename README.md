@@ -56,6 +56,11 @@ workflows. Each project lives in its own directory with its own README.
   mb geopotential height (contoured every 6 dam) and wind speed (shaded
   purple from 30 kt), from the WindBorne WeatherMesh-6 global ensemble
   mean, centered on Portland, OR and spanning north to SE Alaska.
+- [`mslp-precip-map/`](mslp-precip-map/) — one-off map of mean sea level
+  pressure (contoured every 4 hPa) and 3-hour accumulated precipitation
+  (shaded in a standard QPF ramp), from the WindBorne WeatherMesh-6 global
+  ensemble mean, same Portland-to-SE-Alaska domain as
+  `500mb-height-wind-map/`.
 
 ## Shared resources
 

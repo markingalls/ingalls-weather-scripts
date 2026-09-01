@@ -1,0 +1,510 @@
+"""
+WM-6 Ensemble Mean MSLP & 3-Hour Precipitation Map -- one-off builder
+Ingalls Weather
+
+Same domain as ../500mb-height-wind-map/ (centered on Portland, OR, wide
+enough north to reach SE Alaska), showing a different pair of fields:
+  - Contours: ensemble-mean mean sea level pressure isobars, every 4 hPa
+    (the standard surface-analysis interval) -- same field/interval as
+    ../tpw-wm6-ensemble-map/build_map.py's MSLP contours.
+  - Shading: ensemble-mean 3-hour accumulated precipitation (WM-6's
+    `total_precipitation_3h`, already the accumulation ending at the
+    requested valid time -- see fetch_wm6_fields()'s docstring), in a
+    standard green-yellow-orange-red-magenta QPF ramp, starting at 0.5 mm.
+
+USAGE
+-----
+    python build_map.py --date 2026-09-02 --hour 0    # 2026-09-02 00Z
+    python build_map.py --file snapshot.npz            # render from a saved fetch
+
+Requires WB_API_KEY in the environment (see
+https://app.windbornesystems.com/api_tokens).
+
+Both fields fetched here (`pressure_msl`, `total_precipitation_3h`) are
+flat (lat, lon) arrays under `ensemble_mean/` in the archived Zarr file --
+confirmed directly against a real archive while building this (unlike
+../500mb-height-wind-map/'s pressure-level fields, there's no per-level
+array-layout guesswork needed here). Same archived-run / presigned-URL /
+remotezip range-request fetch approach as
+../tpw-wm6-ensemble-map/build_map.py -- see that file's docstring for the
+full explanation of why.
+
+REQUIRES (already checked into /maps at repo root, shared across all
+Ingalls Weather map projects):
+    countries_slim.json, states_lakes_slim.json, admin0_boundary_lines.json
+
+Logo is read from /assets/ingalls_weather_logo.png at repo root.
+"""
+
+import argparse
+import json
+import sys
+import tempfile
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+from matplotlib.colors import Normalize, LinearSegmentedColormap
+import numpy as np
+import requests
+import zarr
+from remotezip import RemoteZip
+from scipy.interpolate import RegularGridInterpolator
+
+import cartopy.crs as ccrs
+import shapely
+from shapely.geometry import shape, box
+from PIL import Image
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MAPS_DIR = REPO_ROOT / "maps"
+ASSETS_DIR = REPO_ROOT / "assets"
+THIS_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = THIS_DIR / "output"
+
+COUNTRIES_FILE = MAPS_DIR / "countries_slim.json"
+STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
+ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
+LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
+
+TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
+
+# Same styling as ../500mb-height-wind-map/build_map.py, kept consistent
+# across both products that share this domain.
+LAND_COLOR = "#EBEBE8"
+OCEAN_COLOR = "#D2E8F3"
+MAJOR_LAKE_MAX_SCALERANK = 2  # see ../500mb-height-wind-map/build_map.py's comment
+
+POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
+POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+
+# ---------------------------------------------------------------------------
+# Figure geometry -- identical to ../500mb-height-wind-map/build_map.py's
+# (same domain, so the same frame/padding math applies verbatim).
+# ---------------------------------------------------------------------------
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 10.2, 8.6
+FIG_DPI = 200
+AXES_RECT = [0.03, 0.15, 0.94, 0.72]  # [left, bottom, width, height], figure fraction
+MAP_FRAME_INSET_PX = 22
+
+# ---------------------------------------------------------------------------
+# Map domain -- identical to ../500mb-height-wind-map/build_map.py's: see
+# that file's comment for how this was chosen (centered on Portland, OR,
+# reaching SE Alaska) and how FETCH_PAD_LON_DEG/FETCH_PAD_LAT_DEG were
+# verified against this exact figure geometry.
+# ---------------------------------------------------------------------------
+LON_MIN, LON_MAX = -152.0, -95.0
+LAT_MIN, LAT_MAX = 30.0, 61.0
+CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
+
+FETCH_PAD_LON_DEG = 30.0
+FETCH_PAD_LAT_DEG = 5.0
+
+MAP_CLIP_BOX = box(LON_MIN - FETCH_PAD_LON_DEG, LAT_MIN - FETCH_PAD_LAT_DEG,
+                    LON_MAX + FETCH_PAD_LON_DEG, LAT_MAX + FETCH_PAD_LAT_DEG)
+
+RESAMPLE_FACTOR = 6
+
+# ---------------------------------------------------------------------------
+# MSLP isobars -- 4 hPa interval, the standard surface-analysis interval
+# (same as ../tpw-wm6-ensemble-map/build_map.py's).
+# ---------------------------------------------------------------------------
+MSLP_CONTOUR_INTERVAL_HPA = 4
+
+# ---------------------------------------------------------------------------
+# 3-hour precipitation shading -- standard NWS-style QPF ramp (green ->
+# yellow -> orange -> red -> magenta), starting at a 0.5 mm floor (below
+# that reads as dry/no meaningful precip). Not power-law spaced like the
+# TPW map's color table -- this ramp's hue order carries the "amount"
+# signal, not the color spacing.
+# ---------------------------------------------------------------------------
+PRECIP_RGB_COLORS = [
+    [223, 241, 216],   # 0.5 mm -- pale green (floor)
+    [116, 196, 118],   # 2 mm -- green
+    [255, 237, 111],   # 6 mm -- yellow
+    [253, 141, 60],    # 12 mm -- orange
+    [222, 45, 38],      # 25 mm -- red
+    [129, 15, 124],     # 50 mm -- magenta/purple (heavy)
+]
+PRECIP_MM_MIN = 0.5
+PRECIP_MM_MAX = 50.0
+PRECIP_MM_STOPS = [0.5, 2, 6, 12, 25, 50]
+
+# Fades in by alpha between PRECIP_MM_MIN and PRECIP_ALPHA_FADE_END_MM --
+# same rationale as the sibling maps' fade-ins (basemap shows through
+# faintly right at the floor instead of switching on abruptly).
+PRECIP_ALPHA_FADE_END_MM = 2.0
+PRECIP_ALPHA_FADE_START = 0.35
+PRECIP_ALPHA_FADE_END = 1.0
+
+
+def build_precip_colormap():
+    span = PRECIP_MM_MAX - PRECIP_MM_MIN
+    stops = [((mm - PRECIP_MM_MIN) / span, [c / 255 for c in rgb])
+             for mm, rgb in zip(PRECIP_MM_STOPS, PRECIP_RGB_COLORS)]
+    return LinearSegmentedColormap.from_list("ingalls_precip_3h", stops, N=256)
+
+
+# ---------------------------------------------------------------------------
+# WindBorne API
+# ---------------------------------------------------------------------------
+WB_BASE = "https://api.windbornesystems.com/forecasts/v1/wm-6"
+MSLP_VARIABLE = "pressure_msl"
+PRECIP_VARIABLE = "total_precipitation_3h"
+
+
+def wb_get(path, api_key, **params):
+    headers = {"Authorization": f"Bearer {api_key}"}
+    resp = requests.get(f"{WB_BASE}/{path}", headers=headers, params=params, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def fetch_zarr_array(remote_zip, names, tmp_dir, array_path):
+    """Copy just one array's metadata + chunk file(s) out of the remote
+    zip into a local directory tree, then open it with zarr. Same helper
+    as ../tpw-wm6-ensemble-map/build_map.py and
+    ../500mb-height-wind-map/build_map.py."""
+    entries = [n for n in names if n == f"{array_path}/zarr.json" or n.startswith(f"{array_path}/c")]
+    for name in entries:
+        dest = tmp_dir / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(remote_zip.read(name))
+    return zarr.open_array(store=str(tmp_dir), path=array_path, mode="r")[:]
+
+
+def fetch_wm6_fields(valid_time_utc, api_key):
+    """Fetch the WM-6 ensemble-mean MSLP and 3-hour precipitation grids
+    valid nearest to valid_time_utc, cropped to the map bbox, in a single
+    remote-zip session. Same archived-run / presigned-URL / remotezip
+    range-request approach as ../tpw-wm6-ensemble-map/build_map.py's
+    fetch_wm6_fields() -- see that file's docstring for the full
+    explanation of why.
+
+    Returns (lat_1d, lon_1d, mslp_hpa_2d, precip_mm_2d, meta dict with
+    initialization_time/valid_time/forecast_hour)."""
+    url_info = wb_get("gridded", api_key, variable="all",
+                       time=valid_time_utc.strftime("%Y-%m-%dT%H:%M:%SZ"), as_url="true")
+    print("Opening archived WM-6 run via presigned URL (range-request fetch, not a full download)...")
+
+    with RemoteZip(url_info["url"]) as rz:
+        names = rz.namelist()
+        root_meta = json.loads(rz.read("zarr.json"))["attributes"]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            lat = fetch_zarr_array(rz, names, tmp_dir, "latitude")
+            lon = fetch_zarr_array(rz, names, tmp_dir, "longitude")
+            mslp_pa = fetch_zarr_array(rz, names, tmp_dir, f"ensemble_mean/{MSLP_VARIABLE}")
+            precip_mm = fetch_zarr_array(rz, names, tmp_dir, f"ensemble_mean/{PRECIP_VARIABLE}")
+
+    mslp_hpa = mslp_pa / 100.0
+
+    lon_unwrapped = ((lon - CENTER_LON + 180) % 360) - 180 + CENTER_LON
+    lat_idx = np.where((lat >= LAT_MIN - FETCH_PAD_LAT_DEG) & (lat <= LAT_MAX + FETCH_PAD_LAT_DEG))[0]
+    lon_mask = (lon_unwrapped >= LON_MIN - FETCH_PAD_LON_DEG) & (lon_unwrapped <= LON_MAX + FETCH_PAD_LON_DEG)
+    lon_idx = np.where(lon_mask)[0]
+    lon_idx = lon_idx[np.argsort(lon_unwrapped[lon_idx])]
+    lat_crop = lat[lat_idx]
+    lon_crop = lon_unwrapped[lon_idx]
+    mslp_crop = mslp_hpa[np.ix_(lat_idx, lon_idx)]
+    precip_crop = precip_mm[np.ix_(lat_idx, lon_idx)]
+
+    if lat_crop[0] > lat_crop[-1]:
+        lat_crop = lat_crop[::-1]
+        mslp_crop = mslp_crop[::-1, :]
+        precip_crop = precip_crop[::-1, :]
+
+    meta = {
+        "initialization_time": root_meta["initialization_time"],
+        "valid_time": root_meta["valid_time"],
+        "forecast_hour": root_meta["forecast_hour"],
+    }
+    return lat_crop, lon_crop, mslp_crop, precip_crop, meta
+
+
+def resample_to_finer_grid(lat, lon, values, factor=RESAMPLE_FACTOR):
+    interp = RegularGridInterpolator((lat, lon), values, method="linear")
+    fine_lat = np.linspace(lat[0], lat[-1], len(lat) * factor)
+    fine_lon = np.linspace(lon[0], lon[-1], len(lon) * factor)
+    fine_lon_grid, fine_lat_grid = np.meshgrid(fine_lon, fine_lat)
+    fine_values = interp((fine_lat_grid, fine_lon_grid))
+    return fine_lat, fine_lon, fine_values
+
+
+def imshow_antimeridian_safe(ax, data, lon, lat, transform, **imshow_kwargs):
+    """Same helper as ../tpw-wm6-ensemble-map/build_map.py -- see its
+    docstring for why a single imshow call can't be used for a lon array
+    that extends past standard -180..180."""
+    boundary_overlap_deg = 0.1
+    lon_std = ((lon + 180) % 360) - 180
+    wrap_idx = np.where(np.diff(lon_std) < 0)[0]
+    bounds = [0, *(i + 1 for i in wrap_idx), len(lon_std)]
+    n_pieces = len(bounds) - 1
+    for i, (start, end) in enumerate(zip(bounds[:-1], bounds[1:])):
+        left = lon_std[start] if i == 0 else -180.0 - boundary_overlap_deg
+        right = lon_std[end - 1] if i == n_pieces - 1 else 180.0 + boundary_overlap_deg
+        ax.imshow(data[:, start:end], transform=transform, origin="lower",
+                  extent=[left, right, lat[0], lat[-1]], **imshow_kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Basemap layers -- same loaders as ../500mb-height-wind-map/build_map.py
+# (including the major-lakes layer added there).
+# ---------------------------------------------------------------------------
+def clip_to_map(geom):
+    clipped = shapely.segmentize(geom, max_segment_length=0.5).intersection(MAP_CLIP_BOX)
+    return None if clipped.is_empty else clipped
+
+
+def clip_outline_to_map(geom):
+    return clip_to_map(geom.boundary)
+
+
+def _load_country_geoms():
+    with open(COUNTRIES_FILE) as f:
+        data = json.load(f)
+    return [shape(feat["geometry"]) for feat in data["features"]
+            if feat["properties"].get("NAME") in TARGET_COUNTRIES]
+
+
+def load_countries():
+    return [g for g in (clip_outline_to_map(g) for g in _load_country_geoms()) if g is not None]
+
+
+def load_countries_filled():
+    return [g for g in (clip_to_map(g) for g in _load_country_geoms()) if g is not None]
+
+
+def load_states():
+    with open(STATES_LAKES_FILE) as f:
+        data = json.load(f)
+    state_geoms = []
+    for feat in data["features"]:
+        props = feat["properties"]
+        if "Lake" in props.get("featurecla", ""):
+            continue
+        if props.get("admin") in TARGET_COUNTRIES:
+            clipped = clip_outline_to_map(shape(feat["geometry"]))
+            if clipped is not None:
+                state_geoms.append(clipped)
+    return state_geoms
+
+
+def load_lakes():
+    """Major lake polygons -- see MAJOR_LAKE_MAX_SCALERANK. Clipped as
+    filled area, not outline-only."""
+    with open(STATES_LAKES_FILE) as f:
+        data = json.load(f)
+    lake_geoms = []
+    for feat in data["features"]:
+        props = feat["properties"]
+        if "Lake" not in props.get("featurecla", ""):
+            continue
+        if (props.get("scalerank") or 0) > MAJOR_LAKE_MAX_SCALERANK:
+            continue
+        clipped = clip_to_map(shape(feat["geometry"]))
+        if clipped is not None:
+            lake_geoms.append(clipped)
+    return lake_geoms
+
+
+def load_boundary_lines(path):
+    with open(path) as f:
+        data = json.load(f)
+    geoms = [shape(feat["geometry"]) for feat in data["features"]]
+    return [g for g in (clip_to_map(g) for g in geoms) if g is not None]
+
+
+def build_map(valid_time_utc, output_path, override_path=None):
+    poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
+    poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
+
+    if override_path:
+        print(f"Using local snapshot: {override_path}")
+        npz = np.load(override_path, allow_pickle=True)
+        lat, lon, mslp_hpa, precip_mm = npz["lat"], npz["lon"], npz["mslp_hpa"], npz["precip_mm"]
+        meta = npz["meta"].item()
+    else:
+        api_key = os.environ.get("WB_API_KEY")
+        if not api_key:
+            sys.exit("WB_API_KEY not set -- get a token at "
+                      "https://app.windbornesystems.com/api_tokens, or pass --file "
+                      "to render from a saved snapshot instead.")
+        lat, lon, mslp_hpa, precip_mm, meta = fetch_wm6_fields(valid_time_utc, api_key)
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        snapshot_name = f"snapshot_{valid_time_utc.strftime('%Y-%m-%d_%H')}z.npz"
+        np.savez(OUTPUT_DIR / snapshot_name,
+                  lat=lat, lon=lon, mslp_hpa=mslp_hpa, precip_mm=precip_mm, meta=meta)
+
+    print(f"MSLP range in fetched crop: {mslp_hpa.min():.0f} - {mslp_hpa.max():.0f} hPa")
+    print(f"3-hr precip range in fetched crop: {precip_mm.min():.1f} - {precip_mm.max():.1f} mm")
+    print(f"Resampling from {lat.size}x{lon.size} native grid...")
+    lat_r, lon_r, mslp_hpa = resample_to_finer_grid(lat, lon, mslp_hpa)
+    _, _, precip_mm = resample_to_finer_grid(lat, lon, precip_mm)
+    lat, lon = lat_r, lon_r
+
+    print("Loading basemap layers...")
+    country_geoms = load_countries()
+    country_fill_geoms = load_countries_filled()
+    state_geoms = load_states()
+    lake_geoms = load_lakes()
+    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
+
+    pc = ccrs.PlateCarree()
+    proj = ccrs.LambertConformal(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
+                                  standard_parallels=(LAT_MIN, LAT_MAX))
+
+    fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
+    fig.patch.set_facecolor("#f7f6f2")
+
+    ax = fig.add_axes(AXES_RECT, projection=proj)
+    ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
+    ax.patch.set_facecolor(OCEAN_COLOR)
+
+    ax.add_geometries(country_fill_geoms, crs=pc, facecolor=LAND_COLOR, edgecolor="none", zorder=0.5)
+
+    # 3-hour precip shading -- fixed mm-to-color QPF ramp, faded in via
+    # per-pixel alpha between PRECIP_MM_MIN and PRECIP_ALPHA_FADE_END_MM.
+    precip_cmap = build_precip_colormap()
+    precip_norm = Normalize(vmin=PRECIP_MM_MIN, vmax=PRECIP_MM_MAX)
+    precip_rgba = precip_cmap(precip_norm(precip_mm))
+
+    fade_ratio = np.clip((precip_mm - PRECIP_MM_MIN) / (PRECIP_ALPHA_FADE_END_MM - PRECIP_MM_MIN), 0, 1)
+    alpha = PRECIP_ALPHA_FADE_START + (PRECIP_ALPHA_FADE_END - PRECIP_ALPHA_FADE_START) * fade_ratio
+    precip_rgba[..., 3] = np.where(precip_mm < PRECIP_MM_MIN, 0.0, alpha)
+
+    imshow_antimeridian_safe(ax, precip_rgba, lon, lat, pc, zorder=1)
+
+    # Major lakes -- drawn over the precip shading but under the MSLP
+    # isobars, same layering as ../500mb-height-wind-map/build_map.py.
+    ax.add_geometries(lake_geoms, crs=pc, facecolor=OCEAN_COLOR, edgecolor="#4a6b7a", linewidth=0.6, zorder=1.2)
+
+    ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
+    ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
+    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+
+    # MSLP isobars -- 4 hPa interval, drawn above everything else so they
+    # stay legible over the precip shading and basemap alike. Levels
+    # computed from this map's actual MSLP range (not a fixed set), same
+    # as ../tpw-wm6-ensemble-map/build_map.py's.
+    level_start = np.floor(mslp_hpa.min() / MSLP_CONTOUR_INTERVAL_HPA) * MSLP_CONTOUR_INTERVAL_HPA
+    level_end = np.ceil(mslp_hpa.max() / MSLP_CONTOUR_INTERVAL_HPA) * MSLP_CONTOUR_INTERVAL_HPA
+    mslp_levels = np.arange(level_start, level_end + MSLP_CONTOUR_INTERVAL_HPA, MSLP_CONTOUR_INTERVAL_HPA)
+    isobars = ax.contour(lon, lat, mslp_hpa, levels=mslp_levels, transform=pc,
+                          colors="#1a1a1a", linewidths=1.0, zorder=3)
+    ax.clabel(isobars, inline=True, fontsize=7.5, fmt="%d", colors="#1a1a1a")
+
+    ax.spines['geo'].set_edgecolor('black')
+    ax.spines['geo'].set_linewidth(1.6)
+
+    # Colorbar -- below the map, centered on the rendered map frame.
+    fig.canvas.draw()
+    frame_px = ax.get_window_extent()
+    frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
+    frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
+    cbar_width, cbar_height = (frame_right - frame_left) * 0.55, 0.016
+    cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
+    cbar_bottom = 0.095
+
+    gradient_mm = np.linspace(PRECIP_MM_MIN, PRECIP_MM_MAX, 256).reshape(1, -1)
+    cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
+    cax.imshow(gradient_mm, aspect="auto", cmap=precip_cmap, norm=precip_norm,
+               extent=[PRECIP_MM_MIN, PRECIP_MM_MAX, 0, 1])
+    cax.set_yticks([])
+    for spine in cax.spines.values():
+        spine.set_edgecolor("#8a887e")
+        spine.set_linewidth(0.6)
+
+    mm_ticks = [0.5, 2, 6, 12, 25, 50]
+    cax.set_xticks(mm_ticks)
+    cax.set_xticklabels([f"{mm:g}" for mm in mm_ticks])
+    cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
+    for label in cax.get_xticklabels():
+        label.set_fontproperties(poppins_reg)
+    cax.set_xlabel("3-Hour Precipitation (mm)", fontsize=8.5, fontproperties=poppins_reg, color="#5a584f")
+
+    # Title & subtitle above the map.
+    init_dt = datetime.fromisoformat(meta["initialization_time"].replace("Z", "+00:00"))
+    valid_dt = datetime.fromisoformat(meta["valid_time"].replace("Z", "+00:00"))
+
+    fig.text(0.03, 0.978, f"{valid_dt.strftime('%a %Y-%m-%d')} {valid_dt.hour:02d}Z MSLP & 3-Hour Precip",
+              fontsize=19, fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
+    fig.text(0.03, 0.943, "WindBorne WM-6 Ensemble Mean", fontsize=12.5,
+              fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
+    fig.text(0.03, 0.914, f"Init {init_dt.strftime('%Y-%m-%d %H')}Z -- MSLP every 4 hPa",
+              fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
+
+    fig.text(0.5, 0.012, "WindBorne WM-6 — Ingalls Weather", fontsize=9,
+              fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=200)
+    plt.close(fig)
+    print(f"Saved base map to {output_path}")
+
+    # ---- Composite logo, bottom-left, snug inside the frame ----
+    if LOGO_FILE.exists():
+        base = Image.open(output_path).convert("RGB")
+        bw, bh = base.size
+        arr = np.array(base)
+        y = bh // 2
+        black_cols = [x for x in range(bw) if arr[y, x][0] < 40 and arr[y, x][1] < 40 and arr[y, x][2] < 40]
+        x = bw // 2
+        black_rows = [yy for yy in range(bh) if arr[yy, x][0] < 40 and arr[yy, x][1] < 40 and arr[yy, x][2] < 40]
+        frame_left = min(black_cols) if black_cols else 20
+        frame_bottom = max(black_rows) if black_rows else bh - 20
+
+        logo = Image.open(LOGO_FILE).convert("RGB")
+        target_w = int(bw * 0.08)
+        scale = target_w / logo.width
+        target_h = int(logo.height * scale)
+        logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
+
+        pos = (frame_left + MAP_FRAME_INSET_PX, frame_bottom - MAP_FRAME_INSET_PX - target_h)
+        base.paste(logo_resized, pos)
+        base.save(output_path)
+        print(f"Composited logo at {pos}")
+    else:
+        print(f"NOTE: logo not found at {LOGO_FILE}, skipping (map saved without logo).")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Build an Ingalls Weather WM-6 ensemble mean MSLP & 3-hour precipitation map.")
+    parser.add_argument("--date", type=str, default=None,
+                         help="Target date, YYYY-MM-DD, UTC (required unless --file is given).")
+    parser.add_argument("--hour", type=int, default=0,
+                         help="Target UTC hour, 0-23 (default: 0, i.e. 00Z).")
+    parser.add_argument("--file", type=Path, default=None,
+                         help="Render from a local saved snapshot (.npz) instead of fetching live.")
+    parser.add_argument("--out", type=Path, default=None,
+                         help="Output PNG path (default: output/mslp_precip_wm6_ensemble_<date>_<hour>z.png).")
+    args = parser.parse_args()
+
+    if not (0 <= args.hour <= 23):
+        parser.error("--hour must be between 0 and 23.")
+
+    if args.file and not args.file.exists():
+        sys.exit(f"--file {args.file} not found.")
+
+    if not args.file and not args.date:
+        parser.error("--date is required (YYYY-MM-DD, UTC) unless --file is given.")
+
+    valid_time_utc = None
+    if args.date:
+        target_date = datetime.strptime(args.date, "%Y-%m-%d").date()
+        valid_time_utc = datetime(target_date.year, target_date.month, target_date.day,
+                                   args.hour, tzinfo=timezone.utc)
+        date_str = target_date.isoformat()
+    else:
+        date_str = "snapshot"
+
+    out_path = args.out or (OUTPUT_DIR / f"mslp_precip_wm6_ensemble_{date_str}_{args.hour:02d}z.png")
+    build_map(valid_time_utc, out_path, override_path=args.file)
