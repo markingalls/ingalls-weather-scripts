@@ -11,11 +11,9 @@ MSLP is contoured every 4 hPa (the standard surface-analysis interval),
 with the single deepest low in view marked with a red "L"
 (`find_major_low()` -- a plain global minimum within the visible bbox,
 not a general multi-center detector, since this map only ever marks the
-one dominant low). Precipitation is shaded in discrete (bucketed, not a
-gradient) standard NWS-style QPF bands -- green through yellow, orange,
-red, to magenta for the heaviest amounts -- labeled in inches at the
-standard 3-hour breakpoints (0.02, 0.1, 0.25, 0.5, 1.0, 2.0 in); WM-6's
-data comes back in mm, converted only for the bucket thresholds
+one dominant low). Precipitation is shaded in a smooth blue -> purple ->
+red -> white gradient spanning 0.01-1.5 in, labeled in inches; WM-6's
+data comes back in mm, converted only for the color-mapping thresholds
 (`PRECIP_MM_STOPS`, derived from `PRECIP_IN_STOPS`).
 
 The domain can be overridden per-render with `--lon-min`/`--lon-max`/

@@ -12,10 +12,9 @@ pair of fields -- and overridable per-render via
     deepest low in view is marked with a red "L" (find_major_low()).
   - Shading: ensemble-mean 3-hour accumulated precipitation (WM-6's
     `total_precipitation_3h`, already the accumulation ending at the
-    requested valid time -- see fetch_wm6_fields()'s docstring), in
-    discrete (bucketed, not a smooth gradient) standard NWS-style QPF
-    bands, labeled in inches at the standard 3-hour breakpoints (0.02,
-    0.1, 0.25, 0.5, 1.0, 2.0 in) -- see precip_mm_to_rgba().
+    requested valid time -- see fetch_wm6_fields()'s docstring), a smooth
+    blue -> purple -> red -> white gradient spanning 0.01-1.5 in, labeled
+    in inches -- see precip_mm_to_rgba()/build_precip_colormap().
 
 USAGE
 -----
@@ -54,6 +53,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
+from matplotlib.colors import Normalize, LinearSegmentedColormap
 import numpy as np
 import requests
 import zarr
@@ -128,40 +128,51 @@ RESAMPLE_FACTOR = 6
 MSLP_CONTOUR_INTERVAL_HPA = 4
 
 # ---------------------------------------------------------------------------
-# 3-hour precipitation shading -- discrete (bucketed) standard NWS-style
-# QPF bands (green -> yellow -> orange -> red -> magenta), not a smooth
-# gradient: each pixel gets one of PRECIP_RGB_COLORS' colors solid, based
-# on which bucket its value falls in, the same categorical-legend style as
-# an NWS QPF panel. Buckets are defined natively in inches (the unit the
-# legend displays, and the unit real QPF panels use) at the standard NWS
-# breakpoints for a 3-hour accumulation; WM-6's data comes back in mm, so
-# PRECIP_MM_STOPS (used for the actual bucketing) is derived from these.
-# Below the first breakpoint (0.02 in, roughly the "measurable
-# precipitation" threshold) is left unshaded.
+# 3-hour precipitation shading -- smooth blue -> purple -> red -> white
+# gradient (on request, replacing an earlier bucketed/discrete version),
+# spanning 0.01-1.5 in. Defined natively in inches (the unit the legend
+# displays); WM-6's data comes back in mm, so PRECIP_MM_STOPS (used for
+# the actual color mapping) is derived from these. Below the floor (0.01
+# in, roughly the "measurable precipitation" threshold) is left unshaded,
+# fading in by alpha rather than switching on hard at the floor -- same
+# technique as the sibling maps' fade-ins.
 # ---------------------------------------------------------------------------
 PRECIP_RGB_COLORS = [
-    [223, 241, 216],   # 0.02 in -- pale green (floor)
-    [116, 196, 118],   # 0.1 in -- green
-    [255, 237, 111],   # 0.25 in -- yellow
-    [253, 141, 60],    # 0.5 in -- orange
-    [222, 45, 38],      # 1.0 in -- red
-    [129, 15, 124],     # 2.0 in -- magenta/purple (heavy, open-ended)
+    [33, 76, 196],      # 0.01 in -- blue
+    [142, 45, 172],     # 0.51 in -- purple
+    [214, 39, 40],       # 1.01 in -- red
+    [255, 255, 255],     # 1.5 in -- white
 ]
-PRECIP_IN_STOPS = [0.02, 0.1, 0.25, 0.5, 1.0, 2.0]
+PRECIP_IN_STOPS = [0.01, 0.51, 1.01, 1.5]
 PRECIP_MM_STOPS = [round(v * 25.4, 3) for v in PRECIP_IN_STOPS]
+PRECIP_IN_MIN, PRECIP_IN_MAX = PRECIP_IN_STOPS[0], PRECIP_IN_STOPS[-1]
+PRECIP_MM_MIN, PRECIP_MM_MAX = PRECIP_MM_STOPS[0], PRECIP_MM_STOPS[-1]
+
+PRECIP_ALPHA_FADE_END_IN = 0.04
+PRECIP_ALPHA_FADE_START = 0.35
+PRECIP_ALPHA_FADE_END = 1.0
+
+
+def build_precip_colormap():
+    span = PRECIP_MM_MAX - PRECIP_MM_MIN
+    stops = [((mm - PRECIP_MM_MIN) / span, [c / 255 for c in rgb])
+             for mm, rgb in zip(PRECIP_MM_STOPS, PRECIP_RGB_COLORS)]
+    return LinearSegmentedColormap.from_list("ingalls_precip_3h", stops, N=256)
 
 
 def precip_mm_to_rgba(precip_mm):
-    """Quantize a precip_mm array into PRECIP_RGB_COLORS' discrete buckets
-    (edges PRECIP_MM_STOPS), returning an RGBA array -- fully transparent
-    below the first bucket, fully opaque (no alpha blending) at and above
-    it, since a bucketed/categorical legend has no continuous ramp to fade
-    along."""
-    edges = np.array(PRECIP_MM_STOPS)
-    colors = np.array([[c / 255 for c in rgb] for rgb in PRECIP_RGB_COLORS])
-    idx = np.clip(np.digitize(precip_mm, edges) - 1, 0, len(colors) - 1)
-    rgba = np.concatenate([colors[idx], np.ones(idx.shape + (1,))], axis=-1)
-    rgba[..., 3] = np.where(precip_mm < edges[0], 0.0, 1.0)
+    """Map a precip_mm array through the continuous blue-purple-red-white
+    colormap, faded in by alpha between PRECIP_MM_MIN and the fade-end mm
+    equivalent of PRECIP_ALPHA_FADE_END_IN, fully transparent below the
+    floor."""
+    cmap = build_precip_colormap()
+    norm = Normalize(vmin=PRECIP_MM_MIN, vmax=PRECIP_MM_MAX)
+    rgba = cmap(norm(precip_mm))
+
+    fade_end_mm = PRECIP_ALPHA_FADE_END_IN * 25.4
+    fade_ratio = np.clip((precip_mm - PRECIP_MM_MIN) / (fade_end_mm - PRECIP_MM_MIN), 0, 1)
+    alpha = PRECIP_ALPHA_FADE_START + (PRECIP_ALPHA_FADE_END - PRECIP_ALPHA_FADE_START) * fade_ratio
+    rgba[..., 3] = np.where(precip_mm < PRECIP_MM_MIN, 0.0, alpha)
     return rgba
 
 
@@ -456,23 +467,25 @@ def build_map(valid_time_utc, output_path, override_path=None):
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
     cbar_bottom = 0.095
 
-    # Discrete swatches (equal-width, one per bucket) rather than a
-    # gradient -- matches the bucketed shading above. Each tick marks a
-    # swatch's *left* edge, i.e. "this color begins at this value" (the
-    # last swatch is open-ended above its edge), the standard convention
-    # for a categorical NWS-style QPF legend.
-    n_buckets = len(PRECIP_RGB_COLORS)
-    swatch_colors = np.array([[c / 255 for c in rgb] for rgb in PRECIP_RGB_COLORS]).reshape(1, n_buckets, 3)
+    precip_cmap = build_precip_colormap()
+    precip_norm = Normalize(vmin=PRECIP_MM_MIN, vmax=PRECIP_MM_MAX)
+    gradient_mm = np.linspace(PRECIP_MM_MIN, PRECIP_MM_MAX, 256).reshape(1, -1)
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
-    cax.imshow(swatch_colors, aspect="auto", interpolation="nearest",
-               extent=[0, n_buckets, 0, 1])
+    cax.imshow(gradient_mm, aspect="auto", cmap=precip_cmap, norm=precip_norm,
+               extent=[PRECIP_IN_MIN, PRECIP_IN_MAX, 0, 1])
     cax.set_yticks([])
     for spine in cax.spines.values():
         spine.set_edgecolor("#8a887e")
         spine.set_linewidth(0.6)
 
-    cax.set_xticks(np.arange(n_buckets))
-    cax.set_xticklabels([f'{v:g}"' for v in PRECIP_IN_STOPS])
+    # Ticked at clean round inch values -- not at PRECIP_IN_STOPS' own
+    # (blue/purple/red/white) control points, which would make for an
+    # oddly-numbered axis -- same approach as
+    # ../tpw-wm6-ensemble-map/build_map.py's TPW colorbar.
+    in_ticks = np.arange(0.0, PRECIP_IN_MAX + 0.01, 0.25)
+    in_ticks[0] = PRECIP_IN_MIN
+    cax.set_xticks(in_ticks)
+    cax.set_xticklabels([f'{v:g}"' for v in in_ticks])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
