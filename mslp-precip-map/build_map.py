@@ -486,6 +486,14 @@ if __name__ == "__main__":
                          help="Render from a local saved snapshot (.npz) instead of fetching live.")
     parser.add_argument("--out", type=Path, default=None,
                          help="Output PNG path (default: output/mslp_precip_wm6_ensemble_<date>_<hour>z.png).")
+    parser.add_argument("--lon-min", type=float, default=None,
+                         help="Override the default domain -- all four of --lon-min/--lon-max/"
+                              "--lat-min/--lat-max must be given together. Intended for one-off "
+                              "zoomed views (e.g. onto a specific storm); the module-level "
+                              "LON_MIN/LON_MAX/LAT_MIN/LAT_MAX stay the project's standing default.")
+    parser.add_argument("--lon-max", type=float, default=None)
+    parser.add_argument("--lat-min", type=float, default=None)
+    parser.add_argument("--lat-max", type=float, default=None)
     args = parser.parse_args()
 
     if not (0 <= args.hour <= 23):
@@ -496,6 +504,25 @@ if __name__ == "__main__":
 
     if not args.file and not args.date:
         parser.error("--date is required (YYYY-MM-DD, UTC) unless --file is given.")
+
+    domain_overrides = (args.lon_min, args.lon_max, args.lat_min, args.lat_max)
+    if any(v is not None for v in domain_overrides):
+        if any(v is None for v in domain_overrides):
+            parser.error("--lon-min/--lon-max/--lat-min/--lat-max must all be given together.")
+        # Reassign the module-level domain globals -- every function above
+        # (fetch_wm6_fields, clip_to_map, build_map, ...) reads these as
+        # free variables resolved at call time, so overriding them here
+        # before build_map() runs is enough; no need to thread a domain
+        # argument through every function. FETCH_PAD_LON_DEG/
+        # FETCH_PAD_LAT_DEG are left as-is: they were sized for the
+        # default (wider, higher-latitude) domain, so they over-cover any
+        # smaller/lower-latitude zoom -- more padding just fetches a bit
+        # more data, it doesn't produce a wrong result.
+        LON_MIN, LON_MAX, LAT_MIN, LAT_MAX = args.lon_min, args.lon_max, args.lat_min, args.lat_max
+        CENTER_LON, CENTER_LAT = (LON_MIN + LON_MAX) / 2, (LAT_MIN + LAT_MAX) / 2
+        MAP_CLIP_BOX = box(LON_MIN - FETCH_PAD_LON_DEG, LAT_MIN - FETCH_PAD_LAT_DEG,
+                            LON_MAX + FETCH_PAD_LON_DEG, LAT_MAX + FETCH_PAD_LAT_DEG)
+        print(f"Domain override: lon [{LON_MIN}, {LON_MAX}], lat [{LAT_MIN}, {LAT_MAX}]")
 
     valid_time_utc = None
     if args.date:
