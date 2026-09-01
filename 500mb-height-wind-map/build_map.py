@@ -100,9 +100,18 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
 
-LAND_COLOR = "#EDE5C1"  # muted/desaturated relative to the TPW sibling map's LAND_COLOR --
-# toned down on request so it doesn't compete with the purple wind shading.
+LAND_COLOR = "#EBEBE8"  # neutral light grey -- toned down further on request so it stays
+# quiet under the purple wind shading (was #F5E7B3, then #EDE5C1).
 OCEAN_COLOR = "#D2E8F3"
+
+# "Major" lakes only -- states_lakes_slim.json's Natural Earth `scalerank`
+# field ranks lake prominence (0 = most prominent, e.g. Lake Superior/
+# Great Slave Lake/Lake Winnipeg, up through small reservoirs at 5-6);
+# checked against every lake feature that actually falls within this map's
+# domain (see load_lakes()) and 0-2 is the cutoff that keeps genuinely
+# major lakes (Great Salt Lake, Great Slave Lake, Lake Winnipeg, Lake
+# Athabasca, Lake of the Woods, ...) without pulling in minor reservoirs.
+MAJOR_LAKE_MAX_SCALERANK = 2
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -425,6 +434,26 @@ def load_states():
     return state_geoms
 
 
+def load_lakes():
+    """Major lake polygons -- see MAJOR_LAKE_MAX_SCALERANK. Clipped as
+    filled area (like load_countries_filled()), not outline-only, since
+    lakes are drawn as their own filled water layer rather than just a
+    boundary line."""
+    with open(STATES_LAKES_FILE) as f:
+        data = json.load(f)
+    lake_geoms = []
+    for feat in data["features"]:
+        props = feat["properties"]
+        if "Lake" not in props.get("featurecla", ""):
+            continue
+        if (props.get("scalerank") or 0) > MAJOR_LAKE_MAX_SCALERANK:
+            continue
+        clipped = clip_to_map(shape(feat["geometry"]))
+        if clipped is not None:
+            lake_geoms.append(clipped)
+    return lake_geoms
+
+
 def load_boundary_lines(path):
     with open(path) as f:
         data = json.load(f)
@@ -470,6 +499,7 @@ def build_map(valid_time_utc, output_path, override_path=None):
     country_geoms = load_countries()
     country_fill_geoms = load_countries_filled()
     state_geoms = load_states()
+    lake_geoms = load_lakes()
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
     pc = ccrs.PlateCarree()
@@ -499,6 +529,12 @@ def build_map(valid_time_utc, output_path, override_path=None):
     wind_rgba[..., 3] = np.where(wind_kt < WIND_KT_MIN, 0.0, alpha)
 
     imshow_antimeridian_safe(ax, wind_rgba, lon, lat, pc, zorder=1)
+
+    # Major lakes -- drawn over the wind shading (so a lake reads as plain
+    # water, not tinted purple) but under the height contours, the same
+    # way a real analysis chart shows contours running across a lake
+    # surface rather than stopping at its shoreline.
+    ax.add_geometries(lake_geoms, crs=pc, facecolor=OCEAN_COLOR, edgecolor="#4a6b7a", linewidth=0.6, zorder=1.2)
 
     ax.add_geometries(country_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
