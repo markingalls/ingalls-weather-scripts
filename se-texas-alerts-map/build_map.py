@@ -244,6 +244,11 @@ ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_C
 alerts = json.load(open("alerts_with_zones.json"))
 extent_box = box(EXTENT[0], EXTENT[2], EXTENT[1], EXTENT[3])
 
+# Event types to leave off the map entirely -- Tropical Cyclone Local
+# Statement covers nearly the whole domain at once and adds noise on top
+# of the more specific warnings/watches without conveying anything extra.
+EXCLUDED_EVENTS = {"Tropical Cyclone Local Statement"}
+
 # Union every zone geometry per event type -- this both merges adjacent
 # same-event zones into one clean outline and naturally de-duplicates
 # NWS products that cover the exact same zone twice.
@@ -251,6 +256,8 @@ event_geoms = {}
 plotted_zones = set()  # (event, zone_id)
 for a in alerts:
     event = a["event"]
+    if event in EXCLUDED_EVENTS:
+        continue
     for z in a["zones"]:
         zone_key = (event, z.get("zone_id"))
         if zone_key in plotted_zones:
@@ -338,7 +345,6 @@ cities = [
     ("Conroe", -95.4560, 30.3119, "left", 0),
     ("Cleveland", -95.0847, 30.3413, "right", 0),
     ("Houston", -95.3698, 29.7604, "right", 0),
-    ("Baytown", -94.9774, 29.7355, "right", 0),
     ("Freeport", -95.3599, 28.9541, "right", 0),
     ("Galveston", -94.7977, 29.3013, "right", 0),
     ("Texas City", -94.9027, 29.3838, "left", 0),
