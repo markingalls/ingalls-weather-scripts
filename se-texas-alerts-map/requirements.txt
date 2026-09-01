@@ -1,7 +1,0 @@
-matplotlib
-cartopy
-shapely
-geopandas
-pyproj
-requests
-Pillow

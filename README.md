@@ -52,10 +52,6 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
-- [`se-texas-alerts-map/`](se-texas-alerts-map/) — generates a styled map
-  of active NWS weather alerts across the Houston-Galveston-Beaumont
-  corridor and adjacent SW Louisiana (Lake Charles, Lafayette), same
-  style as `columbia-basin-alerts-map/` applied to a different domain.
 
 ## Shared resources
 
