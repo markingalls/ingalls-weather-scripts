@@ -138,7 +138,7 @@ MSLP_CONTOUR_INTERVAL_HPA = 4
 # technique as the sibling maps' fade-ins.
 # ---------------------------------------------------------------------------
 PRECIP_RGB_COLORS = [
-    [33, 76, 196],      # 0.01 in -- blue
+    [173, 216, 245],    # 0.01 in -- light blue
     [142, 45, 172],     # 0.51 in -- purple
     [214, 39, 40],       # 1.01 in -- red
     [255, 255, 255],     # 1.5 in -- white
@@ -442,7 +442,10 @@ def build_map(valid_time_utc, output_path, override_path=None):
     mslp_levels = np.arange(level_start, level_end + MSLP_CONTOUR_INTERVAL_HPA, MSLP_CONTOUR_INTERVAL_HPA)
     isobars = ax.contour(lon, lat, mslp_hpa, levels=mslp_levels, transform=pc,
                           colors="#1a1a1a", linewidths=1.0, zorder=3)
-    ax.clabel(isobars, inline=True, fontsize=7.5, fmt="%d", colors="#1a1a1a")
+    isobars.set_path_effects([pe.withStroke(linewidth=2.6, foreground="white")])
+    isobar_labels = ax.clabel(isobars, inline=True, fontsize=7.5, fmt="%d", colors="#1a1a1a")
+    for txt in isobar_labels:
+        txt.set_path_effects([pe.withStroke(linewidth=2.0, foreground="white")])
 
     # The major low's "L" marker -- same styling as
     # ../tpw-wm6-ensemble-map/build_map.py's pressure-center markers (red,
@@ -499,7 +502,7 @@ def build_map(valid_time_utc, output_path, override_path=None):
               fontsize=19, fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
     fig.text(0.03, 0.943, "WindBorne WM-6 Ensemble Mean", fontsize=12.5,
               fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
-    fig.text(0.03, 0.914, f"Init {init_dt.strftime('%Y-%m-%d %H')}Z -- MSLP every 4 hPa",
+    fig.text(0.03, 0.914, f"Init {init_dt.strftime('%Y-%m-%d %H')}Z",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
     fig.text(0.5, 0.012, "WindBorne WM-6 — Ingalls Weather", fontsize=9,
