@@ -2,15 +2,20 @@
 WM-6 Ensemble Mean MSLP & 3-Hour Precipitation Map -- one-off builder
 Ingalls Weather
 
-Same domain as ../500mb-height-wind-map/ (centered on Portland, OR, wide
-enough north to reach SE Alaska), showing a different pair of fields:
+Same domain as ../500mb-height-wind-map/ by default (centered on
+Portland, OR, wide enough north to reach SE Alaska), showing a different
+pair of fields -- and overridable per-render via
+--lon-min/--lon-max/--lat-min/--lat-max for a one-off zoomed view:
   - Contours: ensemble-mean mean sea level pressure isobars, every 4 hPa
     (the standard surface-analysis interval) -- same field/interval as
-    ../tpw-wm6-ensemble-map/build_map.py's MSLP contours.
+    ../tpw-wm6-ensemble-map/build_map.py's MSLP contours. The single
+    deepest low in view is marked with a red "L" (find_major_low()).
   - Shading: ensemble-mean 3-hour accumulated precipitation (WM-6's
     `total_precipitation_3h`, already the accumulation ending at the
-    requested valid time -- see fetch_wm6_fields()'s docstring), in a
-    standard green-yellow-orange-red-magenta QPF ramp, starting at 0.5 mm.
+    requested valid time -- see fetch_wm6_fields()'s docstring), in
+    discrete (bucketed, not a smooth gradient) standard NWS-style QPF
+    bands, labeled in inches at the standard 3-hour breakpoints (0.02,
+    0.1, 0.25, 0.5, 1.0, 2.0 in) -- see precip_mm_to_rgba().
 
 USAGE
 -----
@@ -48,7 +53,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-from matplotlib.colors import Normalize, LinearSegmentedColormap
+import matplotlib.patheffects as pe
 import numpy as np
 import requests
 import zarr
@@ -84,6 +89,10 @@ MAJOR_LAKE_MAX_SCALERANK = 2  # see ../500mb-height-wind-map/build_map.py's comm
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+# Bold + genuinely rounded, used only for L/H pressure-center markers --
+# same font/rationale as ../tpw-wm6-ensemble-map/build_map.py's
+# BALOO_BOLD_PATH (checked into /assets since it's variable-only upstream).
+BALOO_BOLD_PATH = ASSETS_DIR / "fonts" / "Baloo2-Bold.ttf"
 
 # ---------------------------------------------------------------------------
 # Figure geometry -- identical to ../500mb-height-wind-map/build_map.py's
@@ -119,37 +128,62 @@ RESAMPLE_FACTOR = 6
 MSLP_CONTOUR_INTERVAL_HPA = 4
 
 # ---------------------------------------------------------------------------
-# 3-hour precipitation shading -- standard NWS-style QPF ramp (green ->
-# yellow -> orange -> red -> magenta), starting at a 0.5 mm floor (below
-# that reads as dry/no meaningful precip). Not power-law spaced like the
-# TPW map's color table -- this ramp's hue order carries the "amount"
-# signal, not the color spacing.
+# 3-hour precipitation shading -- discrete (bucketed) standard NWS-style
+# QPF bands (green -> yellow -> orange -> red -> magenta), not a smooth
+# gradient: each pixel gets one of PRECIP_RGB_COLORS' colors solid, based
+# on which bucket its value falls in, the same categorical-legend style as
+# an NWS QPF panel. Buckets are defined natively in inches (the unit the
+# legend displays, and the unit real QPF panels use) at the standard NWS
+# breakpoints for a 3-hour accumulation; WM-6's data comes back in mm, so
+# PRECIP_MM_STOPS (used for the actual bucketing) is derived from these.
+# Below the first breakpoint (0.02 in, roughly the "measurable
+# precipitation" threshold) is left unshaded.
 # ---------------------------------------------------------------------------
 PRECIP_RGB_COLORS = [
-    [223, 241, 216],   # 0.5 mm -- pale green (floor)
-    [116, 196, 118],   # 2 mm -- green
-    [255, 237, 111],   # 6 mm -- yellow
-    [253, 141, 60],    # 12 mm -- orange
-    [222, 45, 38],      # 25 mm -- red
-    [129, 15, 124],     # 50 mm -- magenta/purple (heavy)
+    [223, 241, 216],   # 0.02 in -- pale green (floor)
+    [116, 196, 118],   # 0.1 in -- green
+    [255, 237, 111],   # 0.25 in -- yellow
+    [253, 141, 60],    # 0.5 in -- orange
+    [222, 45, 38],      # 1.0 in -- red
+    [129, 15, 124],     # 2.0 in -- magenta/purple (heavy, open-ended)
 ]
-PRECIP_MM_MIN = 0.5
-PRECIP_MM_MAX = 50.0
-PRECIP_MM_STOPS = [0.5, 2, 6, 12, 25, 50]
-
-# Fades in by alpha between PRECIP_MM_MIN and PRECIP_ALPHA_FADE_END_MM --
-# same rationale as the sibling maps' fade-ins (basemap shows through
-# faintly right at the floor instead of switching on abruptly).
-PRECIP_ALPHA_FADE_END_MM = 2.0
-PRECIP_ALPHA_FADE_START = 0.35
-PRECIP_ALPHA_FADE_END = 1.0
+PRECIP_IN_STOPS = [0.02, 0.1, 0.25, 0.5, 1.0, 2.0]
+PRECIP_MM_STOPS = [round(v * 25.4, 3) for v in PRECIP_IN_STOPS]
 
 
-def build_precip_colormap():
-    span = PRECIP_MM_MAX - PRECIP_MM_MIN
-    stops = [((mm - PRECIP_MM_MIN) / span, [c / 255 for c in rgb])
-             for mm, rgb in zip(PRECIP_MM_STOPS, PRECIP_RGB_COLORS)]
-    return LinearSegmentedColormap.from_list("ingalls_precip_3h", stops, N=256)
+def precip_mm_to_rgba(precip_mm):
+    """Quantize a precip_mm array into PRECIP_RGB_COLORS' discrete buckets
+    (edges PRECIP_MM_STOPS), returning an RGBA array -- fully transparent
+    below the first bucket, fully opaque (no alpha blending) at and above
+    it, since a bucketed/categorical legend has no continuous ramp to fade
+    along."""
+    edges = np.array(PRECIP_MM_STOPS)
+    colors = np.array([[c / 255 for c in rgb] for rgb in PRECIP_RGB_COLORS])
+    idx = np.clip(np.digitize(precip_mm, edges) - 1, 0, len(colors) - 1)
+    rgba = np.concatenate([colors[idx], np.ones(idx.shape + (1,))], axis=-1)
+    rgba[..., 3] = np.where(precip_mm < edges[0], 0.0, 1.0)
+    return rgba
+
+
+def find_major_low(lat, lon, mslp_hpa, lon_min, lon_max, lat_min, lat_max):
+    """Locate the single deepest low (lowest MSLP grid cell) within the
+    visible bbox -- the map's one "major low" marker, not a general
+    multi-center L/H detector (a prominence-filtered local-minima scan,
+    like ../tpw-wm6-ensemble-map/build_map.py's find_pressure_extrema(),
+    was tried first here but also flagged weak, sub-isobar-interval
+    minima over flat interior terrain that aren't a real synoptic
+    feature -- a plain global minimum is what "that major low" actually
+    means for this map). Run before resample_to_finer_grid() so the
+    result is a native grid cell, not a smoothed/upsampled one.
+
+    Returns (lon, lat, value_hpa) or None if no cell falls in the bbox."""
+    lat_idx = np.where((lat >= lat_min) & (lat <= lat_max))[0]
+    lon_idx = np.where((lon >= lon_min) & (lon <= lon_max))[0]
+    if lat_idx.size == 0 or lon_idx.size == 0:
+        return None
+    sub = mslp_hpa[np.ix_(lat_idx, lon_idx)]
+    cy, cx = np.unravel_index(np.argmin(sub), sub.shape)
+    return lon[lon_idx[cx]], lat[lat_idx[cy]], sub[cy, cx]
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +359,7 @@ def load_boundary_lines(path):
 def build_map(valid_time_utc, output_path, override_path=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
+    baloo_bold = fm.FontProperties(fname=BALOO_BOLD_PATH)
 
     if override_path:
         print(f"Using local snapshot: {override_path}")
@@ -345,6 +380,9 @@ def build_map(valid_time_utc, output_path, override_path=None):
 
     print(f"MSLP range in fetched crop: {mslp_hpa.min():.0f} - {mslp_hpa.max():.0f} hPa")
     print(f"3-hr precip range in fetched crop: {precip_mm.min():.1f} - {precip_mm.max():.1f} mm")
+    major_low = find_major_low(lat, lon, mslp_hpa, LON_MIN, LON_MAX, LAT_MIN, LAT_MAX)
+    if major_low:
+        print(f"Major low: {major_low[2]:.0f} hPa at {major_low[1]:.2f}N, {major_low[0]:.2f}E")
     print(f"Resampling from {lat.size}x{lon.size} native grid...")
     lat_r, lon_r, mslp_hpa = resample_to_finer_grid(lat, lon, mslp_hpa)
     _, _, precip_mm = resample_to_finer_grid(lat, lon, precip_mm)
@@ -370,15 +408,9 @@ def build_map(valid_time_utc, output_path, override_path=None):
 
     ax.add_geometries(country_fill_geoms, crs=pc, facecolor=LAND_COLOR, edgecolor="none", zorder=0.5)
 
-    # 3-hour precip shading -- fixed mm-to-color QPF ramp, faded in via
-    # per-pixel alpha between PRECIP_MM_MIN and PRECIP_ALPHA_FADE_END_MM.
-    precip_cmap = build_precip_colormap()
-    precip_norm = Normalize(vmin=PRECIP_MM_MIN, vmax=PRECIP_MM_MAX)
-    precip_rgba = precip_cmap(precip_norm(precip_mm))
-
-    fade_ratio = np.clip((precip_mm - PRECIP_MM_MIN) / (PRECIP_ALPHA_FADE_END_MM - PRECIP_MM_MIN), 0, 1)
-    alpha = PRECIP_ALPHA_FADE_START + (PRECIP_ALPHA_FADE_END - PRECIP_ALPHA_FADE_START) * fade_ratio
-    precip_rgba[..., 3] = np.where(precip_mm < PRECIP_MM_MIN, 0.0, alpha)
+    # 3-hour precip shading -- discrete QPF buckets (see precip_mm_to_rgba()),
+    # not a smooth gradient.
+    precip_rgba = precip_mm_to_rgba(precip_mm)
 
     imshow_antimeridian_safe(ax, precip_rgba, lon, lat, pc, zorder=1)
 
@@ -401,6 +433,17 @@ def build_map(valid_time_utc, output_path, override_path=None):
                           colors="#1a1a1a", linewidths=1.0, zorder=3)
     ax.clabel(isobars, inline=True, fontsize=7.5, fmt="%d", colors="#1a1a1a")
 
+    # The major low's "L" marker -- same styling as
+    # ../tpw-wm6-ensemble-map/build_map.py's pressure-center markers (red,
+    # Baloo 2 Bold, white halo), projected to axes data coordinates once
+    # via proj.transform_point().
+    if major_low:
+        low_lon, low_lat, _ = major_low
+        px, py = proj.transform_point(low_lon, low_lat, pc)
+        ax.text(px, py, "L", ha="center", va="center", fontsize=22,
+                 color="#c0392b", zorder=4, fontproperties=baloo_bold,
+                 path_effects=[pe.withStroke(linewidth=1.8, foreground="white")])
+
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
 
@@ -413,22 +456,27 @@ def build_map(valid_time_utc, output_path, override_path=None):
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
     cbar_bottom = 0.095
 
-    gradient_mm = np.linspace(PRECIP_MM_MIN, PRECIP_MM_MAX, 256).reshape(1, -1)
+    # Discrete swatches (equal-width, one per bucket) rather than a
+    # gradient -- matches the bucketed shading above. Each tick marks a
+    # swatch's *left* edge, i.e. "this color begins at this value" (the
+    # last swatch is open-ended above its edge), the standard convention
+    # for a categorical NWS-style QPF legend.
+    n_buckets = len(PRECIP_RGB_COLORS)
+    swatch_colors = np.array([[c / 255 for c in rgb] for rgb in PRECIP_RGB_COLORS]).reshape(1, n_buckets, 3)
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
-    cax.imshow(gradient_mm, aspect="auto", cmap=precip_cmap, norm=precip_norm,
-               extent=[PRECIP_MM_MIN, PRECIP_MM_MAX, 0, 1])
+    cax.imshow(swatch_colors, aspect="auto", interpolation="nearest",
+               extent=[0, n_buckets, 0, 1])
     cax.set_yticks([])
     for spine in cax.spines.values():
         spine.set_edgecolor("#8a887e")
         spine.set_linewidth(0.6)
 
-    mm_ticks = [0.5, 2, 6, 12, 25, 50]
-    cax.set_xticks(mm_ticks)
-    cax.set_xticklabels([f"{mm:g}" for mm in mm_ticks])
+    cax.set_xticks(np.arange(n_buckets))
+    cax.set_xticklabels([f'{v:g}"' for v in PRECIP_IN_STOPS])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
-    cax.set_xlabel("3-Hour Precipitation (mm)", fontsize=8.5, fontproperties=poppins_reg, color="#5a584f")
+    cax.set_xlabel("3-Hour Precipitation (in)", fontsize=8.5, fontproperties=poppins_reg, color="#5a584f")
 
     # Title & subtitle above the map.
     init_dt = datetime.fromisoformat(meta["initialization_time"].replace("Z", "+00:00"))
