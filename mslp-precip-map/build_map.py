@@ -53,6 +53,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
+from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 import requests
 import zarr
@@ -127,12 +128,20 @@ RESAMPLE_FACTOR = 6
 MSLP_CONTOUR_INTERVAL_HPA = 4
 
 # ---------------------------------------------------------------------------
-# 3-hour precipitation shading -- discrete (bucketed, not a gradient)
-# light-blue -> purple -> red -> white bands spanning 0.01-1.5 in. Defined
-# natively in inches (the unit the legend displays); WM-6's data comes
-# back in mm, so PRECIP_MM_STOPS (used for the actual bucketing) is
-# derived from these. Below the floor (0.01 in, roughly the "measurable
-# precipitation" threshold) is left unshaded.
+# 3-hour precipitation shading -- discrete (bucketed, not a smooth
+# gradient) light-blue -> purple -> red -> white bands spanning 0.01-1.5
+# in, quantized into PRECIP_N_BUCKETS steps rather than just the 4 anchor
+# colors themselves -- 4 solid bands read as a blocky staircase with most
+# of a typical (sub-0.5 in) event stuck in a single band, while 25 finer
+# steps still reads as clearly bucketed/categorical (not a blend) but
+# keeps enough gradation to show spatial structure in the light-to-
+# moderate range. PRECIP_RGB_COLORS/PRECIP_IN_STOPS are the same 4 anchor
+# colors as before -- build_precip_colormap() interpolates between them,
+# then precip_mm_to_rgba() samples that continuous ramp at each bucket's
+# center and snaps every pixel to its bucket's single color (no blending
+# within a bucket). Defined natively in inches (the unit the legend
+# displays); WM-6's data comes back in mm, so PRECIP_MM_STOPS is derived
+# from these. Below the floor (0.01 in) is left unshaded.
 # ---------------------------------------------------------------------------
 PRECIP_RGB_COLORS = [
     [173, 216, 245],    # 0.01 in -- light blue
@@ -144,19 +153,37 @@ PRECIP_IN_STOPS = [0.01, 0.51, 1.01, 1.5]
 PRECIP_MM_STOPS = [round(v * 25.4, 3) for v in PRECIP_IN_STOPS]
 PRECIP_IN_MIN, PRECIP_IN_MAX = PRECIP_IN_STOPS[0], PRECIP_IN_STOPS[-1]
 PRECIP_MM_MIN, PRECIP_MM_MAX = PRECIP_MM_STOPS[0], PRECIP_MM_STOPS[-1]
+PRECIP_N_BUCKETS = 25
+
+
+def build_precip_colormap():
+    span = PRECIP_MM_MAX - PRECIP_MM_MIN
+    stops = [((mm - PRECIP_MM_MIN) / span, [c / 255 for c in rgb])
+             for mm, rgb in zip(PRECIP_MM_STOPS, PRECIP_RGB_COLORS)]
+    return LinearSegmentedColormap.from_list("ingalls_precip_3h", stops, N=256)
+
+
+def precip_bucket_colors():
+    """The PRECIP_N_BUCKETS solid colors -- build_precip_colormap()
+    sampled at each bucket's midpoint -- shared by precip_mm_to_rgba() and
+    the colorbar so both use exactly the same swatches."""
+    cmap = build_precip_colormap()
+    centers = (np.arange(PRECIP_N_BUCKETS) + 0.5) / PRECIP_N_BUCKETS
+    return cmap(centers)[:, :3]
 
 
 def precip_mm_to_rgba(precip_mm):
-    """Quantize a precip_mm array into PRECIP_RGB_COLORS' discrete buckets
-    (edges PRECIP_MM_STOPS), returning an RGBA array -- fully transparent
-    below the first bucket, fully opaque (no alpha blending) at and above
-    it, since a bucketed/categorical legend has no continuous ramp to fade
-    along."""
-    edges = np.array(PRECIP_MM_STOPS)
-    colors = np.array([[c / 255 for c in rgb] for rgb in PRECIP_RGB_COLORS])
-    idx = np.clip(np.digitize(precip_mm, edges) - 1, 0, len(colors) - 1)
+    """Quantize a precip_mm array into PRECIP_N_BUCKETS equal-width
+    buckets between PRECIP_MM_MIN and PRECIP_MM_MAX, each pixel snapped to
+    its bucket's single solid color (see precip_bucket_colors()) -- fully
+    transparent below the floor, fully opaque at and above it (no alpha
+    blending, since this is still a categorical/bucketed fill, just with
+    finer steps than the 4 anchor colors alone)."""
+    colors = precip_bucket_colors()
+    idx = np.clip(((precip_mm - PRECIP_MM_MIN) / (PRECIP_MM_MAX - PRECIP_MM_MIN) * PRECIP_N_BUCKETS).astype(int),
+                   0, PRECIP_N_BUCKETS - 1)
     rgba = np.concatenate([colors[idx], np.ones(idx.shape + (1,))], axis=-1)
-    rgba[..., 3] = np.where(precip_mm < edges[0], 0.0, 1.0)
+    rgba[..., 3] = np.where(precip_mm < PRECIP_MM_MIN, 0.0, 1.0)
     return rgba
 
 
@@ -454,23 +481,26 @@ def build_map(valid_time_utc, output_path, override_path=None):
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
     cbar_bottom = 0.095
 
-    # Discrete swatches (equal-width, one per bucket) rather than a
-    # gradient -- matches the bucketed shading above. Each tick marks a
-    # swatch's *left* edge, i.e. "this color begins at this value" (the
-    # last swatch is open-ended above its edge), the standard convention
-    # for a categorical NWS-style QPF legend.
-    n_buckets = len(PRECIP_RGB_COLORS)
-    swatch_colors = np.array([[c / 255 for c in rgb] for rgb in PRECIP_RGB_COLORS]).reshape(1, n_buckets, 3)
+    # Discrete swatches (equal-width, one per bucket, PRECIP_N_BUCKETS of
+    # them) rather than a gradient -- matches the bucketed shading above.
+    # With this many buckets, ticking every swatch edge would be
+    # unreadable, so ticks go at clean round inch values instead (same
+    # approach as a continuous colorbar), positioned at that value's
+    # fractional position along the PRECIP_MM_MIN-PRECIP_MM_MAX span.
+    swatch_colors = precip_bucket_colors().reshape(1, PRECIP_N_BUCKETS, 3)
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     cax.imshow(swatch_colors, aspect="auto", interpolation="nearest",
-               extent=[0, n_buckets, 0, 1])
+               extent=[0, PRECIP_N_BUCKETS, 0, 1])
     cax.set_yticks([])
     for spine in cax.spines.values():
         spine.set_edgecolor("#8a887e")
         spine.set_linewidth(0.6)
 
-    cax.set_xticks(np.arange(n_buckets))
-    cax.set_xticklabels([f'{v:g}"' for v in PRECIP_IN_STOPS])
+    in_ticks = np.arange(0.0, PRECIP_IN_MAX + 0.01, 0.25)
+    in_ticks[0] = PRECIP_IN_MIN
+    tick_positions = (in_ticks - PRECIP_IN_MIN) / (PRECIP_IN_MAX - PRECIP_IN_MIN) * PRECIP_N_BUCKETS
+    cax.set_xticks(tick_positions)
+    cax.set_xticklabels([f'{v:g}"' for v in in_ticks])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
