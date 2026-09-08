@@ -3,29 +3,26 @@ Pacific Northwest Average First Freeze Map -- builder
 Ingalls Weather
 
 Styled map covering the same BC/WA/OR/ID (+ slivers of NV/MT/WY) domain as
-../dew-point-storm-map/: shading is each location's 1991-2020 average
-first fall date its daily low temperature drops to <=32F (0C), built by
-interpolating station climatology (see fetch_climatology.py) across the
-domain with scipy.interpolate.griddata -- the same technique
-../dew-point-storm-map/build_map.py uses to resample gridded model data
-onto a regular lon/lat grid, just applied to point station data here
-instead. There is no gridded first-freeze product that spans both the US
-and Canada (PRISM, NOAA's nClimGrid, and NCEI's own Freeze/Frost Normals
-table are all CONUS-only), so this domain -- which is half BC -- has to be
-built from GHCN-Daily's cross-border station network rather than a
-ready-made grid; see fetch_climatology.py's module docstring for why
-GHCN-Daily specifically (not ACIS) was used for station discovery.
+../dew-point-storm-map/: each station's 1991-2020 average first fall date
+its daily low temperature drops to <=32F (0C) (see fetch_climatology.py),
+plotted as a colored dot at that station's location -- no interpolation
+or shading between stations. There is no gridded first-freeze product
+that spans both the US and Canada (PRISM, NOAA's nClimGrid, and NCEI's
+own Freeze/Frost Normals table are all CONUS-only), so this domain --
+which is half BC -- has to be built from GHCN-Daily's cross-border
+station network rather than a ready-made grid; see
+fetch_climatology.py's module docstring for why GHCN-Daily specifically
+(not ACIS) was used for station discovery.
 
-Because this is a station interpolation rather than a terrain-resolved
-grid, treat it as a regional overview, not a precise local forecast --
-elevation is the single biggest driver of frost timing in this domain
-(a few hundred feet of elevation gain can easily shift the real average
-date by a week or more), and station density thins out considerably away
-from valleys/airports/populated areas, especially in interior BC and the
-Cascade/Rocky Mountain high country. Station markers are drawn on the map
-itself specifically so viewers can see where the underlying data actually
-is, rather than presenting the smoothed field as if it were uniformly
-well-observed.
+Dots, not a filled/interpolated surface, deliberately: elevation is the
+single biggest driver of frost timing in this domain (a few hundred feet
+of elevation gain can easily shift the real average date by a week or
+more), and station density thins out considerably away from
+valleys/airports/populated areas, especially in interior BC and the
+Cascade/Rocky Mountain high country. A smoothed surface interpolated
+across those gaps would read as uniformly well-observed terrain-resolved
+data when it isn't -- showing only the actual station values keeps the
+map honest about where the data is and isn't.
 
 USAGE
 -----
@@ -53,11 +50,8 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
 from matplotlib.colors import Normalize, LinearSegmentedColormap
-from matplotlib.lines import Line2D
 from matplotlib.transforms import offset_copy
 import numpy as np
-from scipy.interpolate import griddata
-from scipy.ndimage import gaussian_filter
 
 import cartopy.crs as ccrs
 from shapely.geometry import shape
@@ -99,17 +93,6 @@ MAP_FRAME_INSET_PX = 22
 LON_MIN, LON_MAX = -128.2, -108.8
 LAT_MIN, LAT_MAX = 39.7, 55.2
 CENTER_LON, CENTER_LAT = -118.5, 47.45
-
-RESAMPLE_PAD_DEG = 1.5
-RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAMPLE_PAD_DEG
-RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAMPLE_PAD_DEG
-RESAMPLE_NX, RESAMPLE_NY = 440, 360
-
-# Light smoothing only -- station data is already sparse/irregular, unlike
-# the dense model grids ../dew-point-storm-map/ smooths; a small sigma
-# just softens griddata's linear facets between stations without erasing
-# genuine local gradient real stations captured.
-SMOOTH_SIGMA = 2.2
 
 CITIES = [
     ("Bella Coola", -126.7659, 52.3728, "right"),
@@ -160,7 +143,7 @@ DATE_COLOR_TABLE_OFFSET = [
     (120, [140, 178, 60]),
     (140, [230, 191, 62]),
     (160, [224, 130, 51]),
-    (184, [178, 47, 45]),
+    (183, [178, 47, 45]),
 ]
 DATE_OFFSET_MIN = DATE_COLOR_TABLE_OFFSET[0][0]
 DATE_OFFSET_MAX = DATE_COLOR_TABLE_OFFSET[-1][0]
@@ -208,19 +191,6 @@ def load_boundary_lines(path):
     return [shape(feat["geometry"]) for feat in data["features"]]
 
 
-def interpolate_to_grid(lons, lats, values):
-    reg_lon = np.linspace(RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_NX)
-    reg_lat = np.linspace(RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX, RESAMPLE_NY)
-    reg_lon_grid, reg_lat_grid = np.meshgrid(reg_lon, reg_lat)
-    points = np.column_stack([lons, lats])
-    regridded = griddata(points, values, (reg_lon_grid, reg_lat_grid), method="linear")
-    nan_mask = np.isnan(regridded)
-    if nan_mask.any():
-        regridded[nan_mask] = griddata(points, values, (reg_lon_grid[nan_mask], reg_lat_grid[nan_mask]),
-                                        method="nearest")
-    return reg_lon, reg_lat, gaussian_filter(regridded, sigma=SMOOTH_SIGMA)
-
-
 def build_map(climatology, output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
@@ -229,8 +199,6 @@ def build_map(climatology, output_path):
     lons = np.array([s["lon"] for s in stations])
     lats = np.array([s["lat"] for s in stations])
     offsets = np.array([s["mean_offset_days"] for s in stations])
-    print(f"Interpolating {len(stations)} station(s) onto a regular grid...")
-    reg_lon, reg_lat, grid_offset = interpolate_to_grid(lons, lats, offsets)
 
     print("Loading basemap layers...")
     land_geoms = load_land()
@@ -251,18 +219,20 @@ def build_map(climatology, output_path):
 
     cmap = build_date_colormap()
     norm = Normalize(vmin=DATE_OFFSET_MIN, vmax=DATE_OFFSET_MAX)
-    ax.pcolormesh(reg_lon, reg_lat, grid_offset, transform=pc, cmap=cmap, norm=norm,
-                  shading="gouraud", zorder=1)
 
-    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
+    ax.add_geometries(land_geoms, crs=pc, facecolor="#eef1ea", edgecolor="#4a6b7a", linewidth=0.8, zorder=1)
     ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
-    # Station markers -- small dark-outlined dots so viewers can see where
-    # the underlying data actually is, rather than the smoothed field
-    # reading as uniformly well-observed (see module docstring).
-    ax.scatter(lons, lats, s=7, facecolor="white", edgecolor="black", linewidth=0.4,
-               alpha=0.75, transform=pc, zorder=4)
+    # Each station plotted at its own location, colored by its own mean
+    # first-freeze date -- no interpolation/shading between stations (see
+    # module docstring). A white halo underneath the colored fill (drawn
+    # as a larger white-edge marker first) keeps every dot legible against
+    # both the light land fill and darker colors in the table.
+    ax.scatter(lons, lats, s=95, facecolor="none", edgecolor="white", linewidth=2.2,
+               transform=pc, zorder=3.9)
+    ax.scatter(lons, lats, c=offsets, cmap=cmap, norm=norm, s=70, edgecolor="black",
+               linewidth=0.6, transform=pc, zorder=4)
 
     geodetic_transform = pc._as_mpl_transform(ax)
     stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.75))]
@@ -300,35 +270,25 @@ def build_map(climatology, output_path):
         spine.set_edgecolor("#8a887e")
         spine.set_linewidth(0.6)
 
-    tick_offsets = [45, 60, 80, 100, 120, 140, 160, 184]
+    tick_offsets = [45, 60, 80, 100, 120, 140, 160, 183]
     cax.set_xticks(tick_offsets)
     cax.set_xticklabels([offset_to_date_label(o) for o in tick_offsets])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)
 
-    # Legend entry for the station markers.
-    station_handle = Line2D([0], [0], marker="o", color="none", markerfacecolor="white",
-                             markeredgecolor="black", markeredgewidth=0.6, markersize=6,
-                             label=f"GHCN-Daily station (n={len(stations)})")
-    legend_y = 0.155
-    leg = fig.legend(handles=[station_handle], loc="center", frameon=False, fontsize=8.75,
-                      prop=poppins_reg, handlelength=1.4, bbox_to_anchor=(0.5, legend_y))
-    for text in leg.get_texts():
-        text.set_color("#2b2a26")
-
     # Title & subtitle above the map
     fig.text(0.03, 0.978, "Pacific Northwest Average First Freeze", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
     fig.text(0.03, 0.943, f"{climatology['period']} Climatology • First Fall Date ≤32°F (0°C)",
               fontsize=12.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
-    fig.text(0.03, 0.914, "NOAA GHCN-Daily station climatology, interpolated",
+    fig.text(0.03, 0.914, f"NOAA GHCN-Daily • {len(stations)} stations, each plotted at its own location",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.012,
-              "NOAA GHCN-Daily — Ingalls Weather — station interpolation; elevation and local "
-              "microclimate shift actual dates, especially away from station markers",
-              fontsize=8, fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
+    fig.text(0.5, 0.14, "Each dot is one station's own average — not interpolated between stations",
+              fontsize=8.75, fontproperties=poppins_reg, color="#5a584f", ha="center", va="bottom")
+    fig.text(0.5, 0.012, "NOAA GHCN-Daily — Ingalls Weather", fontsize=8.5,
+              fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=200)

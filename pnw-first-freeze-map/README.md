@@ -2,12 +2,14 @@
 
 A styled climatology map covering the same BC/WA/OR/ID (+ slivers of
 NV/MT/WY) domain as [`../dew-point-storm-map/`](../dew-point-storm-map/):
-each location's 1991-2020 average date its daily low temperature first
-drops to ≤32°F (0°C) after July 1, shaded cool-to-warm (purple/blue in
-August through orange/red in December) with the underlying GHCN-Daily
-station markers drawn on top. Unlike the rest of this repo's maps, there's
-no live model or observation fetch here — this is a climatology, rebuilt
-only when you want a fresher 30-year window or denser station coverage.
+each GHCN-Daily station's 1991-2020 average date its daily low
+temperature first drops to ≤32°F (0°C) after July 1, plotted as a
+cool-to-warm colored dot (purple/blue in August through orange/red in
+December) at that station's own location — no interpolation or shading
+between stations, just the stations themselves. Unlike the rest of this
+repo's maps, there's no live model or observation fetch here — this is a
+climatology, rebuilt only when you want a fresher 30-year window or
+denser station coverage.
 
 ## Files
 
@@ -17,8 +19,8 @@ only when you want a fresher 30-year window or denser station coverage.
   (as an offset from July 1, plus a formatted date) its first qualifying
   freeze occurred each year, and how many of the 30 years actually
   qualified.
-- `build_map.py` — interpolates `climatology.json`'s station values across
-  the domain with `scipy.interpolate.griddata` and renders the map.
+- `build_map.py` — plots `climatology.json`'s stations as colored dots at
+  their own locations and renders the map.
 - `requirements.txt` / `setup.sh` — Python + system dependencies (cartopy
   needs GDAL, apt-only). `setup.sh` also installs the Poppins font used
   for map labels, since it isn't packaged for apt.
@@ -53,11 +55,12 @@ both the US and Canada: PRISM, NOAA's nClimGrid-Daily normals, and NCEI's
 own published Freeze/Frost Normals table are all CONUS-only, and this
 domain is half British Columbia. NASA/ORNL's Daymet *does* grid daily
 Tmin at 1km across all of North America (US, Canada, Mexico in one file),
-which would avoid station interpolation entirely — but as of this
-writing Daymet's data-serving backend has moved behind NASA's Earthdata
-Login (a free account + token, not a paid one, but still something this
-script can't provision on its own), so it was set aside in favor of a
-source with no auth step at all.
+which would fill in the gaps between stations with real terrain-resolved
+data instead of leaving them blank — but as of this writing Daymet's
+data-serving backend has moved behind NASA's Earthdata Login (a free
+account + token, not a paid one, but still something this script can't
+provision on its own), so it was set aside in favor of a source with no
+auth step at all.
 
 [`../tri-cities-temp-chart/`](../tri-cities-temp-chart/)'s climatology
 uses ACIS (the backend behind xmacis.rcc-acis.org), but ACIS's station
@@ -101,25 +104,26 @@ single request to NCEI's Access Data Service).
   or coastal stations don't freeze at all in some years, and any station
   can have data gaps. Both mean and median day-offset are recorded;
   `build_map.py` plots the mean.
-- **Interpolation**: `build_map.py` runs `scipy.interpolate.griddata`
-  (linear, nearest-neighbor fallback for points outside the station
-  convex hull) on the station lon/lat/mean-offset values, the same
-  technique [`../dew-point-storm-map/`](../dew-point-storm-map/) uses to
-  resample gridded model data onto a regular grid — just applied to
-  point station data here instead. A light gaussian smoothing pass
-  (`sigma=2.2`, much lighter than the storm map's mask smoothing) softens
-  griddata's linear facets between stations without erasing genuine local
-  gradient real stations captured.
-- **This is a station interpolation, not a terrain-resolved grid** —
+- **No interpolation**: `build_map.py` plots each station's own
+  mean-offset value as a colored dot at that station's lon/lat — nothing
+  is resampled onto a regular grid or shaded between stations. This is a
+  deliberate departure from how the other maps in this repo (e.g.
+  [`../dew-point-storm-map/`](../dew-point-storm-map/)) fill their whole
+  domain with `scipy.interpolate.griddata`: a dense model grid is fair to
+  interpolate across, but station coverage here is uneven enough, and
+  elevation-driven enough, that a smoothed fill would visually claim more
+  than the data supports (see the next bullet).
+- **This is a set of station points, not a terrain-resolved grid** —
   treat it as a regional overview, not a precise local forecast.
   Elevation is the single biggest driver of frost timing in this domain
   (a few hundred feet of elevation gain can shift the real average date
   by a week or more), and station density thins out considerably away
   from valleys, airports, and populated areas — especially in interior BC
-  and the Cascade/Rocky Mountain high country. Station markers (small
-  white dots, black outline) are drawn on the map itself specifically so
-  viewers can see where the underlying data actually is, rather than
-  presenting the smoothed field as if it were uniformly well-observed.
+  and the Cascade/Rocky Mountain high country. Plotting only the actual
+  station dots (each with a white halo for legibility against both the
+  land fill and the color table's darker shades), rather than an
+  interpolated surface, keeps the map honest about where the data is and
+  isn't.
 - **Color table** runs cool-to-warm as a stand-in for early-to-late:
   purple/blue (August, high mountain interior) through green/yellow
   (September-October) to orange/red (November-December, milder
