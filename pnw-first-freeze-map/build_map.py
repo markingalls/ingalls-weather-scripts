@@ -77,12 +77,17 @@ POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
 # ---------------------------------------------------------------------------
-# Figure geometry -- same domain, same aspect ratio, as
-# ../dew-point-storm-map/build_map.py.
+# Figure geometry -- same domain/aspect ratio as ../dew-point-storm-map/
+# build_map.py, but a shorter FIG_HEIGHT_IN (8.6in vs 9.0in) with a taller
+# AXES_RECT height fraction so the axes box keeps the same absolute
+# height (and therefore the same lon/lat aspect match) while the empty
+# margin below the map frame -- colorbar, ticks, footer, no legend or
+# caption line here -- gets tighter instead of just padding out a taller
+# figure.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.4, 9.0
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.4, 8.6
 FIG_DPI = 200
-AXES_RECT = [0.03, 0.17, 0.94, 0.70]  # [left, bottom, width, height], figure fraction
+AXES_RECT = [0.03, 0.135, 0.94, 0.73]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
@@ -227,12 +232,14 @@ def build_map(climatology, output_path):
     # Each station plotted at its own location, colored by its own mean
     # first-freeze date -- no interpolation/shading between stations (see
     # module docstring). A white halo underneath the colored fill (drawn
-    # as a larger white-edge marker first) keeps every dot legible against
-    # both the light land fill and darker colors in the table.
+    # as a larger white-edge marker first, kept fully opaque) keeps every
+    # dot legible against both the light land fill and darker colors in
+    # the table; the colored fill itself gets alpha=0.6 so overlapping
+    # dots in dense clusters still show through each other.
     ax.scatter(lons, lats, s=95, facecolor="none", edgecolor="white", linewidth=2.2,
                transform=pc, zorder=3.9)
     ax.scatter(lons, lats, c=offsets, cmap=cmap, norm=norm, s=70, edgecolor="black",
-               linewidth=0.6, transform=pc, zorder=4)
+               linewidth=0.6, alpha=0.6, transform=pc, zorder=4)
 
     geodetic_transform = pc._as_mpl_transform(ax)
     stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.75))]
@@ -257,9 +264,9 @@ def build_map(climatology, output_path):
     frame_px = ax.get_window_extent()
     frame_left = frame_px.x0 / (FIG_WIDTH_IN * FIG_DPI)
     frame_right = frame_px.x1 / (FIG_WIDTH_IN * FIG_DPI)
-    cbar_width, cbar_height = (frame_right - frame_left) * 0.7, 0.016
+    cbar_width, cbar_height = (frame_right - frame_left) * 0.7, 0.017
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
-    cbar_bottom = 0.075
+    cbar_bottom = 0.083
 
     gradient = np.linspace(DATE_OFFSET_MIN, DATE_OFFSET_MAX, 256).reshape(1, -1)
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
@@ -278,16 +285,14 @@ def build_map(climatology, output_path):
         label.set_fontproperties(poppins_reg)
 
     # Title & subtitle above the map
-    fig.text(0.03, 0.978, "Pacific Northwest Average First Freeze", fontsize=19,
+    fig.text(0.03, 0.977, "Pacific Northwest Average First Freeze", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.943, f"{climatology['period']} Climatology • First Fall Date ≤32°F (0°C)",
+    fig.text(0.03, 0.940, f"{climatology['period']} Climatology • First Fall Date ≤32°F (0°C)",
               fontsize=12.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
-    fig.text(0.03, 0.914, f"NOAA GHCN-Daily • {len(stations)} stations, each plotted at its own location",
+    fig.text(0.03, 0.909, f"NOAA GHCN-Daily • {len(stations)} stations",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.14, "Each dot is one station's own average — not interpolated between stations",
-              fontsize=8.75, fontproperties=poppins_reg, color="#5a584f", ha="center", va="bottom")
-    fig.text(0.5, 0.012, "NOAA GHCN-Daily — Ingalls Weather", fontsize=8.5,
+    fig.text(0.5, 0.014, "NOAA GHCN-Daily — Ingalls Weather", fontsize=8.5,
               fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
