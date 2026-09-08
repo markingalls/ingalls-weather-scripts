@@ -52,6 +52,10 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`pnw-first-freeze-map/`](pnw-first-freeze-map/) — climatology map
+  (same domain as `dew-point-storm-map/`) of each location's 1991-2020
+  average first fall date its low temperature drops to ≤32°F, built by
+  interpolating NOAA GHCN-Daily station data across BC/WA/OR/ID.
 
 ## Shared resources
 
