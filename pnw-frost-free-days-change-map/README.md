@@ -89,7 +89,14 @@ climatology sibling maps show).
   `CHANGE_COLOR_TABLE_DAYS` (not rescaled per map, so a given shade
   always means the same day-count change across runs), diverging around
   0 — blue for shorter, a light neutral tone near no change, red for
-  longer.
+  longer. The ±55-day endpoints were chosen from the actual fetched
+  distribution (439 kept stations: mean +19.3d, median +18.7d, 5th/95th
+  percentile about -7.2d/+50.6d — roughly double the sibling
+  first-freeze-change-map's spread, consistent with this metric
+  combining both an earlier spring thaw and a later fall freeze), with a
+  handful of individual-station outliers out to -90d/+120d clipped to
+  the table's end colors rather than stretching the whole scale to fit
+  them.
 - Same dot styling, station halo, figure geometry, `PlateCarree` domain,
   and no-lakes handling as the sibling maps — see
   [`../pnw-first-freeze-map/`](../pnw-first-freeze-map/)'s README for the

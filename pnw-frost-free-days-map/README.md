@@ -83,6 +83,13 @@ fetches the full January 1-December 31 span for every year instead.
   teal/green to gold — a different hue path than the sibling map's
   purple-to-red calendar-date table (which ends in red/orange), so the
   two read as clearly different metrics despite sharing a purple start.
+  The 30-230 day endpoints were chosen from the actual fetched
+  distribution (1,334 kept stations: mean 120.9d, median 117.2d,
+  5th/95th percentile about 31d/227d) — wide enough to cover the bulk of
+  stations with real contrast, while a handful of individual-station
+  extremes out to 4d/294d (a notorious cold-air-drainage basin at the
+  short end, a mild coastal site at the long end) get clipped to the
+  table's end colors rather than stretching the whole scale to fit them.
 - Same dot styling (alpha 0.4, colorbar included), station halo, figure
   geometry, `PlateCarree` domain, and no-lakes handling as
   [`../pnw-first-freeze-map/`](../pnw-first-freeze-map/) — see that

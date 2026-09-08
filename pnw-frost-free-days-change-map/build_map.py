@@ -123,18 +123,22 @@ CITIES = [
 # rescaled per map, diverging around 0: blue where the season is now
 # shorter than 1961-1975, white/gray near no change, red where it's now
 # longer (the more commonly expected direction under a warming climate).
-# Endpoints placeholder pending the actual fetched distribution -- see
-# ../pnw-first-freeze-change-map/build_map.py's table for how these get
-# tuned from real percentiles once fetch_climatology.py has run.
+# +-55 day endpoints chosen from the actual fetched distribution (439
+# kept stations: mean +19.3d, median +18.7d, 5th/95th percentile about
+# -7.2d/+50.6d -- roughly double the sibling first-freeze-change-map's
+# spread, consistent with this metric combining both an earlier spring
+# thaw and a later fall freeze), with a handful of individual-station
+# outliers out to -90d/+120d clipped to the table's end colors rather
+# than stretching the whole scale to fit them.
 # ---------------------------------------------------------------------------
 CHANGE_COLOR_TABLE_DAYS = [
-    (-35, [33, 79, 140]),
-    (-20, [104, 159, 201]),
-    (-8,  [186, 212, 226]),
+    (-55, [33, 79, 140]),
+    (-30, [104, 159, 201]),
+    (-12, [186, 212, 226]),
     (0,   [230, 227, 217]),
-    (8,   [237, 199, 165]),
-    (20,  [211, 129, 79]),
-    (35,  [161, 60, 40]),
+    (12,  [237, 199, 165]),
+    (30,  [211, 129, 79]),
+    (55,  [161, 60, 40]),
 ]
 CHANGE_MIN = CHANGE_COLOR_TABLE_DAYS[0][0]
 CHANGE_MAX = CHANGE_COLOR_TABLE_DAYS[-1][0]
@@ -268,7 +272,7 @@ def build_map(climatology, output_path):
         spine.set_edgecolor("#8a887e")
         spine.set_linewidth(0.6)
 
-    tick_days = [-30, -20, -10, 0, 10, 20, 30]
+    tick_days = [-50, -30, -10, 0, 10, 30, 50]
     cax.set_xticks(tick_days)
     cax.set_xticklabels([change_label(d) for d in tick_days])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")

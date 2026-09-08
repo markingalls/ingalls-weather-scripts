@@ -122,14 +122,20 @@ CITIES = [
 # areas). A different hue path than the sibling calendar-date map's
 # purple-to-red table (which ends in red/orange), so the two are easy to
 # tell apart at a glance despite the shared purple starting point.
+# 30-230 day endpoints chosen from the actual fetched distribution (1,334
+# kept stations: mean 120.9d, median 117.2d, 5th/95th percentile about
+# 31d/227d), with a handful of individual-station extremes out to
+# 4d/294d (e.g. a notorious cold-air-drainage basin at the short end, a
+# mild coastal site at the long end) deliberately clipped to the table's
+# end colors rather than stretching the whole scale to fit them.
 # ---------------------------------------------------------------------------
 DAYS_COLOR_TABLE = [
-    (50,  [72, 33, 115]),
-    (90,  [45, 100, 141]),
-    (130, [37, 140, 122]),
-    (170, [104, 165, 68]),
-    (210, [186, 184, 58]),
-    (260, [223, 156, 62]),
+    (30,  [72, 33, 115]),
+    (70,  [45, 100, 141]),
+    (110, [37, 140, 122]),
+    (150, [104, 165, 68]),
+    (190, [186, 184, 58]),
+    (230, [223, 156, 62]),
 ]
 DAYS_MIN = DAYS_COLOR_TABLE[0][0]
 DAYS_MAX = DAYS_COLOR_TABLE[-1][0]
@@ -257,7 +263,7 @@ def build_map(climatology, output_path):
         spine.set_edgecolor("#8a887e")
         spine.set_linewidth(0.6)
 
-    tick_days = [50, 90, 130, 170, 210, 260]
+    tick_days = [30, 70, 110, 150, 190, 230]
     cax.set_xticks(tick_days)
     cax.set_xticklabels([f"{d}d" for d in tick_days])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
