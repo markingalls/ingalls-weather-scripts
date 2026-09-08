@@ -268,9 +268,12 @@ def build_map(climatology, output_path):
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
     cbar_bottom = 0.083
 
+    # alpha=0.4 matches the station dots above, so the swatch shows the
+    # same color a single dot actually renders at, not a stronger one.
     gradient = np.linspace(DATE_OFFSET_MIN, DATE_OFFSET_MAX, 256).reshape(1, -1)
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
-    cax.imshow(gradient, aspect="auto", cmap=cmap, norm=norm,
+    cax.set_facecolor("white")
+    cax.imshow(gradient, aspect="auto", cmap=cmap, norm=norm, alpha=0.4,
                extent=[DATE_OFFSET_MIN, DATE_OFFSET_MAX, 0, 1])
     cax.set_yticks([])
     for spine in cax.spines.values():
