@@ -129,3 +129,8 @@ pnw-frost-free-days-map/output/*.png
 # is an output too -- neither is source, so don't track them.
 pnw-frost-free-days-change-map/climatology_change.json
 pnw-frost-free-days-change-map/output/*.png
+# --- scratch fetch logs ---
+# ad-hoc `> fetch.log 2>&1` redirects used to monitor long background
+# fetches -- not output either script writes by design, so don't track.
+pnw-frost-free-days-map/fetch.log
+pnw-frost-free-days-change-map/fetch.log
