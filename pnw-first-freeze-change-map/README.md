@@ -100,7 +100,10 @@ map shows.
   -64d/+77d (thin/noisy records even after the completeness filter) get
   clipped to the table's end colors rather than stretching the whole
   scale to fit them.
-- Same dot styling, alpha (0.4, colorbar included), station halo,
-  figure geometry, `PlateCarree` domain, and no-lakes handling as
+- Same dot styling, station halo, figure geometry, `PlateCarree` domain,
+  and no-lakes handling as
   [`../pnw-first-freeze-map/`](../pnw-first-freeze-map/) — see that
-  project's README for the reasoning behind each.
+  project's README for the reasoning behind each. The dot/colorbar alpha
+  is a bit higher here (0.55 vs. the sibling map's 0.4), since this map's
+  diverging table sits closer to a light neutral tone near 0 and needs
+  more saturation to stay legible.

@@ -242,7 +242,7 @@ def build_map(climatology, output_path):
                linewidth=0.6, alpha=0.4, transform=pc, zorder=4)
 
     geodetic_transform = pc._as_mpl_transform(ax)
-    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.75))]
+    stroke = [pe.withStroke(linewidth=2.0, foreground="white")]
     for name, lon_c, lat_c, pos in CITIES:
         if not (LON_MIN <= lon_c <= LON_MAX and LAT_MIN <= lat_c <= LAT_MAX):
             continue
@@ -252,7 +252,7 @@ def build_map(climatology, output_path):
         ha = "left" if pos == "right" else "right"
         name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
         txt = ax.text(lon_c, lat_c, name, fontsize=9.25, fontproperties=poppins_semibold,
-                       color="white", ha=ha, va="center", zorder=101, transform=name_transform)
+                       color="black", ha=ha, va="center", zorder=101, transform=name_transform)
         txt.set_path_effects(stroke)
 
     ax.spines['geo'].set_edgecolor('black')

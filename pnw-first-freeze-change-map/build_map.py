@@ -221,15 +221,17 @@ def build_map(climatology, output_path):
     # colored fill (drawn as a larger white-edge marker first, kept fully
     # opaque) keeps every dot legible against both the light land fill
     # and darker colors in the table; the colored fill itself gets
-    # alpha=0.4, same as ../pnw-first-freeze-map/, so overlapping dots in
-    # dense clusters still show through each other.
+    # alpha=0.55 (a bit stronger than ../pnw-first-freeze-map/'s 0.4,
+    # since this map's diverging table sits closer to a light neutral
+    # near 0 and needs more saturation to stay legible) so overlapping
+    # dots in dense clusters still show through each other.
     ax.scatter(lons, lats, s=95, facecolor="none", edgecolor="white", linewidth=2.2,
                transform=pc, zorder=3.9)
     ax.scatter(lons, lats, c=changes, cmap=cmap, norm=norm, s=70, edgecolor="black",
-               linewidth=0.6, alpha=0.4, transform=pc, zorder=4)
+               linewidth=0.6, alpha=0.55, transform=pc, zorder=4)
 
     geodetic_transform = pc._as_mpl_transform(ax)
-    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.75))]
+    stroke = [pe.withStroke(linewidth=2.0, foreground="white")]
     for name, lon_c, lat_c, pos in CITIES:
         if not (LON_MIN <= lon_c <= LON_MAX and LAT_MIN <= lat_c <= LAT_MAX):
             continue
@@ -239,14 +241,14 @@ def build_map(climatology, output_path):
         ha = "left" if pos == "right" else "right"
         name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
         txt = ax.text(lon_c, lat_c, name, fontsize=9.25, fontproperties=poppins_semibold,
-                       color="white", ha=ha, va="center", zorder=101, transform=name_transform)
+                       color="black", ha=ha, va="center", zorder=101, transform=name_transform)
         txt.set_path_effects(stroke)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
 
     # Colorbar -- below the map, centered on the rendered map frame, ticks
-    # labeled as signed day counts. alpha=0.4 matches the station dots
+    # labeled as signed day counts. alpha=0.55 matches the station dots
     # above, so the swatch shows the same color a single dot actually
     # renders at, not a stronger one.
     fig.canvas.draw()
@@ -260,7 +262,7 @@ def build_map(climatology, output_path):
     gradient = np.linspace(CHANGE_MIN, CHANGE_MAX, 256).reshape(1, -1)
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     cax.set_facecolor("white")
-    cax.imshow(gradient, aspect="auto", cmap=cmap, norm=norm, alpha=0.4,
+    cax.imshow(gradient, aspect="auto", cmap=cmap, norm=norm, alpha=0.55,
                extent=[CHANGE_MIN, CHANGE_MAX, 0, 1])
     cax.set_yticks([])
     for spine in cax.spines.values():
