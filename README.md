@@ -59,6 +59,13 @@ workflows. Each project lives in its own directory with its own README.
 - [`pnw-first-freeze-change-map/`](pnw-first-freeze-change-map/) —
   companion to `pnw-first-freeze-map/`: each long-record station's change
   in average first freeze date between 1961-1975 and 2006-2020.
+- [`pnw-frost-free-days-map/`](pnw-frost-free-days-map/) — companion to
+  `pnw-first-freeze-map/`: each station's 1991-2020 average frost-free
+  period length (days between the last spring and first fall freeze).
+- [`pnw-frost-free-days-change-map/`](pnw-frost-free-days-change-map/) —
+  companion to `pnw-frost-free-days-map/`: each long-record station's
+  change in average frost-free period length between 1961-1975 and
+  2006-2020.
 
 ## Shared resources
 
