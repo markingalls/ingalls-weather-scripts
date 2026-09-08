@@ -53,9 +53,12 @@ workflows. Each project lives in its own directory with its own README.
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
 - [`pnw-first-freeze-map/`](pnw-first-freeze-map/) — climatology map
-  (same domain as `dew-point-storm-map/`) of each location's 1991-2020
-  average first fall date its low temperature drops to ≤32°F, built by
-  interpolating NOAA GHCN-Daily station data across BC/WA/OR/ID.
+  (same domain as `dew-point-storm-map/`) of each NOAA GHCN-Daily
+  station's 1991-2020 average first fall date its low temperature drops
+  to ≤32°F, plotted as dots across BC/WA/OR/ID.
+- [`pnw-first-freeze-change-map/`](pnw-first-freeze-change-map/) —
+  companion to `pnw-first-freeze-map/`: each long-record station's change
+  in average first freeze date between 1961-1975 and 2006-2020.
 
 ## Shared resources
 
