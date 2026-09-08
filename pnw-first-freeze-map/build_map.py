@@ -234,12 +234,12 @@ def build_map(climatology, output_path):
     # module docstring). A white halo underneath the colored fill (drawn
     # as a larger white-edge marker first, kept fully opaque) keeps every
     # dot legible against both the light land fill and darker colors in
-    # the table; the colored fill itself gets alpha=0.6 so overlapping
+    # the table; the colored fill itself gets alpha=0.4 so overlapping
     # dots in dense clusters still show through each other.
     ax.scatter(lons, lats, s=95, facecolor="none", edgecolor="white", linewidth=2.2,
                transform=pc, zorder=3.9)
     ax.scatter(lons, lats, c=offsets, cmap=cmap, norm=norm, s=70, edgecolor="black",
-               linewidth=0.6, alpha=0.6, transform=pc, zorder=4)
+               linewidth=0.6, alpha=0.4, transform=pc, zorder=4)
 
     geodetic_transform = pc._as_mpl_transform(ax)
     stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.75))]
