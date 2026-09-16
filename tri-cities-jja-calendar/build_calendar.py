@@ -81,7 +81,12 @@ def draw_month(ax, year, month, days_by_date, fixed_rows):
     # position, below) says it does.
     ax.set_anchor("N")
 
-    stroke = [pe.withStroke(linewidth=2.2, foreground="white")]
+    # A halo sized for the big high-temp number is oversized on the small
+    # date/departure text -- at the same linewidth it swallows those thin
+    # glyphs instead of just edging them, so the small text gets its own,
+    # narrower halo.
+    stroke_lg = [pe.withStroke(linewidth=2.2, foreground="white")]
+    stroke_sm = [pe.withStroke(linewidth=1.0, foreground="white")]
 
     # weekday header row
     for col, letter in enumerate(WEEKDAY_LETTERS):
@@ -107,27 +112,27 @@ def draw_month(ax, year, month, days_by_date, fixed_rows):
             ax.add_patch(mpatches.Rectangle((col, y0), 1, 1, facecolor=face,
                                              edgecolor=GRID_COLOR, linewidth=0.6))
 
-            day_txt = ax.text(col + 0.09, y0 + 0.16, str(day), ha="left", va="top",
+            day_txt = ax.text(col + 0.09, y0 + 0.10, str(day), ha="left", va="top",
                                fontproperties=f_reg, fontsize=8.5, color=INK_SECONDARY)
-            day_txt.set_path_effects(stroke)
+            day_txt.set_path_effects(stroke_sm)
 
             if maxt is None:
                 m_txt = ax.text(col + 0.5, y0 + 0.55, "M", ha="center", va="center",
                                  fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
-                m_txt.set_path_effects(stroke)
+                m_txt.set_path_effects(stroke_lg)
                 continue
 
             # Dark ink reads fine over this scale even at its most saturated
             # ends (maroon/purple are dark but not black) -- the white halo
-            # (via `stroke`) is what actually keeps it legible everywhere.
+            # (via `stroke_lg`) is what actually keeps it legible everywhere.
             hi_txt = ax.text(col + 0.5, y0 + 0.5, f"{maxt:.0f}°", ha="center", va="center",
                               fontproperties=f_bold, fontsize=13, color=INK)
-            hi_txt.set_path_effects(stroke)
+            hi_txt.set_path_effects(stroke_lg)
 
             dep_str = "0" if departure == 0 else f"{departure:+.0f}"
             dep_txt = ax.text(col + 0.5, y0 + 0.82, dep_str, ha="center", va="center",
                                fontproperties=f_reg, fontsize=8.5, color=INK)
-            dep_txt.set_path_effects(stroke)
+            dep_txt.set_path_effects(stroke_sm)
 
     return month_deps
 
@@ -148,7 +153,7 @@ def main():
 
     axes = []
     left, width, gap = 0.03, 0.30, 0.015
-    bottom, height = 0.10, 0.70
+    bottom, height = 0.10, 0.64
     for i, month in enumerate(MONTHS):
         x0 = left + i * (width + gap)
         ax = fig.add_axes([x0, bottom, width, height])
@@ -220,12 +225,15 @@ def main():
     # ---------- title / subtitle ----------
     n_with_data = len(all_deps)
     season_avg = sum(all_deps) / n_with_data if n_with_data else None
+    # va="top" anchors the title to its own top edge, so the margin above
+    # it is exactly the number below -- unlike baseline placement, it
+    # doesn't shrink or grow with the font's own ascender metrics.
     title = f"Tri-Cities Summer (JJA) Daily High Temperature — {year}"
-    fig.text(0.03, 0.965, title, fontproperties=f_bold, fontsize=24, color=INK)
+    fig.text(0.03, 0.965, title, va="top", fontproperties=f_bold, fontsize=24, color=INK)
     subtitle = (f"{data['label']} ({data['station']}) • ACIS/xmACIS Observed • "
                 f"{data['normals_period']} average"
                 + (f" • Summer averaged {season_avg:+.1f}°F vs. normal" if season_avg is not None else ""))
-    fig.text(0.03, 0.928, subtitle, fontproperties=f_reg, fontsize=13, color=INK_SECONDARY)
+    fig.text(0.03, 0.905, subtitle, va="top", fontproperties=f_reg, fontsize=13, color=INK_SECONDARY)
 
     # ---------- attribution ----------
     fig.text(0.5, 0.055, "ACIS/xmACIS (observed & 1991-2020 normals) — Ingalls Weather",
