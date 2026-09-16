@@ -68,26 +68,16 @@ python3 build_calendar.py
   `build_calendar.py` as `DEPARTURE_CMAP`/`DEPARTURE_STOPS` and clipped
   beyond ±15°F rather than extrapolated further. Edit those constants to
   adjust the anchor colors or the ±15°F range.
-- **Layout**: June and July side by side, August centered below -- each
-  month its own small axes drawn as a real Sunday-first calendar grid
-  (`calendar.Calendar(firstweekday=6)`), not a GitHub-style contribution
-  heatmap. Day number top-left of each cell, the high (bold) and signed
-  departure (small) centered below it. Text color flips between dark ink
-  and white per cell (see `cell_text_style`) based on that cell's own
-  departure color, with a thin same-side-contrast halo -- a single
-  fixed text/halo pairing doesn't hold up across the whole purple-to-
-  maroon range. All three months share one `fixed_rows` grid height (the
-  most weeks any of the three needs) so cell size and the month titles
-  above each grid line up consistently even when one month has fewer
-  calendar weeks than the others. A missing day (ACIS `M`) shades gray
-  with just an "M" -- no departure text.
-- **Vertical layout** is a top-to-bottom flow (`flow_text` in
-  `build_calendar.py`): each title/subtitle/grid is placed from a running
-  cursor advanced by that element's own height plus a fixed gap, rather
-  than at hand-tuned fixed figure coordinates. That's what let June/July
-  vs. August move from one row to two without re-deriving every offset by
-  eye -- change `ROW_MONTHS`, `FIG_W`/`FIG_H`, or the per-block gaps and
-  the rest of the layout re-flows on its own.
+- **Layout**: each month is its own small axes drawn as a real Sunday-
+  first calendar grid (`calendar.Calendar(firstweekday=6)`), not a
+  GitHub-style contribution heatmap -- day number top-left of each cell,
+  the high (bold) and signed departure (small) centered below it, white-
+  halo text throughout so it stays legible over every cell color. All
+  three months share one `fixed_rows` grid height (the most weeks any of
+  the three needs) so cell size and the month titles above each grid line
+  up consistently even when one month has fewer calendar weeks than the
+  others. A missing day (ACIS `M`) shades gray with just an "M" -- no
+  departure text.
 - Chart styling (fonts, colors, logo placement) mirrors
   `tri-cities-temp-chart/build_chart.py` -- edit `build_calendar.py`
   directly to adjust.
