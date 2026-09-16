@@ -70,9 +70,20 @@ def cell_text_style(face_rgba):
     return (INK, "white") if luminance >= 0.55 else ("white", INK)
 
 
+def flow_text(fig, fig_h_in, x, y_top, text, fontsize, fontproperties, color, ha="left", gap_after_in=0.0):
+    """Draws top-anchored text at y_top and returns the cursor y for
+    whatever comes next, advanced by this text's own line height plus
+    gap_after_in. A hand-tuned fixed offset for each line (the previous
+    approach) has to be re-guessed by eye every time a size or a figure
+    dimension changes; flowing the cursor down by each element's actual
+    height keeps every block correctly spaced regardless."""
+    fig.text(x, y_top, text, ha=ha, va="top", fontproperties=fontproperties, fontsize=fontsize, color=color)
+    line_height_in = fontsize / 72.0 * 1.25
+    return y_top - (line_height_in + gap_after_in) / fig_h_in
+
+
 def draw_month(ax, year, month, days_by_date, fixed_rows):
     weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)  # Sunday-first
-    n_weeks = len(weeks)
 
     # ylim height is fixed_rows (the most weeks any of the three months
     # needs) across every axes, not each month's own n_weeks -- with
@@ -99,7 +110,6 @@ def draw_month(ax, year, month, days_by_date, fixed_rows):
         ax.text(col + 0.5, 0.5, letter, ha="center", va="center",
                  fontproperties=f_med, fontsize=11, color=INK_SECONDARY)
 
-    month_deps = []
     for row, week in enumerate(weeks):
         for col, day in enumerate(week):
             if day == 0:
@@ -114,7 +124,6 @@ def draw_month(ax, year, month, days_by_date, fixed_rows):
                 fg, halo = INK_SECONDARY, "white"
             else:
                 face = DEPARTURE_CMAP(DEPARTURE_NORM(departure))
-                month_deps.append(departure)
                 fg, halo = cell_text_style(face)
 
             ax.add_patch(mpatches.Rectangle((col, y0), 1, 1, facecolor=face,
@@ -143,7 +152,11 @@ def draw_month(ax, year, month, days_by_date, fixed_rows):
                                fontproperties=f_reg, fontsize=8.5, color=fg)
             dep_txt.set_path_effects([pe.withStroke(linewidth=1.3, foreground=halo)])
 
-    return month_deps
+
+def month_avg_departure(data, month):
+    deps = [d["departure_f"] for d in data["days"]
+            if d["departure_f"] is not None and date.fromisoformat(d["date"]).month == month]
+    return sum(deps) / len(deps) if deps else None
 
 
 def main():
@@ -155,47 +168,76 @@ def main():
     output = args.output or f"output/tri_cities_jja_calendar_{year}.png"
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
 
-    fig = plt.figure(figsize=(16, 9), dpi=200)
+    # Two rows -- June/July side by side, August centered below -- rather
+    # than all three in one row, so each month gets a bigger grid on a
+    # taller canvas instead of being squeezed to fit three across.
+    ROW_MONTHS = [[6, 7], [8]]
+    FIG_W, FIG_H = 11.5, 14.0
+    MARGIN_X, GAP_X = 0.07, 0.03
+
+    fig = plt.figure(figsize=(FIG_W, FIG_H), dpi=200)
     fig.patch.set_facecolor(BG)
 
     fixed_rows = max(len(calendar.Calendar(firstweekday=6).monthdayscalendar(year, m)) for m in MONTHS)
+    month_width = (1 - 2 * MARGIN_X - GAP_X) / 2
+    month_width_in = month_width * FIG_W
+    # Visible grid height once set_aspect("equal") locks it to this width
+    # (see draw_month) -- same for every month, since they all share one
+    # width and one fixed_rows.
+    visible_grid_h = (month_width_in * (fixed_rows + 1) / 7) / FIG_H
+    month_x0 = {6: MARGIN_X, 7: MARGIN_X + month_width + GAP_X, 8: (1 - month_width) / 2}
 
-    axes = []
-    left, width, gap = 0.03, 0.30, 0.015
-    bottom, height = 0.10, 0.64
-    for i, month in enumerate(MONTHS):
-        x0 = left + i * (width + gap)
-        ax = fig.add_axes([x0, bottom, width, height])
-        ax.set_facecolor(BG)
-        axes.append(ax)
+    all_deps = [d["departure_f"] for d in data["days"] if d["departure_f"] is not None]
+    season_avg = sum(all_deps) / len(all_deps) if all_deps else None
 
-    all_deps = []
-    month_deps_by_month = {}
-    for ax, month in zip(axes, MONTHS):
-        month_deps = draw_month(ax, year, month, days_by_date, fixed_rows)
-        month_deps_by_month[month] = month_deps
-        all_deps += month_deps
+    # ---------- vertical flow, top to bottom ----------
+    # Each block is placed from a running cursor advanced by that block's
+    # own height plus a gap, rather than at hand-tuned fixed coordinates --
+    # so row/figure-size changes don't require re-guessing offsets by eye.
+    cursor = 1.0 - 0.35 / FIG_H
 
-    # ---------- month titles ("June", "avg +1.7°F") ----------
-    # Placed via figure-fraction coordinates from each axes' own bbox
-    # (fixed after fig.canvas.draw()), not axes data coordinates -- with
-    # set_aspect("equal"), a title placed above the grid in data space
-    # would shift depending on that axes' own unit-to-inch scale factor.
-    fig.canvas.draw()
-    for ax, month in zip(axes, MONTHS):
-        month_deps = month_deps_by_month[month]
-        avg_dep = sum(month_deps) / len(month_deps) if month_deps else None
-        subtitle = f"avg {avg_dep:+.1f}°F" if avg_dep is not None else "no data"
+    title = f"Tri-Cities Summer (JJA) Daily High Temperature — {year}"
+    cursor = flow_text(fig, FIG_H, MARGIN_X, cursor, title, 24, f_bold, INK, gap_after_in=0.08)
+    subtitle = (f"{data['label']} ({data['station']}) • ACIS/xmACIS Observed • "
+                f"{data['normals_period']} average"
+                + (f" • Summer averaged {season_avg:+.1f}°F vs. normal" if season_avg is not None else ""))
+    cursor = flow_text(fig, FIG_H, MARGIN_X, cursor, subtitle, 13, f_reg, INK_SECONDARY, gap_after_in=0.35)
 
-        axpos = ax.get_position()
-        cx = (axpos.x0 + axpos.x1) / 2
-        fig.text(cx, axpos.y1 + 0.058, MONTH_NAMES[month], ha="center", va="baseline",
-                  fontproperties=f_bold, fontsize=16, color=INK)
-        fig.text(cx, axpos.y1 + 0.025, subtitle, ha="center", va="baseline",
-                  fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY)
+    for row_months in ROW_MONTHS:
+        title_cursor = cursor
+        for m in row_months:
+            fig.text(month_x0[m] + month_width / 2, title_cursor, MONTH_NAMES[m], ha="center", va="top",
+                      fontproperties=f_bold, fontsize=16, color=INK)
+        cursor = title_cursor - (16 / 72.0 * 1.25 + 0.05) / FIG_H
+
+        avg_cursor = cursor
+        for m in row_months:
+            avg_dep = month_avg_departure(data, m)
+            avg_text = f"avg {avg_dep:+.1f}°F" if avg_dep is not None else "no data"
+            fig.text(month_x0[m] + month_width / 2, avg_cursor, avg_text, ha="center", va="top",
+                      fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY)
+        cursor = avg_cursor - (10.5 / 72.0 * 1.25 + 0.06) / FIG_H
+
+        row_axes_top = cursor
+        # A little taller than the visible grid, not exactly equal to it --
+        # set_aspect("equal") only anchors cleanly to this box's own width
+        # (see draw_month) if the box has at least the height that width
+        # implies; anchor("N") leaves any extra as blank space below.
+        row_box_height = visible_grid_h * 1.08
+        for m in row_months:
+            ax = fig.add_axes([month_x0[m], row_axes_top - row_box_height, month_width, row_box_height])
+            ax.set_facecolor(BG)
+            draw_month(ax, year, m, days_by_date, fixed_rows)
+
+        cursor = row_axes_top - visible_grid_h - 0.15 / FIG_H
 
     # ---------- color-scale legend (horizontal strip under the calendars) ----------
-    cbar_ax = fig.add_axes([0.32, 0.135, 0.36, 0.02])
+    cursor = flow_text(fig, FIG_H, 0.5, cursor, f"Daily high departure from {data['normals_period']} average (°F)",
+                        10.5, f_med, INK_SECONDARY, ha="center", gap_after_in=0.08)
+
+    cbar_width, cbar_height_in = 0.5, 0.16
+    cbar_bottom = cursor - cbar_height_in / FIG_H
+    cbar_ax = fig.add_axes([(1 - cbar_width) / 2, cbar_bottom, cbar_width, cbar_height_in / FIG_H])
     sm = ScalarMappable(norm=DEPARTURE_NORM, cmap=DEPARTURE_CMAP)
     cb = fig.colorbar(sm, cax=cbar_ax, orientation="horizontal")
     cb.set_ticks([-15, -10, -5, 0, 5, 10, 15])
@@ -204,49 +246,35 @@ def main():
         tick.set_fontproperties(f_reg)
     cb.outline.set_edgecolor(GRID_COLOR)
     cb.outline.set_linewidth(0.6)
-    fig.text(0.32 + 0.18, 0.165, f"Daily high departure from {data['normals_period']} average (°F)",
-              ha="center", fontproperties=f_med, fontsize=10.5, color=INK_SECONDARY)
+    # room for the colorbar's own tick labels below it, then the attribution line
+    cursor = cbar_bottom - 0.3 / FIG_H
 
     # ---------- logo (bottom-right) ----------
     LOGO_PATH = "../assets/ingalls_weather_logo.png"
     if os.path.exists(LOGO_PATH):
         logo_img = plt.imread(LOGO_PATH)
         img_h, img_w = logo_img.shape[0], logo_img.shape[1]
-        fig_w_in, fig_h_in = fig.get_size_inches()
         dpi = fig.get_dpi()
         inset_px = 22
-        inset_x = inset_px / (fig_w_in * dpi)
-        inset_y = inset_px / (fig_h_in * dpi)
+        inset_x = inset_px / (FIG_W * dpi)
+        inset_y = inset_px / (FIG_H * dpi)
 
-        logo_width_fig = 0.07
-        logo_width_in = logo_width_fig * fig_w_in
+        logo_width_fig = 0.08
+        logo_width_in = logo_width_fig * FIG_W
         logo_height_in = logo_width_in * (img_h / img_w)
-        logo_height_fig = logo_height_in / fig_h_in
+        logo_height_fig = logo_height_in / FIG_H
 
-        logo_x0 = 0.97 - logo_width_fig
-        logo_y0 = 0.02
+        logo_x0 = 1.0 - inset_x - logo_width_fig
+        logo_y0 = inset_y
         logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
         logo_ax.axis("off")
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
-    # ---------- title / subtitle ----------
-    n_with_data = len(all_deps)
-    season_avg = sum(all_deps) / n_with_data if n_with_data else None
-    # va="top" anchors the title to its own top edge, so the margin above
-    # it is exactly the number below -- unlike baseline placement, it
-    # doesn't shrink or grow with the font's own ascender metrics.
-    title = f"Tri-Cities Summer (JJA) Daily High Temperature — {year}"
-    fig.text(0.03, 0.965, title, va="top", fontproperties=f_bold, fontsize=24, color=INK)
-    subtitle = (f"{data['label']} ({data['station']}) • ACIS/xmACIS Observed • "
-                f"{data['normals_period']} average"
-                + (f" • Summer averaged {season_avg:+.1f}°F vs. normal" if season_avg is not None else ""))
-    fig.text(0.03, 0.905, subtitle, va="top", fontproperties=f_reg, fontsize=13, color=INK_SECONDARY)
-
     # ---------- attribution ----------
-    fig.text(0.5, 0.055, "ACIS/xmACIS (observed & 1991-2020 normals) — Ingalls Weather",
-              fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
+    flow_text(fig, FIG_H, 0.5, cursor, "ACIS/xmACIS (observed & 1991-2020 normals) — Ingalls Weather",
+              9, f_reg, INK_SECONDARY, ha="center")
 
     plt.savefig(output, facecolor=fig.get_facecolor())
     print(f"saved {output}")
