@@ -48,6 +48,11 @@ workflows. Each project lives in its own directory with its own README.
   (xmACIS) and 7 days forecast (WindBorne MetaMesh), against 1991-2020
   daily climatology (percentile shading and normal from xmACIS; record
   highs pooled across Tri-Cities-area stations).
+- [`tri-cities-jja-calendar/`](tri-cities-jja-calendar/) — generates a
+  wall-calendar-style graphic of Tri-Cities daily high temperature across
+  meteorological summer (June-July-August): one cell per day, shaded on a
+  purple-to-maroon spectrum by that day's departure from the 1991-2020
+  average (xmACIS).
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest

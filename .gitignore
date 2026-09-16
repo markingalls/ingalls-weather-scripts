@@ -105,3 +105,9 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+# --- tri-cities-jja-calendar ---
+# jja_highs.json is live data fetch_jja_highs.py regenerates every run, and
+# the rendered calendar in output/ is an output too -- neither is source,
+# so don't track them.
+tri-cities-jja-calendar/jja_highs.json
+tri-cities-jja-calendar/output/*.png
