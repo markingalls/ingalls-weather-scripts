@@ -57,6 +57,19 @@ def parse_args():
     return ap.parse_args()
 
 
+def cell_text_style(face_rgba):
+    """Foreground + halo color for text drawn on a cell of this color. A
+    fixed dark-ink-on-white-halo pairing reads fine on the pale middle of
+    the departure scale, but on its darkest ends (deep purple/maroon) dark
+    text has too little contrast against the cell itself for a thin halo
+    to fully rescue -- so flip to white text with a dark halo once the
+    cell's own luminance drops below the point where dark ink stops
+    working, rather than leaning harder on the halo alone."""
+    r, g, b = face_rgba[:3]
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return (INK, "white") if luminance >= 0.55 else ("white", INK)
+
+
 def draw_month(ax, year, month, days_by_date, fixed_rows):
     weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(year, month)  # Sunday-first
     n_weeks = len(weeks)
@@ -81,13 +94,6 @@ def draw_month(ax, year, month, days_by_date, fixed_rows):
     # position, below) says it does.
     ax.set_anchor("N")
 
-    # A halo sized for the big high-temp number is oversized on the small
-    # date/departure text -- at the same linewidth it swallows those thin
-    # glyphs instead of just edging them, so the small text gets its own,
-    # narrower halo.
-    stroke_lg = [pe.withStroke(linewidth=2.2, foreground="white")]
-    stroke_sm = [pe.withStroke(linewidth=1.0, foreground="white")]
-
     # weekday header row
     for col, letter in enumerate(WEEKDAY_LETTERS):
         ax.text(col + 0.5, 0.5, letter, ha="center", va="center",
@@ -105,34 +111,37 @@ def draw_month(ax, year, month, days_by_date, fixed_rows):
 
             if maxt is None:
                 face = MISSING_COLOR
+                fg, halo = INK_SECONDARY, "white"
             else:
                 face = DEPARTURE_CMAP(DEPARTURE_NORM(departure))
                 month_deps.append(departure)
+                fg, halo = cell_text_style(face)
 
             ax.add_patch(mpatches.Rectangle((col, y0), 1, 1, facecolor=face,
                                              edgecolor=GRID_COLOR, linewidth=0.6))
 
+            # Halo widths stay small (sized to each glyph, not just the
+            # cell's darkness) -- once text color itself contrasts against
+            # the cell, the halo only has to soften the edge, not carry the
+            # whole job of separating text from background.
             day_txt = ax.text(col + 0.09, y0 + 0.10, str(day), ha="left", va="top",
-                               fontproperties=f_reg, fontsize=8.5, color=INK_SECONDARY)
-            day_txt.set_path_effects(stroke_sm)
+                               fontproperties=f_reg, fontsize=8.5, color=fg)
+            day_txt.set_path_effects([pe.withStroke(linewidth=1.3, foreground=halo)])
 
             if maxt is None:
                 m_txt = ax.text(col + 0.5, y0 + 0.55, "M", ha="center", va="center",
-                                 fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
-                m_txt.set_path_effects(stroke_lg)
+                                 fontproperties=f_med, fontsize=13, color=fg)
+                m_txt.set_path_effects([pe.withStroke(linewidth=2.0, foreground=halo)])
                 continue
 
-            # Dark ink reads fine over this scale even at its most saturated
-            # ends (maroon/purple are dark but not black) -- the white halo
-            # (via `stroke_lg`) is what actually keeps it legible everywhere.
             hi_txt = ax.text(col + 0.5, y0 + 0.5, f"{maxt:.0f}°", ha="center", va="center",
-                              fontproperties=f_bold, fontsize=13, color=INK)
-            hi_txt.set_path_effects(stroke_lg)
+                              fontproperties=f_bold, fontsize=13, color=fg)
+            hi_txt.set_path_effects([pe.withStroke(linewidth=2.0, foreground=halo)])
 
             dep_str = "0" if departure == 0 else f"{departure:+.0f}"
             dep_txt = ax.text(col + 0.5, y0 + 0.82, dep_str, ha="center", va="center",
-                               fontproperties=f_reg, fontsize=8.5, color=INK)
-            dep_txt.set_path_effects(stroke_sm)
+                               fontproperties=f_reg, fontsize=8.5, color=fg)
+            dep_txt.set_path_effects([pe.withStroke(linewidth=1.3, foreground=halo)])
 
     return month_deps
 
