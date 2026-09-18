@@ -419,7 +419,7 @@ REGIONS = {
         output_base="puget_sound_lightning",
         cities=[
             ("Bellingham", -122.4787, 48.7519, "left"),
-            ("Mount Vernon", -122.3340, 48.4212, "left"),
+            ("Mt. Vernon", -122.3340, 48.4212, "left"),
             ("Concrete", -121.7515, 48.5384, "right"),
             ("Port Angeles", -123.4307, 48.1181, "above-left"),
             ("Forks", -124.3888, 47.9506, "right"),
@@ -481,7 +481,7 @@ REGIONS = {
             ("Victoria", -123.3656, 48.4284, "right"),
             ("Port Renfrew", -124.4204, 48.5541, "right"),
             ("Port Angeles", -123.4307, 48.1181, "right"),
-            ("Mount Vernon", -122.3340, 48.4212, "right"),
+            ("Mt. Vernon", -122.3340, 48.4212, "right"),
             ("Bellingham", -122.4787, 48.7519, "right"),
             ("Everett", -122.2021, 47.9790, "right"),
             ("Seattle", -122.3321, 47.6062, "left"),

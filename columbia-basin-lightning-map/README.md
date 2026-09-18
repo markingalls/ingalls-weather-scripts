@@ -184,7 +184,7 @@ a region overrides them for a different zoom level.
   here since it already went through a round of real-world tuning (fixed
   a double border line and a cut-off Olympic Peninsula highway); since
   then Coquitlam, Sooke, Oak Harbor, and Boston Bar have been dropped and
-  Courtenay, Merritt, Mount Vernon, and Seattle added. `show_counties=False`, same
+  Courtenay, Merritt, Mt. Vernon, and Seattle added. `show_counties=False`, same
   reasoning as `full_bc`'s (this region's only US territory is the WA
   sliver at its south edge). Uses `America/Vancouver`. Roads:
   `british_columbia_roads.geojson`, `washington_roads.geojson`.
