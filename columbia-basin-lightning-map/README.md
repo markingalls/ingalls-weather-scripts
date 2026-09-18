@@ -117,10 +117,20 @@ a region overrides them for a different zoom level.
   output. `lon_span=23.2` is tuned from that starting point against the
   actual rendered width instead, landing in the same ~1510-1554px band
   every other region falls into (all eight regions are meant to come out
-  the same size on the page). Calgary was dropped from the city list once
-  it fell outside the narrower frame. Uses `America/Vancouver` like
-  `bc_interior`. Roads: `british_columbia_roads.geojson`,
-  `alberta_roads_west.geojson`, `washington_roads.geojson`.
+  the same size on the page). `center_lon` sits 1 degree east of this
+  region's true geographic center so Calgary and Edmonton clear the east
+  edge without widening `lon_span` back past that matched-width band.
+  Uses `America/Vancouver` like `bc_interior`. Roads:
+  `bc_yukon_ab_ak_major_roads.geojson` -- generated from Natural Earth's
+  own `ne_10m_roads_north_america` (not the usual OSM/Geofabrik extracts
+  the other `roads_files` use: Geofabrik's download server refused every
+  connection from this environment, and at this zoomed-way-out scale a
+  coarser highway-only dataset reads better anyway), filtered to `type`
+  in `(Freeway, Primary)` -- NE's own top two road tiers -- and remapped
+  to `highway=motorway`/`trunk` so the existing MOTORWAY/TRUNK/PRIMARY
+  classification in `_draw_static_layers` just works. Nothing in the
+  file is tagged `primary`, so the region renders freeways and major
+  highways only, by construction rather than a per-region filter switch.
 - **`puget_sound`** -- true-zoom, same `LAT_SPAN` as `columbia_basin`/
   `portland` but `lon_span=5.63` (bumped a little over the shared
   `LON_SPAN` default): this region's center sits noticeably further
@@ -165,6 +175,23 @@ python3 build_map.py --region lower_mainland_victoria
 
 ## Notes
 
+- **`../maps/land_slim.json` widened for `full_bc`**: that file (shared
+  by every other project in this repo too) is Natural Earth's 10m
+  physical "land" polygons, hard-clipped to a fixed lon/lat box at some
+  point in the past -- `full_bc`'s true (curved) NearsidePerspective
+  boundary reaches to about lon -141.8 in its northwest corner, just past
+  the original box's -141.0 edge, which showed up as a real, visible
+  triangle of blank white "unmapped" space there (not ocean -- actual
+  missing land). Fixed by appending one new feature: the same source
+  shapefile's land, intersected with only the thin lon [-143, -141]
+  sliver the original box was missing, added to the existing file's
+  `features` list. The original 8 features are untouched (verified 7 of
+  8 reproduce byte-for-byte from the same shapefile + the same original
+  clip box; the 8th-closest match was a small Central American island
+  apparently dropped by hand during the original curation, unrelated to
+  this fix), so every other project reading this file renders exactly as
+  before -- the new feature only ever enters frame for a region reaching
+  that far northwest, which today is just `full_bc`.
 - **Source and access**: GLM's Level 2+ "LCFA" (Lightning Cluster
   Filter Algorithm) product reports one record per detected flash --
   centroid latitude/longitude, radiant energy, and quality flags -- so no

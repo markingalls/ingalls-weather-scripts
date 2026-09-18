@@ -338,31 +338,45 @@ REGIONS = {
     # north covers barely more than half what it does at Columbia Basin's
     # latitude.
     "full_bc": dict(
-        center_lon=-125.5, center_lat=54.25,
+        # center_lon shifted 1deg east of the true geographic center so
+        # Calgary/Edmonton clear the east edge without widening lon_span
+        # (which would blow past the other regions' matched render width
+        # again -- see the Notes entry on that below).
+        center_lon=-124.5, center_lat=54.25,
         lon_span=23.2, lat_span=14.5, satellite_height=41_000_000,
         timezone="America/Vancouver",
-        roads_files=["british_columbia_roads.geojson", "alberta_roads_west.geojson",
-                     "washington_roads.geojson"],
+        # NE 10m roads_north_america, not the usual OSM/Geofabrik extracts
+        # the other roads_files use: Geofabrik's own download server
+        # refused every connection attempt from here (not a size/timeout
+        # issue -- every attempt was refused within ~7s), and at this
+        # zoomed-way-out scale a coarser highway-only dataset is a better
+        # match anyway. Filtered to type in (Freeway, Primary) -- NE's own
+        # top two road tiers -- and remapped to highway=motorway/trunk so
+        # the existing MOTORWAY/TRUNK/PRIMARY classification below just
+        # works; nothing in this file is tagged "primary", so this region
+        # renders freeways/major highways only, no lower-tier roads, by
+        # construction rather than a separate filter. See
+        # maps/bc_yukon_ab_ak_major_roads.geojson's own generation notes.
+        roads_files=["bc_yukon_ab_ak_major_roads.geojson"],
         output_base="full_bc_lightning",
         cities=[
             ("Prince Rupert", -130.3208, 54.3150, "left"),
-            ("Haida Gwaii", -132.2000, 53.2500, "left"),
             ("Terrace", -128.6032, 54.5182, "below"),
-            ("Smithers", -127.1687, 54.7822, "left"),
             ("Fort St. John", -120.8467, 56.2499, "right"),
             ("Fort Nelson", -122.6972, 58.8050, "right"),
             ("Prince George", -122.7497, 53.9171, "left"),
-            ("Quesnel", -122.4930, 53.0027, "left"),
             ("Williams Lake", -122.1417, 52.1417, "left"),
             ("Bella Coola", -126.7500, 52.3736, "left"),
             ("Kamloops", -120.3273, 50.6745, "right"),
             ("Kelowna", -119.4960, 49.8880, "right"),
-            ("Nelson", -117.2948, 49.4928, "right"),
             ("Cranbrook", -115.7697, 49.5097, "right"),
             ("Whistler", -122.9574, 50.1163, "left"),
             ("Vancouver", -123.1207, 49.2827, "left"),
-            ("Nanaimo", -123.9401, 49.1659, "left"),
+            ("Nanaimo", -123.9401, 49.1659, "below-left"),
             ("Victoria", -123.3656, 48.4284, "left"),
+            ("Calgary", -114.0719, 51.0447, "right"),
+            ("Edmonton", -113.4909, 53.5461, "right"),
+            ("Juneau", -134.4197, 58.3019, "left"),
         ],
     ),
     # True-zoom -- same shared LAT_SPAN as columbia_basin/portland, but
