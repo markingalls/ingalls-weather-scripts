@@ -99,7 +99,12 @@ a region overrides them for a different zoom level.
   offshore convection from Northern California up through Vancouver
   Island. Roads: `washington_roads.geojson`, `oregon_roads.geojson`,
   `california_roads_north.geojson`, `british_columbia_roads.geojson`
-  (all coastal slivers on the frame's east edge).
+  (all coastal slivers on the frame's east edge). The only region with
+  `show_gridlines=True`: lat/lon gridlines drawn at `zorder=0.95`, just
+  under land's `zorder=1`, so land's opaque fill paints over them and
+  they only show up over open water -- a chart-like touch that fits a
+  map that's mostly ocean, and one every other region skips since it'd
+  mostly just cross land there.
 - **`full_bc`** -- new, covers the entire province coast-to-Alberta-border
   and past the Yukon boundary. Center `(-125.5, 54.25)`, `lat_span=14.5`,
   `satellite_height=41_000_000`. `lon_span` started from the same

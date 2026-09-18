@@ -295,23 +295,23 @@ REGIONS = {
     "offshore_pnw": dict(
         center_lon=-128.0, center_lat=45.5,
         lon_span=13.0, lat_span=8.8, satellite_height=22_000_000,
+        show_gridlines=True,
         roads_files=["washington_roads.geojson", "oregon_roads.geojson",
                      "california_roads_north.geojson", "british_columbia_roads.geojson"],
         output_base="offshore_pnw_lightning",
         cities=[
-            ("Neah Bay", -124.6155, 48.3667, "right"),
-            ("Port Angeles", -123.4307, 48.1181, "right"),
-            ("Aberdeen", -123.8157, 46.9754, "right"),
-            ("Astoria", -123.8313, 46.1879, "right"),
-            ("Newport", -124.0535, 44.6365, "right"),
-            ("Coos Bay", -124.2100, 43.3665, "right"),
+            ("Neah Bay", -124.6155, 48.3667, "left"),
+            ("Aberdeen", -123.8157, 46.9754, "left"),
+            ("Astoria", -123.8313, 46.1879, "left"),
+            ("Tillamook", -123.8429, 45.4554, "left"),
+            ("Newport", -124.0535, 44.6365, "left"),
+            ("Coos Bay", -124.2100, 43.3665, "left"),
             ("Crescent City", -124.2026, 41.7558, "left"),
-            ("Seattle", -122.3321, 47.6062, "right"),
-            ("Portland", -122.6765, 45.5152, "right"),
-            ("Victoria", -123.3656, 48.4284, "right"),
-            ("Nanaimo", -123.9401, 49.1659, "right"),
-            ("Tofino", -125.9066, 49.1530, "right"),
-            ("Port Alberni", -124.8028, 49.2339, "above"),
+            ("Seattle", -122.3321, 47.6062, "left"),
+            ("Portland", -122.6765, 45.5152, "left"),
+            ("Victoria", -123.3656, 48.4284, "left"),
+            ("Nanaimo", -123.9401, 49.1659, "left"),
+            ("Tofino", -125.9066, 49.1530, "left"),
         ],
     ),
     # Covers the entire province, coast to Alberta border and the US
@@ -436,6 +436,7 @@ def _basemap_cache_key(cfg):
         cfg["center_lon"], cfg["center_lat"],
         cfg.get("lon_span", LON_SPAN), cfg.get("lat_span", LAT_SPAN),
         cfg.get("satellite_height", SATELLITE_HEIGHT),
+        cfg.get("show_gridlines", False),
         tuple(cfg["roads_files"]),
     ]
     for fname in STATIC_MAP_FILES + list(cfg["roads_files"]):
@@ -445,6 +446,18 @@ def _basemap_cache_key(cfg):
 
 
 def _draw_static_layers(ax, pc, cfg):
+    # ---------- lat/lon gridlines (ocean only) ----------
+    # Opt-in per region (cfg["show_gridlines"]), drawn at zorder=0.95 --
+    # just under land's zorder=1 below -- so land's opaque fill paints
+    # over them wherever there's land, leaving them visible only on the
+    # white (open-water) background. No explicit xlocs/ylocs: cartopy's
+    # default gridliner picks a "nice" degree interval from the axes'
+    # current extent, so this adapts automatically if the region's own
+    # span ever changes.
+    if cfg.get("show_gridlines"):
+        ax.gridlines(crs=pc, draw_labels=False, linewidth=0.6,
+                     color="#7ea6c9", linestyle="--", alpha=0.7, zorder=0.95)
+
     # ---------- land ----------
     land = json.load(open(f"{MAPS_DIR}/land_slim.json"))
     geoms = [shape(f["geometry"]) for f in land["features"]]
