@@ -143,17 +143,25 @@ a region overrides them for a different zoom level.
   attribution line instead of the default "OpenStreetMap", which would
   misattribute this region's roads) are two new per-region config keys;
   no other region currently sets either.
-- **`puget_sound`** -- true-zoom, same `LAT_SPAN` as `columbia_basin`/
-  `portland` but `lon_span=5.63` (bumped a little over the shared
-  `LON_SPAN` default): this region's center sits noticeably further
-  north (47.55 vs Columbia Basin's 46.2), and `NearsidePerspective`
-  renders the same longitude span narrower the further the frame center
-  sits from the equator, so the plain default came out visibly narrower
-  than the other regions' output. Tuned empirically against rendered
-  output width (same ~1510-1554px target band as `full_bc` above) rather
-  than the ground-km formula -- close enough a latitude gap that
-  eyeballing the match was simpler and just as accurate. Center
-  `(-122.4, 47.55)`. Roads: `washington_roads.geojson`.
+- **`puget_sound`** -- `lon_span=5.067`/`lat_span=3.24`: started from
+  `lon_span=5.63` (bumped a little over the shared `LON_SPAN` default,
+  same reasoning as `lower_mainland_victoria`'s -- this region's center
+  sits noticeably further north than Columbia Basin's, and
+  `NearsidePerspective` renders the same longitude span narrower the
+  further the frame center sits from the equator, so the plain default
+  came out visibly narrower than the other regions' output; tuned
+  empirically against rendered output width rather than the ground-km
+  formula), then both spans shrunk 10% together (same ratio, so the
+  rendered output's pixel dimensions stay put) for a requested zoom in,
+  same treatment as `lower_mainland_victoria`'s. Center `(-122.4, 47.75)`
+  -- shifted north from `47.55` on request. Roads:
+  `washington_roads.geojson`, `british_columbia_roads.geojson` -- a
+  sliver of BC was already in frame before the second file was added
+  (this region's own north edge sits just past the border), but with no
+  roads file for it that sliver showed no roads at all; same OSM/Geofabrik
+  schema as `washington_roads.geojson`, so BC's roads render with the
+  same motorway/trunk/primary tiers, not a highways-only filter like
+  `full_bc`'s.
 - **`lower_mainland_victoria`** -- `lon_span=5.22`/`lat_span=3.24`: a
   true-zoom-derived `5.8`/`3.6` (tuned the same empirical way as
   `puget_sound`'s, for the same reason -- this region sits even further
@@ -234,6 +242,14 @@ python3 build_map.py --region lower_mainland_victoria
   shape in this island-heavy stretch can only help other distance-to-land
   logic here, and it's the same safe, additive, already-verified-not-to-
   disturb-existing-features approach as the full_bc corner fix.
+- **`land_slim.json` widened again for `puget_sound`**: requested
+  directly this time (better island/shoreline detail for Puget Sound
+  proper -- Whidbey, Vashon, Bainbridge, the Kitsap Peninsula -- not just
+  the San Juan/Gulf Islands stretch the `lower_mainland_victoria` fix
+  above covered). Same source, same additive approach, clipped to lon
+  [-125.0,-121.5] / lat [46.5,49.5] this time; some overlap with the
+  `lower_mainland_victoria` addition is expected and harmless (duplicate
+  polygons just paint the same fill color twice).
 - **City label offset scales with the region's own span**: `POS_DX`/
   `POS_DY` (in `build_map()`, where city dots/labels are drawn) were a
   fixed degree offset from each dot regardless of region -- fine while

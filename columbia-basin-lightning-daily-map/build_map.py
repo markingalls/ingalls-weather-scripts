@@ -402,20 +402,28 @@ REGIONS = {
     # the same ~1510-1554px band every other region's tight-cropped
     # output falls into, so this map is the same size as the others.
     "puget_sound": dict(
-        center_lon=-122.4, center_lat=47.55,
-        lon_span=5.63,
-        roads_files=["washington_roads.geojson"],
+        # Center shifted north a little (47.55 -> 47.75) and both spans
+        # shrunk 10% together (same ratio preserved, so the rendered
+        # output's pixel dimensions stay put -- see the "same output
+        # size" Notes entry -- only the framing gets tighter), same
+        # treatment as lower_mainland_victoria's zoom-in.
+        center_lon=-122.4, center_lat=47.75,
+        lon_span=5.067, lat_span=3.24,
+        # A sliver of BC was already in frame before this (this region's
+        # own north edge sits at lat 49.37, just past the border at 49.0)
+        # but only had washington_roads.geojson, so that sliver showed no
+        # roads at all -- same OSM/Geofabrik schema as washington_roads.geojson,
+        # so BC's roads render with the same motorway/trunk/primary tiers,
+        # not a highways-only filter like full_bc's.
+        roads_files=["washington_roads.geojson", "british_columbia_roads.geojson"],
         output_base="puget_sound_lightning",
         cities=[
             ("Bellingham", -122.4787, 48.7519, "left"),
             ("Mount Vernon", -122.3340, 48.4212, "left"),
             ("Port Angeles", -123.4307, 48.1181, "above-left"),
-            ("Port Townsend", -122.7601, 48.1173, "left"),
             ("Everett", -122.2021, 47.9790, "right"),
             ("Bremerton", -122.6329, 47.5673, "left"),
             ("Seattle", -122.3321, 47.6062, "right"),
-            ("Bellevue", -122.2015, 47.6101, "above-right"),
-            ("Renton", -122.2171, 47.4829, "right"),
             ("Tacoma", -122.4443, 47.2529, "right"),
             ("Shelton", -123.1004, 47.2129, "left"),
             ("Olympia", -122.9007, 47.0379, "left"),
