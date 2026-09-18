@@ -66,6 +66,17 @@ def region_extent(center_lon, center_lat, lon_span=LON_SPAN, lat_span=LAT_SPAN):
     ]
 
 
+def _nice_gridline_step(span):
+    """Smallest of a few round degree steps that keeps at most ~8 lines
+    across the given span -- a plain stand-in for cartopy's automatic
+    gridline locator, needed because the actual gridline segments are
+    drawn by hand (see the show_gridlines note in _draw_static_layers)."""
+    for step in (1, 2, 5, 10, 15, 20):
+        if span / step <= 8:
+            return step
+    return 30
+
+
 # Longest legitimate segment length seen in admin1_boundary_lines.json's
 # TIGER-derived state lines is ~1.6 degrees; countries_slim.json's country
 # borders have several segments over-simplified down to a single straight
@@ -308,9 +319,9 @@ REGIONS = {
             ("Coos Bay", -124.2100, 43.3665, "left"),
             ("Crescent City", -124.2026, 41.7558, "left"),
             ("Seattle", -122.3321, 47.6062, "left"),
-            ("Portland", -122.6765, 45.5152, "left"),
-            ("Victoria", -123.3656, 48.4284, "left"),
-            ("Nanaimo", -123.9401, 49.1659, "left"),
+            ("Portland", -122.6765, 45.5152, "right"),
+            ("Victoria", -123.3656, 48.4284, "right"),
+            ("Vancouver", -123.1207, 49.2827, "left"),
             ("Tofino", -125.9066, 49.1530, "left"),
         ],
     ),
@@ -447,16 +458,83 @@ def _basemap_cache_key(cfg):
 
 def _draw_static_layers(ax, pc, cfg):
     # ---------- lat/lon gridlines (ocean only) ----------
-    # Opt-in per region (cfg["show_gridlines"]), drawn at zorder=0.95 --
-    # just under land's zorder=1 below -- so land's opaque fill paints
-    # over them wherever there's land, leaving them visible only on the
-    # white (open-water) background. No explicit xlocs/ylocs: cartopy's
-    # default gridliner picks a "nice" degree interval from the axes'
-    # current extent, so this adapts automatically if the region's own
-    # span ever changes.
+    # Opt-in per region (cfg["show_gridlines"]). cartopy's ax.gridlines()
+    # Gridliner ignores the zorder it's given when stacking against other
+    # axes content -- its artist always draws itself last regardless of
+    # its own zorder attribute (confirmed experimentally: even a
+    # zorder=100 land polygon still rendered UNDER a zorder=0.5
+    # Gridliner). So the actual grid lines are drawn here by hand instead,
+    # as plain ax.plot() lines -- which are normal Line2D artists and do
+    # respect zorder -- at zorder=0.95, just under land's zorder=1 below,
+    # so land's opaque fill paints over them and they only show up over
+    # open water. A real (but line-less) Gridliner is added after roads,
+    # further down, purely for its degree-labeled bottom/left edge ticks.
     if cfg.get("show_gridlines"):
-        ax.gridlines(crs=pc, draw_labels=False, linewidth=0.6,
-                     color="#7ea6c9", linestyle="--", alpha=0.7, zorder=0.95)
+        lon_min, lon_max, lat_min, lat_max = region_extent(
+            cfg["center_lon"], cfg["center_lat"],
+            cfg.get("lon_span", LON_SPAN), cfg.get("lat_span", LAT_SPAN))
+        # Padded past the nominal box so lines reach the projection's true
+        # (curved, slightly wider) visible edge -- see the native_xlim/
+        # native_ylim note in build_map() below for why the nominal box
+        # falls short of the actual rendered frame.
+        pad_lon = (lon_max - lon_min) * 0.15
+        pad_lat = (lat_max - lat_min) * 0.15
+        lon_step = _nice_gridline_step(lon_max - lon_min)
+        lat_step = _nice_gridline_step(lat_max - lat_min)
+        grid_kwargs = dict(transform=pc, color="#7ea6c9", linewidth=0.6,
+                            linestyle="--", alpha=0.7, zorder=0.95)
+        lat_samples = np.linspace(lat_min - pad_lat, lat_max + pad_lat, 60)
+        lon_samples = np.linspace(lon_min - pad_lon, lon_max + pad_lon, 60)
+        lon = math.ceil((lon_min - pad_lon) / lon_step) * lon_step
+        while lon <= lon_max + pad_lon:
+            ax.plot([lon] * len(lat_samples), lat_samples, **grid_kwargs)
+            lon += lon_step
+        lat = math.ceil((lat_min - pad_lat) / lat_step) * lat_step
+        while lat <= lat_max + pad_lat:
+            ax.plot(lon_samples, [lat] * len(lon_samples), **grid_kwargs)
+            lat += lat_step
+
+        # Degree labels along the bottom (longitude) and left (latitude)
+        # edges only -- drawn well above land/roads (zorder=6.5) so they
+        # read clearly, unlike the lines themselves just above. Anchored
+        # to the axes' true (curved) boundary, not the nominal lat_min/
+        # lon_min box edge: NearsidePerspective's real visible boundary is
+        # a curve, not the rectangle region_extent() describes (same
+        # native_xlim/native_ylim point build_map() makes below when
+        # filtering flashes to the frame) -- a label placed at exactly
+        # lat_min for every longitude landed outside the actual curved
+        # edge everywhere except the two corners, and just vanished
+        # (clipped) in between, when this used the nominal edge directly.
+        native_xlim, native_ylim = ax.get_xlim(), ax.get_ylim()
+
+        def _visible_edge(lons, lats, pick):
+            native = ax.projection.transform_points(pc, np.asarray(lons), np.asarray(lats))
+            visible = ((native[:, 0] >= native_xlim[0]) & (native[:, 0] <= native_xlim[1]) &
+                       (native[:, 1] >= native_ylim[0]) & (native[:, 1] <= native_ylim[1]))
+            if not visible.any():
+                return None
+            idx = np.where(visible)[0]
+            arr = np.asarray(lats) if pick == "min_lat" else np.asarray(lons)
+            best = idx[np.argmin(arr[idx])]
+            return lons[best], lats[best]
+
+        label_kwargs = dict(transform=pc, fontsize=9, color="#5a584f", zorder=6.5)
+        lon = math.ceil(lon_min / lon_step) * lon_step
+        while lon <= lon_max:
+            pt = _visible_edge([lon] * len(lat_samples), lat_samples, "min_lat")
+            if pt:
+                hemi = "W" if lon < 0 else "E"
+                ax.text(pt[0], pt[1], f"{abs(round(lon))}\u00b0{hemi}",
+                        ha="center", va="bottom", **label_kwargs)
+            lon += lon_step
+        lat = math.ceil(lat_min / lat_step) * lat_step
+        while lat <= lat_max:
+            pt = _visible_edge(lon_samples, [lat] * len(lon_samples), "min_lon")
+            if pt:
+                hemi = "N" if lat >= 0 else "S"
+                ax.text(pt[0], pt[1], f"{abs(round(lat))}\u00b0{hemi}",
+                        ha="left", va="center", **label_kwargs)
+            lat += lat_step
 
     # ---------- land ----------
     land = json.load(open(f"{MAPS_DIR}/land_slim.json"))
