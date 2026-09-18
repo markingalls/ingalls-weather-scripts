@@ -287,6 +287,127 @@ REGIONS = {
             ("Nordegg", -116.0500, 52.4667, "right"),
         ],
     ),
+    # Same wide-zoom style as "pnw" above (identical lon_span/lat_span/
+    # satellite_height), just recentered west over open water -- "pnw"'s
+    # own frame is centered well inland and only shows a coastal sliver,
+    # so this is a dedicated view of offshore convection along the
+    # WA/OR/N. CA coast and the water west of Vancouver Island.
+    "offshore_pnw": dict(
+        center_lon=-128.0, center_lat=45.5,
+        lon_span=13.0, lat_span=8.8, satellite_height=22_000_000,
+        roads_files=["washington_roads.geojson", "oregon_roads.geojson",
+                     "california_roads_north.geojson", "british_columbia_roads.geojson"],
+        output_base="offshore_pnw_lightning",
+        cities=[
+            ("Neah Bay", -124.6155, 48.3667, "right"),
+            ("Port Angeles", -123.4307, 48.1181, "right"),
+            ("Aberdeen", -123.8157, 46.9754, "right"),
+            ("Astoria", -123.8313, 46.1879, "right"),
+            ("Newport", -124.0535, 44.6365, "right"),
+            ("Coos Bay", -124.2100, 43.3665, "right"),
+            ("Crescent City", -124.2026, 41.7558, "left"),
+            ("Seattle", -122.3321, 47.6062, "right"),
+            ("Portland", -122.6765, 45.5152, "right"),
+            ("Victoria", -123.3656, 48.4284, "right"),
+            ("Nanaimo", -123.9401, 49.1659, "right"),
+            ("Tofino", -125.9066, 49.1530, "right"),
+            ("Port Alberni", -124.8028, 49.2339, "above"),
+        ],
+    ),
+    # Covers the entire province, coast to Alberta border and the US
+    # border up past the Yukon boundary -- wider than "bc_interior" in
+    # both dimensions, so it needs its own center and its own
+    # satellite_height. lon_span is derived the same way bc_interior's is
+    # (see that region's comment above): lat_span converted to ground km,
+    # times the true-zoom width:height ratio in km, converted back to
+    # degrees at this region's own (much higher) latitude. Skipping that
+    # conversion here of all places would produce the most visibly
+    # squashed frame of any region, since a degree of longitude this far
+    # north covers barely more than half what it does at Columbia Basin's
+    # latitude.
+    "full_bc": dict(
+        center_lon=-125.5, center_lat=54.25,
+        lon_span=26.2, lat_span=14.5, satellite_height=41_000_000,
+        timezone="America/Vancouver",
+        roads_files=["british_columbia_roads.geojson", "alberta_roads_west.geojson",
+                     "washington_roads.geojson"],
+        output_base="full_bc_lightning",
+        cities=[
+            ("Prince Rupert", -130.3208, 54.3150, "left"),
+            ("Haida Gwaii", -132.2000, 53.2500, "left"),
+            ("Terrace", -128.6032, 54.5182, "below"),
+            ("Smithers", -127.1687, 54.7822, "left"),
+            ("Fort St. John", -120.8467, 56.2499, "right"),
+            ("Fort Nelson", -122.6972, 58.8050, "right"),
+            ("Prince George", -122.7497, 53.9171, "left"),
+            ("Quesnel", -122.4930, 53.0027, "left"),
+            ("Williams Lake", -122.1417, 52.1417, "left"),
+            ("Bella Coola", -126.7500, 52.3736, "left"),
+            ("Kamloops", -120.3273, 50.6745, "right"),
+            ("Kelowna", -119.4960, 49.8880, "right"),
+            ("Nelson", -117.2948, 49.4928, "right"),
+            ("Cranbrook", -115.7697, 49.5097, "right"),
+            ("Whistler", -122.9574, 50.1163, "left"),
+            ("Vancouver", -123.1207, 49.2827, "left"),
+            ("Nanaimo", -123.9401, 49.1659, "left"),
+            ("Victoria", -123.3656, 48.4284, "left"),
+            ("Calgary", -114.0719, 51.0447, "right"),
+        ],
+    ),
+    # True-zoom, same shared LON_SPAN/LAT_SPAN as columbia_basin/portland
+    # -- no override needed, same as those two.
+    "puget_sound": dict(
+        center_lon=-122.4, center_lat=47.55,
+        roads_files=["washington_roads.geojson"],
+        output_base="puget_sound_lightning",
+        cities=[
+            ("Bellingham", -122.4787, 48.7519, "left"),
+            ("Mount Vernon", -122.3340, 48.4212, "left"),
+            ("Port Angeles", -123.4307, 48.1181, "above-left"),
+            ("Port Townsend", -122.7601, 48.1173, "left"),
+            ("Everett", -122.2021, 47.9790, "right"),
+            ("Bremerton", -122.6329, 47.5673, "left"),
+            ("Seattle", -122.3321, 47.6062, "right"),
+            ("Bellevue", -122.2015, 47.6101, "above-right"),
+            ("Renton", -122.2171, 47.4829, "right"),
+            ("Tacoma", -122.4443, 47.2529, "right"),
+            ("Shelton", -123.1004, 47.2129, "left"),
+            ("Olympia", -122.9007, 47.0379, "left"),
+        ],
+    ),
+    # True-zoom, no override -- same shared LON_SPAN/LAT_SPAN as
+    # columbia_basin/portland/puget_sound. City list carried over from the
+    # one-off lower-mainland-victoria-lightning-map/ project (Whistler,
+    # Hope, Port Renfrew, and Everett mark this domain's rough N/E/W/S
+    # extent there), reused here since it already went through a round of
+    # real-world tuning (fixed a double border line and a cut-off Olympic
+    # Peninsula highway).
+    "lower_mainland_victoria": dict(
+        center_lon=-122.93, center_lat=49.05,
+        timezone="America/Vancouver",
+        roads_files=["british_columbia_roads.geojson", "washington_roads.geojson"],
+        output_base="lower_mainland_victoria_lightning",
+        cities=[
+            ("Whistler", -122.9574, 50.1163, "right"),
+            ("Squamish", -123.1558, 49.7016, "right"),
+            ("Sechelt", -123.7556, 49.4742, "left"),
+            ("Vancouver", -123.1207, 49.2827, "left"),
+            ("Coquitlam", -122.7932, 49.2838, "right"),
+            ("Surrey", -122.8490, 49.1913, "right"),
+            ("Abbotsford", -122.3045, 49.0504, "right"),
+            ("Chilliwack", -121.9514, 49.1579, "right"),
+            ("Hope", -121.4412, 49.3820, "left"),
+            ("Nanaimo", -123.9401, 49.1659, "left"),
+            ("Duncan", -123.7079, 48.7787, "left"),
+            ("Victoria", -123.3656, 48.4284, "right"),
+            ("Sooke", -123.7275, 48.3742, "right"),
+            ("Port Renfrew", -124.4204, 48.5541, "right"),
+            ("Port Angeles", -123.4307, 48.1181, "right"),
+            ("Oak Harbor", -122.6401, 48.2934, "left"),
+            ("Bellingham", -122.4787, 48.7519, "right"),
+            ("Everett", -122.2021, 47.9790, "right"),
+        ],
+    ),
 }
 
 
@@ -562,10 +683,11 @@ def build_map(region_key, lightning_path, output_path):
     title_y = subtitle_y + 0.035
     # Derived from window_start (a UTC instant) converted to this region's
     # own timezone, not the shared pt_date string baked in at fetch time
-    # -- the fetch window itself is shared across all four regions (see
+    # -- the fetch window itself is shared across all regions (see
     # fetch_lightning.py), but the calendar-date LABEL shown per region
-    # should reflect that region's own zone. bc_interior uses America/
-    # Vancouver; every other region defaults to America/Los_Angeles.
+    # should reflect that region's own zone. bc_interior, full_bc, and
+    # lower_mainland_victoria use America/Vancouver; every other region
+    # defaults to America/Los_Angeles.
     # These are numerically identical for any date since 2007, so this
     # doesn't change today's rendered label, but it's the correct source
     # of truth per region going forward.

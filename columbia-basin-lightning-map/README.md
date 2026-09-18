@@ -1,9 +1,11 @@
 # GLM Lightning Maps (Last 24 Hours)
 
-A styled map of the last 24 hours of lightning flashes, for each of four
-regions -- Columbia Basin, Portland Metro, Pacific Northwest, and BC
-Interior -- sourced from the GLM (Geostationary Lightning Mapper)
-instrument on GOES-18, NOAA's operational GOES-West satellite. Real-time
+A styled map of the last 24 hours of lightning flashes, for each of eight
+regions -- Columbia Basin, Portland Metro, Pacific Northwest, BC
+Interior, Offshore Pacific Northwest, Full British Columbia, Puget Sound,
+and Lower Mainland + Victoria -- sourced from the GLM (Geostationary
+Lightning Mapper) instrument on GOES-18, NOAA's operational GOES-West
+satellite. Real-time
 companion: [`../columbia-basin-lightning-realtime-map/`](../columbia-basin-lightning-realtime-map/)
 (last 2 hours). 5-day rolling archive companion:
 [`../columbia-basin-lightning-daily-map/`](../columbia-basin-lightning-daily-map/).
@@ -12,7 +14,7 @@ companion: [`../columbia-basin-lightning-realtime-map/`](../columbia-basin-light
 
 - `fetch_lightning.py` -- pulls GLM-L2-LCFA flash detections from the
   last 24 hours out of NOAA's public `noaa-goes18` bucket on AWS Open
-  Data, over a domain spanning all four regions below, and writes
+  Data, over a domain spanning all eight regions below, and writes
   `lightning_last24h.json`. Run this first, any time you want the map(s)
   to reflect right-now conditions.
 - `build_map.py` -- `REGIONS` dict registry (extent, center point, city
@@ -90,6 +92,36 @@ a region overrides them for a different zoom level.
   e.g. around Cranbrook/Fernie) plus `../maps/alberta_roads_west.geojson`
   (Geofabrik Alberta extract, clipped to LON -120.0 to -113.0 / LAT 48.5
   to 55.0) -- both filtered to motorway/trunk/primary.
+- **`offshore_pnw`** -- same wide-zoom style as `pnw` (`lon_span=13.0`,
+  `lat_span=8.8`, `satellite_height=22_000_000`), recentered west over
+  open water at `(-128.0, 45.5)` -- `pnw`'s own frame is centered well
+  inland and only shows a coastal sliver, so this is a dedicated view of
+  offshore convection from Northern California up through Vancouver
+  Island. Roads: `washington_roads.geojson`, `oregon_roads.geojson`,
+  `california_roads_north.geojson`, `british_columbia_roads.geojson`
+  (all coastal slivers on the frame's east edge).
+- **`full_bc`** -- new, covers the entire province coast-to-Alberta-border
+  and past the Yukon boundary. Center `(-125.5, 54.25)`, `lat_span=14.5`,
+  `satellite_height=41_000_000`; `lon_span=26.2` is derived the same way
+  `bc_interior`'s is (`lat_span` converted to ground km, times Columbia
+  Basin's true-zoom width:height ratio, converted back to degrees at this
+  region's own latitude) -- skipping that conversion here, of all
+  regions, would produce the most visibly squashed frame, since a degree
+  of longitude this far north covers barely more than half what it does
+  at Columbia Basin's latitude. Uses `America/Vancouver` like
+  `bc_interior`. Roads: `british_columbia_roads.geojson`,
+  `alberta_roads_west.geojson`, `washington_roads.geojson`.
+- **`puget_sound`** -- true-zoom, no span override (same
+  `LON_SPAN`/`LAT_SPAN` as `columbia_basin`/`portland`), center
+  `(-122.4, 47.55)`. Roads: `washington_roads.geojson`.
+- **`lower_mainland_victoria`** -- true-zoom, no span override, center
+  `(-122.93, 49.05)`. City list carried over from the one-off
+  `lower-mainland-victoria-lightning-map/` project (Whistler, Hope, Port
+  Renfrew, and Everett mark that domain's rough N/E/W/S extent), reused
+  here since it already went through a round of real-world tuning (fixed
+  a double border line and a cut-off Olympic Peninsula highway). Uses
+  `America/Vancouver`. Roads: `british_columbia_roads.geojson`,
+  `washington_roads.geojson`.
 
 ## Usage
 
@@ -98,13 +130,17 @@ relative to it):
 
 ```bash
 bash setup.sh                        # first time / fresh environment only
-python3 fetch_lightning.py           # pull the 24h of GLM flashes ending now (all 4 regions read this)
+python3 fetch_lightning.py           # pull the 24h of GLM flashes ending now (all 8 regions read this)
 python3 fetch_lightning.py --end-pt "14:00"               # ... ending 14:00 PT today
 python3 fetch_lightning.py --end-pt "2026-07-16 14:00"    # ... ending 14:00 PT on a given date
 python3 build_map.py --region columbia_basin
 python3 build_map.py --region portland
 python3 build_map.py --region pnw
 python3 build_map.py --region bc_interior
+python3 build_map.py --region offshore_pnw
+python3 build_map.py --region full_bc
+python3 build_map.py --region puget_sound
+python3 build_map.py --region lower_mainland_victoria
 ```
 
 ## Notes
@@ -120,8 +156,8 @@ python3 build_map.py --region bc_interior
   concurrently (I/O-bound, so threads are safe there), then parses them
   sequentially -- the underlying HDF5/netCDF4 library isn't thread-safe,
   so parsing concurrently intermittently corrupts memory.
-- **One shared fetch, four regions**: `fetch_lightning.py`'s bounding box
-  covers at least the union of all four `REGIONS` extents (padded 0.5
+- **One shared fetch, eight regions**: `fetch_lightning.py`'s bounding box
+  covers at least the union of all eight `REGIONS` extents (padded 0.5
   degrees), not just Columbia Basin's, and its east edge intentionally
   goes further still (see `bc_interior`'s Notes entry below) -- widening
   it doesn't add fetch cost, since GLM file listing/download is purely a

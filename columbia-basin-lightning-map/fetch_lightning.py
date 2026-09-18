@@ -1,7 +1,8 @@
 """
 Pulls the last 24 hours of GOES-18 (GOES-West) GLM flash-level lightning
-detections over a domain spanning all four regions in build_map.py's
-REGIONS (Columbia Basin, Portland, Pacific NW, BC Interior) and writes
+detections over a domain spanning all eight regions in build_map.py's
+REGIONS (Columbia Basin, Portland, Pacific NW, BC Interior, Offshore
+Pacific NW, Full BC, Puget Sound, Lower Mainland + Victoria) and writes
 lightning_last24h.json. Run this before build_map.py any time you want
 the map(s) to reflect right-now conditions instead of a stale snapshot.
 build_map.py filters down to each region's own (tighter) extent at render
@@ -12,7 +13,7 @@ Source: NOAA's public "noaa-goes18" bucket on AWS Open Data
 (GLM-L2-LCFA product), read anonymously -- no API key or AWS account
 needed. GLM-L2-LCFA files are produced every 20 seconds (~4,320/day);
 flash centroid lat/lon/energy are already provided in each file, so no
-satellite-projection math is needed. Widening the bbox to cover all four
+satellite-projection math is needed. Widening the bbox to cover all eight
 regions doesn't add fetch cost: file listing/download is purely a
 function of the time window (GOES covers the full disk in every file),
 not the bbox -- only the cheap post-download numpy mask scales with area.
@@ -35,12 +36,14 @@ BUCKET = "noaa-goes18"  # GOES-18 is the current operational GOES-West satellite
 PRODUCT = "GLM-L2-LCFA"
 LOOKBACK_HOURS = 24
 
-# Union of all four REGIONS extents in build_map.py (columbia_basin,
-# portland, pnw, bc_interior), padded a bit so flashes right at any
-# region's map edge aren't dropped pre-plot. pnw is the widest in
-# latitude; bc_interior pushes the northern edge up past what pnw alone
-# would need. Re-verify this union whenever any region's extent changes
-# rather than assuming it still does.
+# Union of all eight REGIONS extents in build_map.py (columbia_basin,
+# portland, pnw, bc_interior, offshore_pnw, full_bc, puget_sound,
+# lower_mainland_victoria), padded a bit so flashes right at any region's
+# map edge aren't dropped pre-plot. full_bc is now the widest in both
+# directions: its west edge (-138.6) pushes past offshore_pnw's
+# (-134.5), and its north edge (61.5) pushes well past what bc_interior
+# alone (54.31) would need. Re-verify this union whenever any region's
+# extent changes rather than assuming it still does.
 #
 # The east edge is intentionally pulled well past what any region
 # currently renders rather than trimmed to bc_interior's own render edge:
@@ -48,10 +51,11 @@ LOOKBACK_HOURS = 24
 # fetch-cost reason not to grab that data too (file listing/download is a
 # function of the time window, not the bbox), so it's fine to pull more
 # than any map currently displays. -108.0 is comfortably past Calgary
-# (-114.07), not just "roughly Alberta's eastern border".
+# (-114.07), not just "roughly Alberta's eastern border" -- and still
+# past full_bc's own east edge (-112.4).
 BBOX_PAD = 0.5
-LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -108.0 + BBOX_PAD
-LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 54.31 + BBOX_PAD
+LON_MIN, LON_MAX = -138.6 - BBOX_PAD, -108.0 + BBOX_PAD
+LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 61.5 + BBOX_PAD
 
 
 def hour_prefixes(start, end):

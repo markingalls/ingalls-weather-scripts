@@ -1,7 +1,8 @@
 """
 Pulls the last 2 hours of GOES-18 (GOES-West) GLM flash-level lightning
-detections over a domain spanning all four regions in build_map.py's
-REGIONS (Columbia Basin, Portland, Pacific NW, BC Interior) and writes
+detections over a domain spanning all eight regions in build_map.py's
+REGIONS (Columbia Basin, Portland, Pacific NW, BC Interior, Offshore
+Pacific NW, Full BC, Puget Sound, Lower Mainland + Victoria) and writes
 lightning_last2h.json. Run this before build_map.py any time you want the
 map(s) to reflect right-now conditions instead of a stale snapshot -- this
 is the real-time companion to ../columbia-basin-lightning-map (24-hour
@@ -13,7 +14,7 @@ Source: NOAA's public "noaa-goes18" bucket on AWS Open Data
 needed. GLM-L2-LCFA files are produced every 20 seconds (~360 in a
 2-hour window); flash centroid lat/lon/energy are already provided in
 each file, so no satellite-projection math is needed. Widening the bbox
-to cover all four regions doesn't add fetch cost: file listing/download
+to cover all eight regions doesn't add fetch cost: file listing/download
 is purely a function of the time window (GOES covers the full disk in
 every file), not the bbox.
 """
@@ -35,13 +36,14 @@ BUCKET = "noaa-goes18"  # GOES-18 is the current operational GOES-West satellite
 PRODUCT = "GLM-L2-LCFA"
 LOOKBACK_HOURS = 2
 
-# Union of all four REGIONS extents in build_map.py (columbia_basin,
-# portland, pnw, bc_interior), padded a bit so flashes right at any
-# region's map edge aren't dropped pre-plot. See ../columbia-basin-
+# Union of all eight REGIONS extents in build_map.py (columbia_basin,
+# portland, pnw, bc_interior, offshore_pnw, full_bc, puget_sound,
+# lower_mainland_victoria), padded a bit so flashes right at any region's
+# map edge aren't dropped pre-plot. See ../columbia-basin-
 # lightning-map/fetch_lightning.py for how these bounds were derived.
 BBOX_PAD = 0.5
-LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -108.0 + BBOX_PAD
-LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 54.31 + BBOX_PAD
+LON_MIN, LON_MAX = -138.6 - BBOX_PAD, -108.0 + BBOX_PAD
+LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 61.5 + BBOX_PAD
 
 
 def hour_prefixes(start, end):

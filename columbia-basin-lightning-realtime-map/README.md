@@ -2,7 +2,7 @@
 
 The real-time companion to
 [`../columbia-basin-lightning-map/`](../columbia-basin-lightning-map/)
-(same four regions, same GOES-18 GLM source): instead of the full 24
+(same eight regions, same GOES-18 GLM source): instead of the full 24
 hours, this renders just the last 2 hours, with finer recency bands
 suited to watching an active storm right now rather than reviewing a
 day's worth of activity.
@@ -11,7 +11,7 @@ day's worth of activity.
 
 - `fetch_lightning.py` -- pulls GLM-L2-LCFA flash detections from the
   last 2 hours out of NOAA's public `noaa-goes18` bucket on AWS Open
-  Data, over a domain spanning all four regions, and writes
+  Data, over a domain spanning all eight regions, and writes
   `lightning_last2h.json`. Run this first, any time you want the map(s)
   to reflect right-now conditions. See
   `../columbia-basin-lightning-map/README.md` for the fuller write-up of
@@ -47,16 +47,20 @@ relative to it):
 
 ```bash
 bash setup.sh                        # first time / fresh environment only
-python3 fetch_lightning.py           # pull the last 2h of GLM flashes (all 4 regions read this)
+python3 fetch_lightning.py           # pull the last 2h of GLM flashes (all 8 regions read this)
 python3 build_map.py --region columbia_basin
 python3 build_map.py --region portland
 python3 build_map.py --region pnw
 python3 build_map.py --region bc_interior
+python3 build_map.py --region offshore_pnw
+python3 build_map.py --region full_bc
+python3 build_map.py --region puget_sound
+python3 build_map.py --region lower_mainland_victoria
 ```
 
 For a live view (e.g. an Instagram story that refreshes every few
 minutes), re-run on a short interval -- a 2-hour window is only ~360 GLM
-files, so a full fetch + render across all four regions takes well under
+files, so a full fetch + render across all eight regions takes well under
 a minute.
 
 `fetch_lightning.py` also accepts `--end-pt` (same as the 24-hour

@@ -1,8 +1,9 @@
 """
 Pulls a full Pacific-time calendar day of GOES-18 (GOES-West) GLM
-flash-level lightning detections over a domain spanning all four regions
+flash-level lightning detections over a domain spanning all eight regions
 in build_map.py's REGIONS (Columbia Basin, Portland, Pacific NW, BC
-Interior) and writes lightning_daily.json. Defaults to yesterday (PT) --
+Interior, Offshore Pacific NW, Full BC, Puget Sound, Lower Mainland +
+Victoria) and writes lightning_daily.json. Defaults to yesterday (PT) --
 see deploy/publish_daily.py for how this fits into the 5-day rotating
 archive. Companion to ../columbia-basin-lightning-map (24h) and
 ../columbia-basin-lightning-realtime-map (2h); see the 24h project's
@@ -29,13 +30,14 @@ PACIFIC = ZoneInfo("America/Los_Angeles")
 BUCKET = "noaa-goes18"  # GOES-18 is the current operational GOES-West satellite
 PRODUCT = "GLM-L2-LCFA"
 
-# Union of all four REGIONS extents in build_map.py (columbia_basin,
-# portland, pnw, bc_interior), padded a bit so flashes right at any
-# region's map edge aren't dropped pre-plot. See ../columbia-basin-
+# Union of all eight REGIONS extents in build_map.py (columbia_basin,
+# portland, pnw, bc_interior, offshore_pnw, full_bc, puget_sound,
+# lower_mainland_victoria), padded a bit so flashes right at any region's
+# map edge aren't dropped pre-plot. See ../columbia-basin-
 # lightning-map/fetch_lightning.py for how these bounds were derived.
 BBOX_PAD = 0.5
-LON_MIN, LON_MAX = -125.8 - BBOX_PAD, -108.0 + BBOX_PAD
-LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 54.31 + BBOX_PAD
+LON_MIN, LON_MAX = -138.6 - BBOX_PAD, -108.0 + BBOX_PAD
+LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 61.5 + BBOX_PAD
 
 
 def hour_prefixes(start, end):

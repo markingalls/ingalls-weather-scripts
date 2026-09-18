@@ -20,12 +20,12 @@ dropped.
 - `fetch_lightning.py` -- pulls a full Pacific-time calendar day of
   GLM-L2-LCFA flash detections (defaults to yesterday) out of NOAA's
   public `noaa-goes18` bucket on AWS Open Data, over a domain spanning
-  all four regions, and writes `lightning_daily.json`. `--pt-date
+  all eight regions, and writes `lightning_daily.json`. `--pt-date
   YYYY-MM-DD` picks a specific day instead (useful for backfilling or
   testing). See `../columbia-basin-lightning-map/README.md` for the
   fuller write-up of the data source and satellite choice.
 - `build_map.py` -- same `REGIONS`-dict pattern as the other two
-  lightning projects (same four regions, same basemap/roads/city-label
+  lightning projects (same eight regions, same basemap/roads/city-label
   handling, same border/offshore-line fixes), but each region's dict key
   is `output_base` (e.g. `"columbia_basin_lightning"`) rather than a
   fixed `output` filename -- the day-slot number isn't decided by
@@ -39,7 +39,7 @@ dropped.
   numerically identical to Pacific time for any date since 2007, so this
   doesn't change the rendered label today, but it's the correct source of
   truth per region going forward. The fetch window itself stays one
-  shared UTC range across all four regions (see `fetch_lightning.py`).
+  shared UTC range across all eight regions (see `fetch_lightning.py`).
 - `deploy/publish_daily.py` -- cron entry point; owns the whole rotate
   -> fetch -> render -> publish sequence. See "Rotation" below for the
   mechanism and why it's safe on a first run with no prior images.
