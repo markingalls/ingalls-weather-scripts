@@ -465,6 +465,7 @@ REGIONS = {
             ("Mount Vernon", -122.3340, 48.4212, "right"),
             ("Bellingham", -122.4787, 48.7519, "right"),
             ("Everett", -122.2021, 47.9790, "right"),
+            ("Seattle", -122.3321, 47.6062, "left"),
         ],
     ),
 }

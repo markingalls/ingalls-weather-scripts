@@ -166,7 +166,7 @@ a region overrides them for a different zoom level.
   here since it already went through a round of real-world tuning (fixed
   a double border line and a cut-off Olympic Peninsula highway); since
   then Coquitlam, Sooke, Oak Harbor, and Boston Bar have been dropped and
-  Courtenay, Merritt, and Mount Vernon added. `show_counties=False`, same
+  Courtenay, Merritt, Mount Vernon, and Seattle added. `show_counties=False`, same
   reasoning as `full_bc`'s (this region's only US territory is the WA
   sliver at its south edge). Uses `America/Vancouver`. Roads:
   `british_columbia_roads.geojson`, `washington_roads.geojson`.
@@ -193,6 +193,47 @@ python3 build_map.py --region lower_mainland_victoria
 
 ## Notes
 
+- **US/Canada border was missing around Sumas/Blaine (and, it turned out,
+  most of the WA/BC and BC/Alberta border generally)**: `countries_slim.json`
+  draws country outlines by extracting the border from each country's own
+  polygon, then `drop_long_segments()` cuts any single simplified segment
+  over `MAX_BORDER_SEGMENT_DEG` (3.0deg) -- Canada's polygon collapses the
+  *entire* Minnesota-to-Blaine stretch of the 49th parallel into one
+  ~27.5deg segment, so `drop_long_segments()` correctly drops it, but that
+  leaves nothing there at all. The fallback, `admin1_boundary_lines.json`
+  (filtered by `trim_offshore_segments()` to points within
+  `OFFSHORE_LINE_DISTANCE_DEG` (0.02deg) of land, meant to cut just the
+  spurious 3-nautical-mile-offshore maritime jog Natural Earth bakes into
+  each coastal state's line), turned out to represent nearly this state's
+  *entire* coastal and strait boundary as such a jog -- correctly trimmed,
+  but trimming away real border along with it, leaving only the dry-land
+  Sumas-to-Cascades tail. Fixed by adding real data instead of adjusting
+  either heuristic (which would risk breaking what they're each already
+  correctly doing elsewhere): pulled Natural Earth's dedicated
+  `ne_10m_admin_0_boundary_lines_land` (a boundary-*lines* dataset, not a
+  country-*polygon* one, so neither heuristic above ever touches it) for
+  the Canada/US line, both `TYPE=Land` (the actual dry-land border,
+  Blaine east across the continent) and `TYPE=Water Indicator` (the
+  maritime line through the strait, including its jog around the Point
+  Roberts exclave), clipped to lon [-140,-110] / lat [47,62] and appended
+  as new features to `countries_slim.json` (existing features untouched,
+  same additive approach as the `land_slim.json` fix below) -- fixes
+  every region whose frame crosses this border, not just
+  `lower_mainland_victoria` (`full_bc` and `puget_sound` also picked up a
+  previously-missing border for free).
+- **`land_slim.json` also widened for `lower_mainland_victoria`**: while
+  investigating the border gap, some of the excluded `admin1_boundary_lines.json`
+  points turned out to sit 0.03-0.15deg from `land_slim.json`'s simplified
+  land shape near the San Juan/Gulf Islands (real islands `land_slim.json`
+  barely represents at that simplification level) -- close enough to
+  matter for `trim_offshore_segments()`'s 0.02deg threshold, though this
+  particular gap turned out to be the maritime-boundary issue above, not
+  a land-detail one. Added anyway (Natural Earth's `ne_10m_land`, same
+  source `land_slim.json` itself comes from, clipped to lon [-125.5,-121] /
+  lat [47.8,49.6] and appended as new features) since more accurate land
+  shape in this island-heavy stretch can only help other distance-to-land
+  logic here, and it's the same safe, additive, already-verified-not-to-
+  disturb-existing-features approach as the full_bc corner fix.
 - **City label offset scales with the region's own span**: `POS_DX`/
   `POS_DY` (in `build_map()`, where city dots/labels are drawn) were a
   fixed degree offset from each dot regardless of region -- fine while
