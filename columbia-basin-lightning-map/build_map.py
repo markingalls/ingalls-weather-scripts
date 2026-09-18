@@ -373,10 +373,10 @@ REGIONS = {
         output="full_bc_lightning.png",
         cities=[
             ("Prince Rupert", -130.3208, 54.3150, "left"),
-            ("Terrace", -128.6032, 54.5182, "below"),
+            ("Terrace", -128.6032, 54.5182, "right"),
             ("Fort St. John", -120.8467, 56.2499, "right"),
             ("Fort Nelson", -122.6972, 58.8050, "right"),
-            ("Prince George", -122.7497, 53.9171, "left"),
+            ("Prince George", -122.7497, 53.9171, "right"),
             ("Williams Lake", -122.1417, 52.1417, "left"),
             ("Bella Coola", -126.7500, 52.3736, "left"),
             ("Kamloops", -120.3273, 50.6745, "right"),
@@ -384,10 +384,9 @@ REGIONS = {
             ("Cranbrook", -115.7697, 49.5097, "right"),
             ("Whistler", -122.9574, 50.1163, "left"),
             ("Vancouver", -123.1207, 49.2827, "left"),
-            ("Nanaimo", -123.9401, 49.1659, "below-left"),
             ("Victoria", -123.3656, 48.4284, "left"),
-            ("Calgary", -114.0719, 51.0447, "right"),
-            ("Edmonton", -113.4909, 53.5461, "right"),
+            ("Calgary", -114.0719, 51.0447, "left"),
+            ("Edmonton", -113.4909, 53.5461, "left"),
             ("Juneau", -134.4197, 58.3019, "left"),
         ],
     ),
@@ -788,10 +787,22 @@ def build_map(region_key, lightning_path, output_path):
     # ---------- city labels ----------
     # 8-way (not just left/right) -- see columbia-basin-alerts-map/
     # build_map.py, where this was first built out, for the full writeup.
-    POS_DX = {"right": 0.13, "below-right": 0.11, "above-right": 0.11,
-              "left": -0.13, "below-left": -0.11, "above-left": -0.11}
-    POS_DY = {"above": 0.09, "above-left": 0.08, "above-right": 0.08,
-              "below": -0.09, "below-left": -0.08, "below-right": -0.08}
+    # These are calibrated for a true-zoom region (LON_SPAN/LAT_SPAN, no
+    # override) and scaled by how much wider/taller this region's own
+    # span is -- a fixed degree offset renders as a much smaller pixel
+    # gap in a wide region like "pnw" or "full_bc" than in a true-zoom
+    # one, since every region's tight-cropped output lands in roughly the
+    # same pixel width/height (see the Notes entry on that) regardless of
+    # its nominal span. Without this, full_bc's labels (4x the span of a
+    # true-zoom region) sat almost against their dots while
+    # columbia_basin's had a clearly visible gap -- same degree offset,
+    # very different pixel offset.
+    dx_scale = cfg.get("lon_span", LON_SPAN) / LON_SPAN
+    dy_scale = cfg.get("lat_span", LAT_SPAN) / LAT_SPAN
+    POS_DX = {"right": 0.13 * dx_scale, "below-right": 0.11 * dx_scale, "above-right": 0.11 * dx_scale,
+              "left": -0.13 * dx_scale, "below-left": -0.11 * dx_scale, "above-left": -0.11 * dx_scale}
+    POS_DY = {"above": 0.09 * dy_scale, "above-left": 0.08 * dy_scale, "above-right": 0.08 * dy_scale,
+              "below": -0.09 * dy_scale, "below-left": -0.08 * dy_scale, "below-right": -0.08 * dy_scale}
     POS_HA = {"right": "left", "above-right": "left", "below-right": "left",
               "left": "right", "above-left": "right", "below-left": "right"}
     POS_VA = {"above": "bottom", "above-left": "bottom", "above-right": "bottom",

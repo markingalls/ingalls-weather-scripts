@@ -175,6 +175,19 @@ python3 build_map.py --region lower_mainland_victoria
 
 ## Notes
 
+- **City label offset scales with the region's own span**: `POS_DX`/
+  `POS_DY` (in `build_map()`, where city dots/labels are drawn) were a
+  fixed degree offset from each dot regardless of region -- fine while
+  every region was close to true-zoom scale, but a fixed degree offset
+  renders as a much smaller pixel gap in a wide region than a narrow one,
+  since every region's tight-cropped output lands in roughly the same
+  pixel width/height regardless of its nominal span (see the "same
+  output size" entry below). `full_bc` (roughly 4x a true-zoom region's
+  span) had its labels sitting almost against their dots before this;
+  `dx_scale`/`dy_scale` (`cfg`'s own `lon_span`/`lat_span` divided by the
+  shared `LON_SPAN`/`LAT_SPAN` default) now scale the offset so the
+  pixel gap reads the same across every region. `columbia_basin` (no
+  span override, `dx_scale`/`dy_scale` both exactly 1) is unaffected.
 - **`../maps/land_slim.json` widened for `full_bc`**: that file (shared
   by every other project in this repo too) is Natural Earth's 10m
   physical "land" polygons, hard-clipped to a fixed lon/lat box at some
