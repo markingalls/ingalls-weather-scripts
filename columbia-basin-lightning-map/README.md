@@ -126,11 +126,16 @@ a region overrides them for a different zoom level.
   the other `roads_files` use: Geofabrik's download server refused every
   connection from this environment, and at this zoomed-way-out scale a
   coarser highway-only dataset reads better anyway), filtered to `type`
-  in `(Freeway, Primary)` -- NE's own top two road tiers -- and remapped
-  to `highway=motorway`/`trunk` so the existing MOTORWAY/TRUNK/PRIMARY
-  classification in `_draw_static_layers` just works. Nothing in the
-  file is tagged `primary`, so the region renders freeways and major
-  highways only, by construction rather than a per-region filter switch.
+  in `(Freeway, Tollway, Primary)` -- NE's own top two road tiers, plus
+  `Tollway`, its own separate category for divided/limited-access toll
+  roads (without it, the Coquihalla -- BC-5 between Hope and Merritt --
+  and a short WA-16/Tacoma Narrows Bridge segment were both missing
+  despite being freeway-grade) -- and remapped to `highway=motorway`
+  (`Freeway`/`Tollway`) or `trunk` (`Primary`) so the existing MOTORWAY/
+  TRUNK/PRIMARY classification in `_draw_static_layers` just works.
+  Nothing in the file is tagged `primary`, so the region renders freeways
+  (toll or not) and major highways only, by construction rather than a
+  per-region filter switch.
 - **`puget_sound`** -- true-zoom, same `LAT_SPAN` as `columbia_basin`/
   `portland` but `lon_span=5.63` (bumped a little over the shared
   `LON_SPAN` default): this region's center sits noticeably further

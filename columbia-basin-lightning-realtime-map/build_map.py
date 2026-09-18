@@ -377,7 +377,7 @@ REGIONS = {
             ("Fort St. John", -120.8467, 56.2499, "right"),
             ("Fort Nelson", -122.6972, 58.8050, "right"),
             ("Prince George", -122.7497, 53.9171, "right"),
-            ("Williams Lake", -122.1417, 52.1417, "left"),
+            ("Williams Lake", -122.1417, 52.1417, "right"),
             ("Bella Coola", -126.7500, 52.3736, "left"),
             ("Kamloops", -120.3273, 50.6745, "right"),
             ("Kelowna", -119.4960, 49.8880, "right"),
@@ -794,10 +794,10 @@ def build_map(region_key, lightning_path, output_path):
     # very different pixel offset.
     dx_scale = cfg.get("lon_span", LON_SPAN) / LON_SPAN
     dy_scale = cfg.get("lat_span", LAT_SPAN) / LAT_SPAN
-    POS_DX = {"right": 0.13 * dx_scale, "below-right": 0.11 * dx_scale, "above-right": 0.11 * dx_scale,
-              "left": -0.13 * dx_scale, "below-left": -0.11 * dx_scale, "above-left": -0.11 * dx_scale}
-    POS_DY = {"above": 0.09 * dy_scale, "above-left": 0.08 * dy_scale, "above-right": 0.08 * dy_scale,
-              "below": -0.09 * dy_scale, "below-left": -0.08 * dy_scale, "below-right": -0.08 * dy_scale}
+    POS_DX = {"right": 0.065 * dx_scale, "below-right": 0.055 * dx_scale, "above-right": 0.055 * dx_scale,
+              "left": -0.065 * dx_scale, "below-left": -0.055 * dx_scale, "above-left": -0.055 * dx_scale}
+    POS_DY = {"above": 0.045 * dy_scale, "above-left": 0.04 * dy_scale, "above-right": 0.04 * dy_scale,
+              "below": -0.045 * dy_scale, "below-left": -0.04 * dy_scale, "below-right": -0.04 * dy_scale}
     POS_HA = {"right": "left", "above-right": "left", "below-right": "left",
               "left": "right", "above-left": "right", "below-left": "right"}
     POS_VA = {"above": "bottom", "above-left": "bottom", "above-right": "bottom",
