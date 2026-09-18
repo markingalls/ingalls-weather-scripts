@@ -9,6 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
+import matplotlib.transforms as mtransforms
 from matplotlib.lines import Line2D
 import cartopy.crs as ccrs
 from shapely.geometry import shape, LineString, Point
@@ -518,22 +519,34 @@ def _draw_static_layers(ax, pc, cfg):
             best = idx[np.argmin(arr[idx])]
             return lons[best], lats[best]
 
-        label_kwargs = dict(transform=pc, fontsize=9, color="#5a584f", zorder=6.5)
+        # Placed in a blended (data-x/axes-y or axes-x/data-y) transform,
+        # not at each label's own true-edge (lon, lat) point directly --
+        # that put every label at a different height/depth along the
+        # frame's curved boundary (correct, but reads as "why are these
+        # jumping around" rather than as a neat edge). A blended
+        # transform keeps the row/column dead straight, like an ordinary
+        # chart border, while still positioning each label under/beside
+        # its own meridian/parallel via that native coordinate.
+        blended_x = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+        blended_y = mtransforms.blended_transform_factory(ax.transAxes, ax.transData)
+        label_kwargs = dict(fontsize=9, color="#5a584f", zorder=6.5)
         lon = math.ceil(lon_min / lon_step) * lon_step
         while lon <= lon_max:
             pt = _visible_edge([lon] * len(lat_samples), lat_samples, "min_lat")
             if pt:
+                native_x, _ = ax.projection.transform_point(*pt, pc)
                 hemi = "W" if lon < 0 else "E"
-                ax.text(pt[0], pt[1], f"{abs(round(lon))}\u00b0{hemi}",
-                        ha="center", va="bottom", **label_kwargs)
+                ax.text(native_x, 0.006, f"{abs(round(lon))}\u00b0{hemi}",
+                        transform=blended_x, ha="center", va="bottom", **label_kwargs)
             lon += lon_step
         lat = math.ceil(lat_min / lat_step) * lat_step
         while lat <= lat_max:
             pt = _visible_edge(lon_samples, [lat] * len(lon_samples), "min_lon")
             if pt:
+                _, native_y = ax.projection.transform_point(*pt, pc)
                 hemi = "N" if lat >= 0 else "S"
-                ax.text(pt[0], pt[1], f"{abs(round(lat))}\u00b0{hemi}",
-                        ha="left", va="center", **label_kwargs)
+                ax.text(0.006, native_y, f"{abs(round(lat))}\u00b0{hemi}",
+                        transform=blended_y, ha="left", va="center", **label_kwargs)
             lat += lat_step
 
     # ---------- land ----------
