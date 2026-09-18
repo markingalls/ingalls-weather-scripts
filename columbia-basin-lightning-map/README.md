@@ -161,14 +161,17 @@ a region overrides them for a different zoom level.
   roads file for it that sliver showed no roads at all; same OSM/Geofabrik
   schema as `washington_roads.geojson`, so BC's roads render with the
   same motorway/trunk/primary tiers, not a highways-only filter like
-  `full_bc`'s. `show_counties=False` (requested directly, to declutter
-  -- unlike `full_bc`/`lower_mainland_victoria`'s, this isn't about a
-  thin edge sliver, this region's whole frame is WA). City list grew a
-  lot in a later round: Aberdeen, Centralia, Chehalis, Paradise,
-  Wenatchee, Stevens Pass, Snoqualmie Pass, Forks, Concrete, Victoria,
-  and Vancouver (BC, not WA -- paired with Victoria as reference points
-  for the BC sliver, not the Vancouver, WA near Portland, which sits
-  south of this region's own frame entirely).
+  `full_bc`'s. County lines were briefly turned off entirely
+  (`show_counties=False`) for this region, then reinstated once the
+  county layer was fixed to clip to `land_union` (see the "counties
+  clipped to land" Notes entry below) -- the underlying complaint was
+  never the lines existing, just that they used to run straight across
+  Puget Sound's open water. City list grew a lot in a later round:
+  Aberdeen, Centralia, Chehalis, Paradise, Stevens Pass, Snoqualmie Pass,
+  Forks, Concrete, Victoria, and Vancouver (BC, not WA -- paired with
+  Victoria as reference points for the BC sliver, not the Vancouver, WA
+  near Portland, which sits south of this region's own frame entirely);
+  Wenatchee was later dropped again and Yakima added in its place.
 - **`lower_mainland_victoria`** -- `lon_span=5.22`/`lat_span=3.24`: a
   true-zoom-derived `5.8`/`3.6` (tuned the same empirical way as
   `puget_sound`'s, for the same reason -- this region sits even further
@@ -410,3 +413,41 @@ python3 build_map.py --region lower_mainland_victoria
   `cos(lat)` conversion keeps the real-world aspect ratio correct, which
   isn't quite the same thing as keeping the rendered pixel width
   consistent, especially for a very wide/tall region like `full_bc`.
+- **`land_slim.json`'s widening fixes were creating fake straight-line
+  artifacts**: the `full_bc`/`lower_mainland_victoria`/`puget_sound`
+  additions above (three entries up) each added a Natural-Earth land
+  polygon clipped to a bounding box. That's fine wherever the box edge
+  falls on open water, but wherever it happened to fall across solid
+  inland territory instead, the clip itself became a new, fake, perfectly
+  straight polygon edge -- invisible as long as land was drawn
+  fill-only (`edgecolor="none"`), but visible as literal rectangles once
+  an outline stroke was added to land (see "land now draws with a visible
+  outline" below) -- reported as "weird rectangular lines" near Paradise,
+  Snoqualmie Pass, and Stevens Pass in `puget_sound`. Fixed by rebuilding
+  `land_slim.json` from its original pre-widening 8 features plus 29
+  smaller replacement features, each computed as
+  `shapely.difference(clipped_to_bbox, original_8_feature_union)` --
+  keeping only the genuinely new area (small islands and coastline
+  detail the original 8 features didn't already cover) instead of the
+  redundant, artifact-prone inland-reaching duplicate. Needed
+  `shapely.set_precision(geom, 1e-7)` on both sides of the `difference()`
+  call to avoid a `GEOSException` the raw geometries triggered. Verified
+  by re-rendering all three affected regions: rectangles gone, islands
+  still properly detailed, no change to any region's output dimensions.
+- **Land now draws with a visible outline**: `edgecolor="none"` ->
+  `edgecolor="#9a978c", linewidth=0.4` in `_draw_static_layers()`, a
+  global change affecting every region. Added because the small islands
+  from the widening fixes above had no crisp edge distinguishing them
+  from open water under fill-only rendering.
+- **Counties clipped to land**: county lines used to draw each county
+  polygon's own raw boundary, which runs straight across open water for
+  any county fronting Puget Sound -- county polygons extend to the middle
+  of the water, since the water is part of the county's jurisdiction, so
+  the line was never actually a coastline artifact, just an accurate
+  outline of a shape that includes water. `show_counties=False` on
+  `puget_sound` had briefly hidden counties there entirely to work around
+  this. Fixed properly instead: intersect each county's `.boundary` with
+  `land_union` (the same union of land geometry the roads/coastline logic
+  already computes) before drawing, so only the on-land portion of each
+  line survives. `puget_sound` now has `show_counties` back at its
+  default (`True`) with counties stopping cleanly at the shoreline.

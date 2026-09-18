@@ -427,7 +427,6 @@ REGIONS = {
         # roads at all -- same OSM/Geofabrik schema as washington_roads.geojson,
         # so BC's roads render with the same motorway/trunk/primary tiers,
         # not a highways-only filter like full_bc's.
-        show_counties=False,
         roads_files=["washington_roads.geojson", "british_columbia_roads.geojson"],
         output="puget_sound_lightning.png",
         cities=[
@@ -440,8 +439,8 @@ REGIONS = {
             ("Stevens Pass", -121.0890, 47.7457, "right"),
             ("Bremerton", -122.6329, 47.5673, "left"),
             ("Seattle", -122.3321, 47.6062, "right"),
-            ("Snoqualmie Pass", -121.4131, 47.4234, "below"),
-            ("Wenatchee", -120.3103, 47.4235, "left"),
+            ("Snoqualmie Pass", -121.4131, 47.4234, "right"),
+            ("Yakima", -120.5059, 46.6021, "right"),
             ("Tacoma", -122.4443, 47.2529, "right"),
             ("Shelton", -123.1004, 47.2129, "left"),
             ("Olympia", -122.9007, 47.0379, "left"),
@@ -669,8 +668,20 @@ def _draw_static_layers(ax, pc, cfg):
     # regions this layer was built for.
     if cfg.get("show_counties", True):
         counties = json.load(open(f"{MAPS_DIR}/counties_wa_or_id.geojson"))
-        co_geoms = [shape(f["geometry"]) for f in counties["features"]]
-        ax.add_geometries(co_geoms, crs=pc, facecolor="none", edgecolor="#c7c4b8",
+        # Clipped to land_union, not drawn as each county polygon's own
+        # raw outline: a county's boundary runs down the middle of the
+        # water for any county that fronts Puget Sound (that's how county
+        # polygons are drawn -- the water is part of the county), so the
+        # raw outline crossed open water freely. Intersecting with
+        # land_union keeps only the on-land portion of each line, the
+        # same idea as trim_offshore_segments() above but via an exact
+        # geometric intersection rather than a per-vertex distance check.
+        co_lines = []
+        for f in counties["features"]:
+            clipped = shape(f["geometry"]).boundary.intersection(land_union)
+            if not clipped.is_empty:
+                co_lines.append(clipped)
+        ax.add_geometries(co_lines, crs=pc, facecolor="none", edgecolor="#c7c4b8",
                            linewidth=0.5, zorder=4)
 
     # ---------- roads ----------
