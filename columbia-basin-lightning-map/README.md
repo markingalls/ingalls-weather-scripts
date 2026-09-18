@@ -164,10 +164,12 @@ a region overrides them for a different zoom level.
   `lower-mainland-victoria-lightning-map/` project (Whistler, Hope, Port
   Renfrew, and Everett mark that domain's rough N/E/W/S extent), reused
   here since it already went through a round of real-world tuning (fixed
-  a double border line and a cut-off Olympic Peninsula highway); Coquitlam,
-  Sooke, and Oak Harbor were later dropped and Courtenay and Boston Bar
-  added. Uses `America/Vancouver`. Roads: `british_columbia_roads.geojson`,
-  `washington_roads.geojson`.
+  a double border line and a cut-off Olympic Peninsula highway); since
+  then Coquitlam, Sooke, Oak Harbor, and Boston Bar have been dropped and
+  Courtenay, Merritt, and Mount Vernon added. `show_counties=False`, same
+  reasoning as `full_bc`'s (this region's only US territory is the WA
+  sliver at its south edge). Uses `America/Vancouver`. Roads:
+  `british_columbia_roads.geojson`, `washington_roads.geojson`.
 
 ## Usage
 

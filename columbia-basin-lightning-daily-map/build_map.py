@@ -440,6 +440,10 @@ REGIONS = {
         # Notes entry), not just how tight the framing looks.
         lon_span=5.22, lat_span=3.24,
         timezone="America/Vancouver",
+        # This region's only US territory is the WA sliver at its south
+        # edge -- county lines there are just clutter, same reasoning as
+        # full_bc's show_counties=False.
+        show_counties=False,
         roads_files=["british_columbia_roads.geojson", "washington_roads.geojson"],
         output_base="lower_mainland_victoria_lightning",
         cities=[
@@ -450,14 +454,15 @@ REGIONS = {
             ("Surrey", -122.8490, 49.1913, "right"),
             ("Abbotsford", -122.3045, 49.0504, "right"),
             ("Chilliwack", -121.9514, 49.1579, "right"),
-            ("Boston Bar", -121.4333, 49.8667, "right"),
+            ("Merritt", -120.7862, 50.1121, "right"),
             ("Hope", -121.4412, 49.3820, "left"),
             ("Nanaimo", -123.9401, 49.1659, "left"),
-            ("Courtenay", -124.9805, 49.6841, "left"),
+            ("Courtenay", -124.9805, 49.6841, "right"),
             ("Duncan", -123.7079, 48.7787, "left"),
             ("Victoria", -123.3656, 48.4284, "right"),
             ("Port Renfrew", -124.4204, 48.5541, "right"),
             ("Port Angeles", -123.4307, 48.1181, "right"),
+            ("Mount Vernon", -122.3340, 48.4212, "right"),
             ("Bellingham", -122.4787, 48.7519, "right"),
             ("Everett", -122.2021, 47.9790, "right"),
         ],
