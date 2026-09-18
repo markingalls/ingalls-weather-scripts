@@ -135,7 +135,14 @@ a region overrides them for a different zoom level.
   TRUNK/PRIMARY classification in `_draw_static_layers` just works.
   Nothing in the file is tagged `primary`, so the region renders freeways
   (toll or not) and major highways only, by construction rather than a
-  per-region filter switch.
+  per-region filter switch. Covers BC, Alberta, Yukon, Alaska, Northwest
+  Territories, and the WA/ID/MT slivers this frame's edges reach into.
+  `show_counties=False` (this region's only US territory is a sliver at
+  the edge of an otherwise Canada-focused map, where county lines are
+  just clutter) and `roads_source="Natural Earth"` (used in the
+  attribution line instead of the default "OpenStreetMap", which would
+  misattribute this region's roads) are two new per-region config keys;
+  no other region currently sets either.
 - **`puget_sound`** -- true-zoom, same `LAT_SPAN` as `columbia_basin`/
   `portland` but `lon_span=5.63` (bumped a little over the shared
   `LON_SPAN` default): this region's center sits noticeably further

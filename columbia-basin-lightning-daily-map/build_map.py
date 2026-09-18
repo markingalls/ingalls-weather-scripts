@@ -345,18 +345,30 @@ REGIONS = {
         center_lon=-124.5, center_lat=54.25,
         lon_span=23.2, lat_span=14.5, satellite_height=41_000_000,
         timezone="America/Vancouver",
+        # No county overlay (a WA/OR/ID-only layer -- see show_counties in
+        # _draw_static_layers): this region's only US territory is a
+        # sliver of WA/ID/MT along the edge of an otherwise Canada-focused
+        # map, where county lines are just clutter.
+        show_counties=False,
         # NE 10m roads_north_america, not the usual OSM/Geofabrik extracts
         # the other roads_files use: Geofabrik's own download server
         # refused every connection attempt from here (not a size/timeout
         # issue -- every attempt was refused within ~7s), and at this
         # zoomed-way-out scale a coarser highway-only dataset is a better
-        # match anyway. Filtered to type in (Freeway, Primary) -- NE's own
-        # top two road tiers -- and remapped to highway=motorway/trunk so
-        # the existing MOTORWAY/TRUNK/PRIMARY classification below just
+        # match anyway. Filtered to type in (Freeway, Tollway, Primary) --
+        # NE's own top two road tiers, plus Tollway (its own separate
+        # category for divided/limited-access toll roads -- without it,
+        # the Coquihalla and a WA-16/Tacoma Narrows Bridge segment were
+        # both missing despite being freeway-grade) -- and remapped to
+        # highway=motorway (Freeway/Tollway) or trunk (Primary) so the
+        # existing MOTORWAY/TRUNK/PRIMARY classification below just
         # works; nothing in this file is tagged "primary", so this region
-        # renders freeways/major highways only, no lower-tier roads, by
-        # construction rather than a separate filter. See
+        # renders freeways (toll or not) and major highways only, no
+        # lower-tier roads, by construction rather than a separate
+        # filter. Covers BC/Alberta/Yukon/Alaska/Northwest Territories
+        # plus the WA/ID/MT slivers this frame's edges reach into -- see
         # maps/bc_yukon_ab_ak_major_roads.geojson's own generation notes.
+        roads_source="Natural Earth",
         roads_files=["bc_yukon_ab_ak_major_roads.geojson"],
         output_base="full_bc_lightning",
         cities=[
@@ -462,6 +474,7 @@ def _basemap_cache_key(cfg):
         cfg.get("lon_span", LON_SPAN), cfg.get("lat_span", LAT_SPAN),
         cfg.get("satellite_height", SATELLITE_HEIGHT),
         cfg.get("show_gridlines", False),
+        cfg.get("show_counties", True),
         tuple(cfg["roads_files"]),
     ]
     for fname in STATIC_MAP_FILES + list(cfg["roads_files"]):
@@ -602,10 +615,16 @@ def _draw_static_layers(ax, pc, cfg):
                        linewidth=0.7, zorder=3)
 
     # ---------- counties (WA/OR/ID only -- no-op elsewhere, not a bug) ----------
-    counties = json.load(open(f"{MAPS_DIR}/counties_wa_or_id.geojson"))
-    co_geoms = [shape(f["geometry"]) for f in counties["features"]]
-    ax.add_geometries(co_geoms, crs=pc, facecolor="none", edgecolor="#c7c4b8",
-                       linewidth=0.5, zorder=4)
+    # Opt-out per region (cfg["show_counties"] = False): full_bc's US
+    # portion is just a Washington/Idaho/Montana sliver at the very edge
+    # of a Canada-focused map, where county lines are just clutter, not
+    # useful context the way they are for the Columbia-Basin-scale
+    # regions this layer was built for.
+    if cfg.get("show_counties", True):
+        counties = json.load(open(f"{MAPS_DIR}/counties_wa_or_id.geojson"))
+        co_geoms = [shape(f["geometry"]) for f in counties["features"]]
+        ax.add_geometries(co_geoms, crs=pc, facecolor="none", edgecolor="#c7c4b8",
+                           linewidth=0.5, zorder=4)
 
     # ---------- roads ----------
     MOTORWAY = {"motorway", "motorway_link"}
@@ -859,8 +878,17 @@ def build_map(region_key, lightning_path, output_path):
     leg.get_frame().set_linewidth(0.8)
 
     # ---------- attribution ----------
+    # Built per-region, not a fixed string: full_bc has show_counties=False
+    # (no US Census layer drawn -- see _draw_static_layers) and its own
+    # roads_source ("Natural Earth", not the usual OpenStreetMap extracts
+    # -- see its REGIONS entry), so a hardcoded string would misattribute
+    # data that region doesn't actually use.
+    attribution_parts = ["NOAA GOES-18 GLM"]
+    if cfg.get("show_counties", True):
+        attribution_parts.append("US Census (counties)")
+    attribution_parts.append(f"{cfg.get('roads_source', 'OpenStreetMap')} (roads)")
     fig.text(center_x, 0.02,
-              "NOAA GOES-18 GLM / US Census (counties) / OpenStreetMap (roads) — Ingalls Weather",
+              " / ".join(attribution_parts) + " — Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color="#5a584f", ha="center")
 
     plt.savefig(output_path, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
