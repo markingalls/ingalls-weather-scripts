@@ -445,7 +445,12 @@ REGIONS = {
     # highway).
     "lower_mainland_victoria": dict(
         center_lon=-122.93, center_lat=49.05,
-        lon_span=5.8,
+        # Both spans shrunk 10% from the true-zoom-derived 5.8/3.6, same
+        # ratio preserved, for a modest zoom in -- shrinking just one
+        # would change this region's data aspect ratio and, with it, the
+        # rendered output's pixel dimensions (see the "same output size"
+        # Notes entry), not just how tight the framing looks.
+        lon_span=5.22, lat_span=3.24,
         timezone="America/Vancouver",
         roads_files=["british_columbia_roads.geojson", "washington_roads.geojson"],
         output="lower_mainland_victoria_lightning_realtime.png",
@@ -454,18 +459,17 @@ REGIONS = {
             ("Squamish", -123.1558, 49.7016, "right"),
             ("Sechelt", -123.7556, 49.4742, "left"),
             ("Vancouver", -123.1207, 49.2827, "left"),
-            ("Coquitlam", -122.7932, 49.2838, "right"),
             ("Surrey", -122.8490, 49.1913, "right"),
             ("Abbotsford", -122.3045, 49.0504, "right"),
             ("Chilliwack", -121.9514, 49.1579, "right"),
+            ("Boston Bar", -121.4333, 49.8667, "right"),
             ("Hope", -121.4412, 49.3820, "left"),
             ("Nanaimo", -123.9401, 49.1659, "left"),
+            ("Courtenay", -124.9805, 49.6841, "left"),
             ("Duncan", -123.7079, 48.7787, "left"),
             ("Victoria", -123.3656, 48.4284, "right"),
-            ("Sooke", -123.7275, 48.3742, "right"),
             ("Port Renfrew", -124.4204, 48.5541, "right"),
             ("Port Angeles", -123.4307, 48.1181, "right"),
-            ("Oak Harbor", -122.6401, 48.2934, "left"),
             ("Bellingham", -122.4787, 48.7519, "right"),
             ("Everett", -122.2021, 47.9790, "right"),
         ],

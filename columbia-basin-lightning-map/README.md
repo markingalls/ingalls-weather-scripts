@@ -154,16 +154,20 @@ a region overrides them for a different zoom level.
   than the ground-km formula -- close enough a latitude gap that
   eyeballing the match was simpler and just as accurate. Center
   `(-122.4, 47.55)`. Roads: `washington_roads.geojson`.
-- **`lower_mainland_victoria`** -- true-zoom, same `LAT_SPAN` as
-  `columbia_basin`/`portland`/`puget_sound` but `lon_span=5.8`, tuned the
-  same empirical way as `puget_sound`'s for the same reason (this region
-  sits even further north, 49.05). Center `(-122.93, 49.05)`. City list
-  carried over from the one-off `lower-mainland-victoria-lightning-map/`
-  project (Whistler, Hope, Port Renfrew, and Everett mark that domain's
-  rough N/E/W/S extent), reused here since it already went through a
-  round of real-world tuning (fixed a double border line and a cut-off
-  Olympic Peninsula highway). Uses `America/Vancouver`. Roads:
-  `british_columbia_roads.geojson`, `washington_roads.geojson`.
+- **`lower_mainland_victoria`** -- `lon_span=5.22`/`lat_span=3.24`: a
+  true-zoom-derived `5.8`/`3.6` (tuned the same empirical way as
+  `puget_sound`'s, for the same reason -- this region sits even further
+  north, 49.05), then both shrunk 10% together (same ratio, so the data
+  aspect ratio -- and with it, the rendered output's pixel dimensions --
+  doesn't shift, only how tight the framing looks) for a requested zoom
+  in. Center `(-122.93, 49.05)`. City list started from the one-off
+  `lower-mainland-victoria-lightning-map/` project (Whistler, Hope, Port
+  Renfrew, and Everett mark that domain's rough N/E/W/S extent), reused
+  here since it already went through a round of real-world tuning (fixed
+  a double border line and a cut-off Olympic Peninsula highway); Coquitlam,
+  Sooke, and Oak Harbor were later dropped and Courtenay and Boston Bar
+  added. Uses `America/Vancouver`. Roads: `british_columbia_roads.geojson`,
+  `washington_roads.geojson`.
 
 ## Usage
 
