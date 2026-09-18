@@ -102,26 +102,41 @@ a region overrides them for a different zoom level.
   (all coastal slivers on the frame's east edge).
 - **`full_bc`** -- new, covers the entire province coast-to-Alberta-border
   and past the Yukon boundary. Center `(-125.5, 54.25)`, `lat_span=14.5`,
-  `satellite_height=41_000_000`; `lon_span=26.2` is derived the same way
-  `bc_interior`'s is (`lat_span` converted to ground km, times Columbia
-  Basin's true-zoom width:height ratio, converted back to degrees at this
-  region's own latitude) -- skipping that conversion here, of all
-  regions, would produce the most visibly squashed frame, since a degree
-  of longitude this far north covers barely more than half what it does
-  at Columbia Basin's latitude. Uses `America/Vancouver` like
+  `satellite_height=41_000_000`. `lon_span` started from the same
+  ground-km/`cos(lat)` conversion `bc_interior`'s is derived from, but
+  over this much bigger a span (and this much bigger a swing in latitude
+  across the frame, 47 to 61.5) `NearsidePerspective` doesn't scale
+  linearly with that formula's flat-ground assumption the way it does for
+  `bc_interior`'s smaller extent -- the formula's own output (`26.2`)
+  rendered noticeably wider than every other region's tight-cropped
+  output. `lon_span=23.2` is tuned from that starting point against the
+  actual rendered width instead, landing in the same ~1510-1554px band
+  every other region falls into (all eight regions are meant to come out
+  the same size on the page). Calgary was dropped from the city list once
+  it fell outside the narrower frame. Uses `America/Vancouver` like
   `bc_interior`. Roads: `british_columbia_roads.geojson`,
   `alberta_roads_west.geojson`, `washington_roads.geojson`.
-- **`puget_sound`** -- true-zoom, no span override (same
-  `LON_SPAN`/`LAT_SPAN` as `columbia_basin`/`portland`), center
+- **`puget_sound`** -- true-zoom, same `LAT_SPAN` as `columbia_basin`/
+  `portland` but `lon_span=5.63` (bumped a little over the shared
+  `LON_SPAN` default): this region's center sits noticeably further
+  north (47.55 vs Columbia Basin's 46.2), and `NearsidePerspective`
+  renders the same longitude span narrower the further the frame center
+  sits from the equator, so the plain default came out visibly narrower
+  than the other regions' output. Tuned empirically against rendered
+  output width (same ~1510-1554px target band as `full_bc` above) rather
+  than the ground-km formula -- close enough a latitude gap that
+  eyeballing the match was simpler and just as accurate. Center
   `(-122.4, 47.55)`. Roads: `washington_roads.geojson`.
-- **`lower_mainland_victoria`** -- true-zoom, no span override, center
-  `(-122.93, 49.05)`. City list carried over from the one-off
-  `lower-mainland-victoria-lightning-map/` project (Whistler, Hope, Port
-  Renfrew, and Everett mark that domain's rough N/E/W/S extent), reused
-  here since it already went through a round of real-world tuning (fixed
-  a double border line and a cut-off Olympic Peninsula highway). Uses
-  `America/Vancouver`. Roads: `british_columbia_roads.geojson`,
-  `washington_roads.geojson`.
+- **`lower_mainland_victoria`** -- true-zoom, same `LAT_SPAN` as
+  `columbia_basin`/`portland`/`puget_sound` but `lon_span=5.8`, tuned the
+  same empirical way as `puget_sound`'s for the same reason (this region
+  sits even further north, 49.05). Center `(-122.93, 49.05)`. City list
+  carried over from the one-off `lower-mainland-victoria-lightning-map/`
+  project (Whistler, Hope, Port Renfrew, and Everett mark that domain's
+  rough N/E/W/S extent), reused here since it already went through a
+  round of real-world tuning (fixed a double border line and a cut-off
+  Olympic Peninsula highway). Uses `America/Vancouver`. Roads:
+  `british_columbia_roads.geojson`, `washington_roads.geojson`.
 
 ## Usage
 
@@ -245,3 +260,16 @@ python3 build_map.py --region lower_mainland_victoria
   post-shrink `get_position()` box before saving, or the saved raster
   carries a double-counted margin when replayed into the real (already
   shrunk) render axes.
+- **All regions render at the same output size**: `fig = plt.figure(figsize=(12, 8.3), dpi=200)`
+  is fixed regardless of region, but `plt.savefig(..., bbox_inches="tight")`
+  crops to actual content, so a region's final pixel width still varies
+  with its own aspect ratio (height doesn't vary -- it's pinned by the
+  fixed title/subtitle/legend/attribution text). Every region here lands
+  in a ~1510-1554px-wide band (at the fixed 1569px height) -- close
+  enough not to notice on the site. Adding a new region: render it, check
+  its output width lands in that same band, and if not, tune `lon_span`
+  (see `puget_sound`/`lower_mainland_victoria`/`full_bc` above for how)
+  rather than trusting a span computed by formula alone -- the ground-km/
+  `cos(lat)` conversion keeps the real-world aspect ratio correct, which
+  isn't quite the same thing as keeping the rendered pixel width
+  consistent, especially for a very wide/tall region like `full_bc`.

@@ -339,7 +339,7 @@ REGIONS = {
     # latitude.
     "full_bc": dict(
         center_lon=-125.5, center_lat=54.25,
-        lon_span=26.2, lat_span=14.5, satellite_height=41_000_000,
+        lon_span=23.2, lat_span=14.5, satellite_height=41_000_000,
         timezone="America/Vancouver",
         roads_files=["british_columbia_roads.geojson", "alberta_roads_west.geojson",
                      "washington_roads.geojson"],
@@ -363,13 +363,22 @@ REGIONS = {
             ("Vancouver", -123.1207, 49.2827, "left"),
             ("Nanaimo", -123.9401, 49.1659, "left"),
             ("Victoria", -123.3656, 48.4284, "left"),
-            ("Calgary", -114.0719, 51.0447, "right"),
         ],
     ),
-    # True-zoom, same shared LON_SPAN/LAT_SPAN as columbia_basin/portland
-    # -- no override needed, same as those two.
+    # True-zoom -- same shared LAT_SPAN as columbia_basin/portland, but
+    # lon_span needs a small bump over the shared LON_SPAN default: this
+    # region sits noticeably further north (47.55 vs Columbia Basin's
+    # 46.2), and NearsidePerspective renders the same longitude span
+    # narrower the further the frame center sits from the equator. Tuned
+    # empirically (against rendered output width, not the ground-km/
+    # cos(lat) formula bc_interior/full_bc use -- close enough a latitude
+    # gap that eyeballing the match against the other true-zoom regions'
+    # actual rendered width was simpler and just as accurate) to land in
+    # the same ~1510-1554px band every other region's tight-cropped
+    # output falls into, so this map is the same size as the others.
     "puget_sound": dict(
         center_lon=-122.4, center_lat=47.55,
+        lon_span=5.63,
         roads_files=["washington_roads.geojson"],
         output="puget_sound_lightning.png",
         cities=[
@@ -387,15 +396,19 @@ REGIONS = {
             ("Olympia", -122.9007, 47.0379, "left"),
         ],
     ),
-    # True-zoom, no override -- same shared LON_SPAN/LAT_SPAN as
-    # columbia_basin/portland/puget_sound. City list carried over from the
-    # one-off lower-mainland-victoria-lightning-map/ project (Whistler,
-    # Hope, Port Renfrew, and Everett mark this domain's rough N/E/W/S
-    # extent there), reused here since it already went through a round of
-    # real-world tuning (fixed a double border line and a cut-off Olympic
-    # Peninsula highway).
+    # True-zoom -- same shared LAT_SPAN as columbia_basin/portland, but
+    # lon_span is bumped for the same reason as puget_sound's above (this
+    # region sits even further north, 49.05), tuned the same empirical way
+    # to land in the same rendered-width band as every other region. City
+    # list carried over from the one-off
+    # lower-mainland-victoria-lightning-map/ project (Whistler, Hope, Port
+    # Renfrew, and Everett mark this domain's rough N/E/W/S extent there),
+    # reused here since it already went through a round of real-world
+    # tuning (fixed a double border line and a cut-off Olympic Peninsula
+    # highway).
     "lower_mainland_victoria": dict(
         center_lon=-122.93, center_lat=49.05,
+        lon_span=5.8,
         timezone="America/Vancouver",
         roads_files=["british_columbia_roads.geojson", "washington_roads.geojson"],
         output="lower_mainland_victoria_lightning.png",
