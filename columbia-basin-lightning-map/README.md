@@ -161,7 +161,14 @@ a region overrides them for a different zoom level.
   roads file for it that sliver showed no roads at all; same OSM/Geofabrik
   schema as `washington_roads.geojson`, so BC's roads render with the
   same motorway/trunk/primary tiers, not a highways-only filter like
-  `full_bc`'s.
+  `full_bc`'s. `show_counties=False` (requested directly, to declutter
+  -- unlike `full_bc`/`lower_mainland_victoria`'s, this isn't about a
+  thin edge sliver, this region's whole frame is WA). City list grew a
+  lot in a later round: Aberdeen, Centralia, Chehalis, Paradise,
+  Wenatchee, Stevens Pass, Snoqualmie Pass, Forks, Concrete, Victoria,
+  and Vancouver (BC, not WA -- paired with Victoria as reference points
+  for the BC sliver, not the Vancouver, WA near Portland, which sits
+  south of this region's own frame entirely).
 - **`lower_mainland_victoria`** -- `lon_span=5.22`/`lat_span=3.24`: a
   true-zoom-derived `5.8`/`3.6` (tuned the same empirical way as
   `puget_sound`'s, for the same reason -- this region sits even further
@@ -201,6 +208,16 @@ python3 build_map.py --region lower_mainland_victoria
 
 ## Notes
 
+- **Land now has a thin outline stroke** (`edgecolor="#9a978c", linewidth=0.4`
+  in `_draw_static_layers`, was `edgecolor="none"`): with fill only, a
+  small island (a handful of pixels across in the cached raster) had no
+  crisp edge separating it from the ocean, just a soft antialiased fill
+  boundary that read as a blurry smudge rather than a real island --
+  most visible in the San Juan/Gulf Islands at `puget_sound`'s tight
+  true-zoom scale, but this is a global change (every region's `_draw_static_layers`
+  call is the same function) since it's a plain quality fix, not a
+  region-specific one -- verified `columbia_basin` (which has almost no
+  coastline in frame) still renders correctly, no regressions.
 - **US/Canada border was missing around Sumas/Blaine (and, it turned out,
   most of the WA/BC and BC/Alberta border generally)**: `countries_slim.json`
   draws country outlines by extracting the border from each country's own

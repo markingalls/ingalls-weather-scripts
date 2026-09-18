@@ -427,18 +427,30 @@ REGIONS = {
         # roads at all -- same OSM/Geofabrik schema as washington_roads.geojson,
         # so BC's roads render with the same motorway/trunk/primary tiers,
         # not a highways-only filter like full_bc's.
+        show_counties=False,
         roads_files=["washington_roads.geojson", "british_columbia_roads.geojson"],
         output="puget_sound_lightning.png",
         cities=[
             ("Bellingham", -122.4787, 48.7519, "left"),
             ("Mount Vernon", -122.3340, 48.4212, "left"),
+            ("Concrete", -121.7515, 48.5384, "right"),
             ("Port Angeles", -123.4307, 48.1181, "above-left"),
+            ("Forks", -124.3888, 47.9506, "right"),
             ("Everett", -122.2021, 47.9790, "right"),
+            ("Stevens Pass", -121.0890, 47.7457, "right"),
             ("Bremerton", -122.6329, 47.5673, "left"),
             ("Seattle", -122.3321, 47.6062, "right"),
+            ("Snoqualmie Pass", -121.4131, 47.4234, "below"),
+            ("Wenatchee", -120.3103, 47.4235, "left"),
             ("Tacoma", -122.4443, 47.2529, "right"),
             ("Shelton", -123.1004, 47.2129, "left"),
             ("Olympia", -122.9007, 47.0379, "left"),
+            ("Centralia", -122.9762, 46.7154, "left"),
+            ("Chehalis", -122.9654, 46.6598, "right"),
+            ("Paradise", -121.7369, 46.7862, "right"),
+            ("Aberdeen", -123.8157, 46.9754, "left"),
+            ("Victoria", -123.3656, 48.4284, "left"),
+            ("Vancouver", -123.1207, 49.2827, "left"),
         ],
     ),
     # True-zoom -- same shared LAT_SPAN as columbia_basin/portland, but
@@ -613,7 +625,7 @@ def _draw_static_layers(ax, pc, cfg):
     # ---------- land ----------
     land = json.load(open(f"{MAPS_DIR}/land_slim.json"))
     geoms = [shape(f["geometry"]) for f in land["features"]]
-    ax.add_geometries(geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", zorder=1)
+    ax.add_geometries(geoms, crs=pc, facecolor="#e3e1da", edgecolor="#9a978c", linewidth=0.4, zorder=1)
 
     # ---------- countries (US/Canada/Mexico border) ----------
     countries = json.load(open(f"{MAPS_DIR}/countries_slim.json"))
