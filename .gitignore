@@ -232,3 +232,12 @@ tempest-pressure-chart/tempest_pressure_obs_daily.json
 tempest-pressure-chart/tempest_pressure_chart*.png
 tempest-pressure-chart/lookback/
 tempest-pressure-chart/state/
+
+# --- pressure-gradient-chart ---
+# gradient_obs.json is live data fetch_gradient.py regenerates every run,
+# and the rendered chart is an output too -- neither is source, so don't
+# track them. state/ is the droplet-deploy guard's runtime state (lock
+# file, logs) -- created on the server, not source.
+pressure-gradient-chart/gradient_obs.json
+pressure-gradient-chart/gradient_chart*.png
+pressure-gradient-chart/state/

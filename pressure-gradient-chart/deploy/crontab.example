@@ -1,0 +1,11 @@
+# Add this line to the droplet's existing crontab (crontab -e) alongside
+# everything else already there.
+#
+# No API key needed -- api.weather.gov is free, just requires the
+# User-Agent fetch_gradient.py already sends.
+
+# Every 15 minutes. Both stations' own feeds actually update roughly every
+# 5 minutes, but the gradient moves slowly enough that a 15-minute
+# republish cadence doesn't lose anything a viewer would notice.
+
+*/15 * * * * /opt/ingalls-weather-scripts/pressure-gradient-chart/venv/bin/python3 /opt/ingalls-weather-scripts/pressure-gradient-chart/deploy/publish_gradient.py >> /opt/ingalls-weather-scripts/pressure-gradient-chart/state/cron.log 2>&1
