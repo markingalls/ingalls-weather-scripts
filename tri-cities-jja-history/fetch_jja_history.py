@@ -11,7 +11,7 @@ One ACIS StnData call spans the whole start-year..end-year range (ACIS
 doesn't mind the non-summer months coming back too; they're just filtered
 out client-side), rather than one call per year.
 
-Defaults to KPSC (Tri-Cities Airport, Pasco, WA), 2020 through the most
+Defaults to KPSC (Tri-Cities Airport, Pasco, WA), 2019 through the most
 recently *completed* JJA (see tri-cities-jja-calendar/fetch_jja_highs.py's
 same default_year logic).
 """
@@ -26,7 +26,7 @@ BASE_URL = "https://data.rcc-acis.org/StnData"
 DEFAULT_SID = "KPSC 5"
 DEFAULT_STATION = "KPSC"
 DEFAULT_LABEL = "Pasco, WA"
-DEFAULT_START_YEAR = 2020
+DEFAULT_START_YEAR = 2019
 
 NORMALS_PERIOD = "1991-2020"
 MONTHS = [6, 7, 8]

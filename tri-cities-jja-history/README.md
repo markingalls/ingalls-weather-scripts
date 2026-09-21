@@ -8,7 +8,7 @@ rows, a gap, then the full-season average departure as a bottom row.
 Same purple-blue-white-orange-red-maroon departure spectrum, fonts, and
 branding as the calendar, on the same 16x9 canvas.
 
-Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA), 2020 through the
+Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA), 2019 through the
 most recently *completed* JJA.
 
 ## Files
@@ -29,7 +29,7 @@ most recently *completed* JJA.
 ```bash
 bash setup.sh                      # first time / fresh environment only
 
-# Default: KPSC / Pasco, WA, 2020 through the most recently completed JJA
+# Default: KPSC / Pasco, WA, 2019 through the most recently completed JJA
 python3 fetch_jja_history.py
 python3 build_history_grid.py
 
