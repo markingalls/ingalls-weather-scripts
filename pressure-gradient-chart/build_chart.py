@@ -208,7 +208,6 @@ def build_chart(data_path, output_path):
         plot_times, plot_gradients = insert_gaps(times, smoothed_gradients, MAX_GAP)
         gradient_line = ax.plot(plot_times, plot_gradients, color=GRADIENT_COLOR, linewidth=2.6,
                                  zorder=Z_GRADIENT, label="Pressure gradient")[0]
-        line_paths = [gradient_line.get_transform().transform_path(gradient_line.get_path())]
 
         y_low, y_high = gradient_ylim(gradients)
         ax.set_ylim(y_low, y_high)
@@ -217,6 +216,15 @@ def build_chart(data_path, output_path):
         # the plot, with "now" simply being wherever that edge falls,
         # rather than a dotted marker partway through empty space.
         ax.set_xlim(window_start, times[-1])
+
+        # transform_path() bakes in the axes' *current* data->display
+        # transform at call time -- it doesn't track later changes -- so
+        # this has to run after set_ylim()/set_xlim() above, not right
+        # after plot(). Computed too early, it captures the line's
+        # position under matplotlib's own autoscaled limits (tight to the
+        # data) rather than the actual +-8ish mb / full-window axis it
+        # ends up drawn on, silently breaking every on_line check below.
+        line_paths = [gradient_line.get_transform().transform_path(gradient_line.get_path())]
     else:
         ax.text(0.5, 0.5, "No observations in this window", transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)

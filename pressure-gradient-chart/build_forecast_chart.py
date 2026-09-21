@@ -87,14 +87,6 @@ def build_forecast_chart(data_path, output_path):
             fc_line = ax.plot(boundary_times, boundary_gradients, color=GRADIENT_COLOR, linewidth=2.6,
                                linestyle="--", dashes=(5, 2.5), zorder=Z_GRADIENT, label="MetaMesh Forecast")[0]
 
-        # Both lines' own drawn paths -- checked below by place_logo() and
-        # mark_extreme() alike, so neither ever lands on top of either
-        # line. An earlier version only ever checked `gradient_line`
-        # (whichever of the two got assigned to it), silently never
-        # checking the other.
-        line_paths = [ln.get_transform().transform_path(ln.get_path())
-                      for ln in (gradient_line, fc_line) if ln is not None]
-
         # Dotted marker at "now" -- the observed/forecast boundary. Unlike
         # build_chart.py's observed-only chart (where "now" is simply the
         # right edge of the plot), this chart keeps drawing past it into
@@ -104,6 +96,20 @@ def build_forecast_chart(data_path, output_path):
         y_low, y_high = gradient_ylim(gradients)
         ax.set_ylim(y_low, y_high)
         ax.set_xlim(window_start, window_end)
+
+        # Both lines' own drawn paths -- checked below by place_logo() and
+        # mark_extreme() alike, so neither ever lands on top of either
+        # line. transform_path() bakes in the axes' *current* data-
+        # >display transform at call time and doesn't track later
+        # changes, so this has to run after set_ylim()/set_xlim() above,
+        # not right after plot() -- computed too early, it captures each
+        # line's position under matplotlib's own autoscaled limits rather
+        # than the actual axis it ends up drawn on, silently breaking
+        # every on_line check below. An earlier version also only ever
+        # checked `gradient_line` (whichever of the two got assigned to
+        # it), silently never checking the other.
+        line_paths = [ln.get_transform().transform_path(ln.get_path())
+                      for ln in (gradient_line, fc_line) if ln is not None]
     else:
         ax.text(0.5, 0.5, "No observations or forecast in this window", transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
