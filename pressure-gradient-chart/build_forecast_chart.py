@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -9,7 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
-from matplotlib.transforms import Bbox, blended_transform_factory
+from matplotlib.transforms import blended_transform_factory
 
 # Reuses fonts, palette, sizing constants, and the gap/smoothing helpers
 # directly from build_chart.py -- this is the same chart family (same
@@ -18,8 +17,9 @@ from matplotlib.transforms import Bbox, blended_transform_factory
 # of that here would just be a maintenance hazard.
 from build_chart import (
     AXIS_COLOR, BG, DEFAULT_Y_RANGE_MB, GRADIENT_COLOR, GRID_COLOR, HIGH_COLOR, INK,
-    INK_SECONDARY, LOW_COLOR, MAX_GAP, SCRIPT_DIR, SMOOTHING_WINDOW, Z_GRADIENT, Z_GRID,
-    Z_MARKER, Z_ZERO, ZERO_LINE_COLOR, f_bold, f_med, f_reg, gradient_ylim, insert_gaps, smooth,
+    INK_SECONDARY, LOW_COLOR, MAX_GAP, SMOOTHING_WINDOW, Z_GRADIENT, Z_GRID,
+    Z_MARKER, Z_ZERO, ZERO_LINE_COLOR, f_bold, f_med, f_reg, gradient_ylim, insert_gaps,
+    place_logo, smooth,
 )
 
 
@@ -64,6 +64,7 @@ def build_forecast_chart(data_path, output_path):
 
     gradient_line = None
     fc_line = None
+    line_paths = []
     if times:
         # Observed: smoothed the same way build_chart.py's single-series
         # chart is (NWS's ~5-minute cadence is noisy at this scale).
@@ -85,8 +86,14 @@ def build_forecast_chart(data_path, output_path):
             boundary_gradients = ([obs_gradients[-1]] + fc_gradients) if obs_gradients else fc_gradients
             fc_line = ax.plot(boundary_times, boundary_gradients, color=GRADIENT_COLOR, linewidth=2.6,
                                linestyle="--", dashes=(5, 2.5), zorder=Z_GRADIENT, label="MetaMesh Forecast")[0]
-            if gradient_line is None:
-                gradient_line = fc_line
+
+        # Both lines' own drawn paths -- checked below by place_logo() and
+        # mark_extreme() alike, so neither ever lands on top of either
+        # line. An earlier version only ever checked `gradient_line`
+        # (whichever of the two got assigned to it), silently never
+        # checking the other.
+        line_paths = [ln.get_transform().transform_path(ln.get_path())
+                      for ln in (gradient_line, fc_line) if ln is not None]
 
         # Dotted marker at "now" -- the observed/forecast boundary. Unlike
         # build_chart.py's observed-only chart (where "now" is simply the
@@ -114,40 +121,11 @@ def build_forecast_chart(data_path, output_path):
                                fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
 
     # ---------- logo ----------
-    LOGO_PATH = f"{SCRIPT_DIR}/../assets/ingalls_weather_logo.png"
-    logo_ax = None
-    if os.path.exists(LOGO_PATH):
-        logo_img = plt.imread(LOGO_PATH)
-        img_h, img_w = logo_img.shape[0], logo_img.shape[1]
-        fig_w_in, fig_h_in = fig.get_size_inches()
-        dpi = fig.get_dpi()
-        inset_px = 22
-        inset_x = inset_px / (fig_w_in * dpi)
-        inset_y = inset_px / (fig_h_in * dpi)
-
-        logo_width_fig = 0.08 * (axpos.x1 - axpos.x0)
-        logo_width_in = logo_width_fig * fig_w_in
-        logo_height_in = logo_width_in * (img_h / img_w)
-        logo_height_fig = logo_height_in / fig_h_in
-
-        logo_x0 = axpos.x1 - inset_x - logo_width_fig
-        bottom_y0 = axpos.y0 + inset_y
-        top_y0 = axpos.y1 - inset_y - logo_height_fig
-        logo_y0 = bottom_y0
-
-        if gradient_line is not None:
-            fig_w_px, fig_h_px = fig_w_in * dpi, fig_h_in * dpi
-            pad_px = 6
-            rect = Bbox.from_extents(logo_x0 * fig_w_px - pad_px, bottom_y0 * fig_h_px - pad_px,
-                                      (logo_x0 + logo_width_fig) * fig_w_px + pad_px,
-                                      (bottom_y0 + logo_height_fig) * fig_h_px + pad_px)
-            display_path = gradient_line.get_transform().transform_path(gradient_line.get_path())
-            if display_path.intersects_bbox(rect, filled=False):
-                logo_y0 = top_y0
-
-        logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
-        logo_ax.imshow(logo_img)
-        logo_ax.axis("off")
+    # line_paths (both the observed and forecast lines' own drawn paths,
+    # computed above) -- an earlier version of this only ever checked
+    # `gradient_line` (whichever of the two happened to be assigned to
+    # it), silently never checking the other.
+    logo_ax, logo_bbox = place_logo(fig, axpos, line_paths)
 
     # ---------- high / low markers (across the full observed+forecast window) ----------
     if times:
@@ -158,16 +136,13 @@ def build_forecast_chart(data_path, output_path):
         renderer = fig.canvas.get_renderer()
         ax_box = ax.get_window_extent(renderer)
         occupied = [onshore_label.get_window_extent(renderer), offshore_label.get_window_extent(renderer)]
-        if logo_ax is not None:
-            occupied.append(logo_ax.get_window_extent(renderer))
-        # Both the solid observed and dashed forecast lines' own drawn
-        # paths -- an extreme is a point ON one of them, so that line
-        # keeps running right past it in both directions, and a label
-        # offset that clears every other label can still land right on
-        # top of (or hugging right up against) the line itself a little
-        # further along.
-        line_paths = [ln.get_transform().transform_path(ln.get_path())
-                      for ln in (gradient_line, fc_line) if ln is not None]
+        if logo_bbox is not None:
+            occupied.append(logo_bbox)
+        # line_paths is also checked below -- an extreme is a point ON one
+        # of the lines, so that line keeps running right past it in both
+        # directions, and a label offset that clears every other label can
+        # still land right on top of (or hugging right up against) the
+        # line itself a little further along.
 
         def mark_extreme(idx, color, prefix):
             t_val, v_val = times[idx], gradients[idx]

@@ -185,7 +185,16 @@ python3 build_forecast_chart.py
   hue, not `tempest-pressure-chart`'s forest green -- this chart plots a
   difference between two NWS stations, not one Tempest station's own
   reading, so it doesn't share that chart's "family" green.
-- Chart styling (fonts, dimensions, logo placement) otherwise mirrors
+- **Logo placement** (`place_logo()`) defaults bottom-right, moving to
+  top-right if *any* plotted line's own drawn path would pass behind it
+  there (`Path.intersects_bbox()`, same mechanism the high/low markers'
+  own line-avoidance uses) -- falling back to bottom-right, the original
+  default, if a line runs through both corners. Shared by
+  `build_forecast_chart.py`, which passes it *both* of its lines (solid
+  observed + dashed forecast) -- an earlier version there only ever
+  checked whichever one happened to be assigned to a single
+  `gradient_line` variable, silently never checking the other.
+- Chart styling (fonts, dimensions) otherwise mirrors
   `tempest-pressure-chart/build_chart.py` directly -- edit `build_chart.py`
   to adjust.
 
@@ -224,10 +233,11 @@ boundary.
   `MATCH_TOLERANCE` directly from `fetch_gradient.py` rather than
   reimplementing the observed-segment logic (pagination included).
   `build_forecast_chart.py` similarly imports its fonts, palette, sizing
-  constants, and `insert_gaps()`/`smooth()`/`gradient_ylim()` from
-  `build_chart.py` -- same chart family (including the same ±8 mb default
-  y-range and fixed 0.2 mb onshore/offshore label offset), so duplicating
-  those would just be a maintenance hazard.
+  constants, and `insert_gaps()`/`smooth()`/`gradient_ylim()`/
+  `place_logo()` from `build_chart.py` -- same chart family (including the
+  same ±8 mb default y-range, fixed 0.2 mb onshore/offshore label offset,
+  and logo-placement mechanics), so duplicating those would just be a
+  maintenance hazard.
 - **Smoothing** applies only to the observed segment (same
   `SMOOTHING_WINDOW` as `build_chart.py`, since NWS's ~5-minute cadence is
   noisy at this scale) -- the forecast segment is left raw, since

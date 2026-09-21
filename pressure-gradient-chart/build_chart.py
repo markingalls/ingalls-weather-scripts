@@ -107,6 +107,62 @@ def smooth(values, window):
     return smoothed
 
 
+def place_logo(fig, axpos, line_paths):
+    """Places the Ingalls Weather logo bottom-right by default, moving to
+    top-right if *any* plotted line's own drawn path (not just one --
+    build_forecast_chart.py has both a solid observed and a dashed
+    forecast line, and an earlier version of this only ever checked
+    whichever one happened to be assigned first) would pass behind it
+    there. Falls back to bottom-right if a line runs through both
+    corners -- moving further doesn't help once neither candidate is
+    actually clear, and bottom-right is the original default.
+
+    Returns (logo_ax, logo_bbox_px) -- logo_bbox_px is the padded pixel
+    Bbox actually used, for the caller to add to its own collision-
+    avoidance list. Returns (None, None) if the logo image is missing.
+    """
+    logo_path = os.path.join(SCRIPT_DIR, "..", "assets", "ingalls_weather_logo.png")
+    if not os.path.exists(logo_path):
+        print(f"NOTE: no logo found at {logo_path} -- skipping logo placement.")
+        return None, None
+
+    logo_img = plt.imread(logo_path)
+    img_h, img_w = logo_img.shape[0], logo_img.shape[1]
+    fig_w_in, fig_h_in = fig.get_size_inches()
+    dpi = fig.get_dpi()
+    inset_px = 22
+    inset_x = inset_px / (fig_w_in * dpi)
+    inset_y = inset_px / (fig_h_in * dpi)
+
+    logo_width_fig = 0.08 * (axpos.x1 - axpos.x0)
+    logo_width_in = logo_width_fig * fig_w_in
+    logo_height_in = logo_width_in * (img_h / img_w)
+    logo_height_fig = logo_height_in / fig_h_in
+
+    logo_x0 = axpos.x1 - inset_x - logo_width_fig
+    bottom_y0 = axpos.y0 + inset_y
+    top_y0 = axpos.y1 - inset_y - logo_height_fig
+
+    fig_w_px, fig_h_px = fig_w_in * dpi, fig_h_in * dpi
+    pad_px = 6
+
+    def rect_for(y0):
+        return Bbox.from_extents(logo_x0 * fig_w_px - pad_px, y0 * fig_h_px - pad_px,
+                                  (logo_x0 + logo_width_fig) * fig_w_px + pad_px,
+                                  (y0 + logo_height_fig) * fig_h_px + pad_px)
+
+    logo_y0 = bottom_y0
+    for y0 in (bottom_y0, top_y0):
+        if not any(p.intersects_bbox(rect_for(y0), filled=False) for p in line_paths):
+            logo_y0 = y0
+            break
+
+    logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
+    logo_ax.imshow(logo_img)
+    logo_ax.axis("off")
+    return logo_ax, rect_for(logo_y0)
+
+
 def gradient_ylim(values):
     """Symmetric +-half_range, where half_range is the larger of
     DEFAULT_Y_RANGE_MB and the observed min/max magnitude padded by
@@ -146,11 +202,13 @@ def build_chart(data_path, output_path):
     center_x = (axpos.x0 + axpos.x1) / 2
 
     gradient_line = None
+    line_paths = []
     if times:
         smoothed_gradients = smooth(gradients, SMOOTHING_WINDOW)
         plot_times, plot_gradients = insert_gaps(times, smoothed_gradients, MAX_GAP)
         gradient_line = ax.plot(plot_times, plot_gradients, color=GRADIENT_COLOR, linewidth=2.6,
                                  zorder=Z_GRADIENT, label="Pressure gradient")[0]
+        line_paths = [gradient_line.get_transform().transform_path(gradient_line.get_path())]
 
         y_low, y_high = gradient_ylim(gradients)
         ax.set_ylim(y_low, y_high)
@@ -186,45 +244,7 @@ def build_chart(data_path, output_path):
                                fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
 
     # ---------- logo ----------
-    # Same placement logic as tempest-pressure-chart: bottom-right by
-    # default, moving to top-right if the gradient line's actual drawn
-    # path would pass behind it there.
-    LOGO_PATH = os.path.join(SCRIPT_DIR, "..", "assets", "ingalls_weather_logo.png")
-    logo_ax = None
-    if os.path.exists(LOGO_PATH):
-        logo_img = plt.imread(LOGO_PATH)
-        img_h, img_w = logo_img.shape[0], logo_img.shape[1]
-        fig_w_in, fig_h_in = fig.get_size_inches()
-        dpi = fig.get_dpi()
-        inset_px = 22
-        inset_x = inset_px / (fig_w_in * dpi)
-        inset_y = inset_px / (fig_h_in * dpi)
-
-        logo_width_fig = 0.08 * (axpos.x1 - axpos.x0)
-        logo_width_in = logo_width_fig * fig_w_in
-        logo_height_in = logo_width_in * (img_h / img_w)
-        logo_height_fig = logo_height_in / fig_h_in
-
-        logo_x0 = axpos.x1 - inset_x - logo_width_fig
-        bottom_y0 = axpos.y0 + inset_y
-        top_y0 = axpos.y1 - inset_y - logo_height_fig
-        logo_y0 = bottom_y0
-
-        if gradient_line is not None:
-            fig_w_px, fig_h_px = fig_w_in * dpi, fig_h_in * dpi
-            pad_px = 6
-            rect = Bbox.from_extents(logo_x0 * fig_w_px - pad_px, bottom_y0 * fig_h_px - pad_px,
-                                      (logo_x0 + logo_width_fig) * fig_w_px + pad_px,
-                                      (bottom_y0 + logo_height_fig) * fig_h_px + pad_px)
-            display_path = gradient_line.get_transform().transform_path(gradient_line.get_path())
-            if display_path.intersects_bbox(rect, filled=False):
-                logo_y0 = top_y0
-
-        logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
-        logo_ax.imshow(logo_img)
-        logo_ax.axis("off")
-    else:
-        print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
+    logo_ax, logo_bbox = place_logo(fig, axpos, line_paths)
 
     # ---------- high / low markers ----------
     # Always on, same reasoning as tempest-pressure-chart -- there's only
@@ -239,15 +259,14 @@ def build_chart(data_path, output_path):
         renderer = fig.canvas.get_renderer()
         ax_box = ax.get_window_extent(renderer)
         occupied = [onshore_label.get_window_extent(renderer), offshore_label.get_window_extent(renderer)]
-        if logo_ax is not None:
-            occupied.append(logo_ax.get_window_extent(renderer))
-        # The line's own drawn path, not just other labels/the logo -- an
-        # extreme is a point ON the line, so the line keeps running right
-        # past it in both directions, and a label offset that clears every
-        # other label can still land right on top of (or hugging right up
+        if logo_bbox is not None:
+            occupied.append(logo_bbox)
+        # line_paths (the line's own drawn path, computed above) is also
+        # checked below, not just other labels/the logo -- an extreme is a
+        # point ON the line, so the line keeps running right past it in
+        # both directions, and a label offset that clears every other
+        # label can still land right on top of (or hugging right up
         # against) the line itself a little further along.
-        line_paths = [gradient_line.get_transform().transform_path(gradient_line.get_path())] \
-            if gradient_line is not None else []
 
         def mark_extreme(idx, color, prefix):
             t_val, v_val = times[idx], gradients[idx]
