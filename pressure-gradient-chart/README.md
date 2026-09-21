@@ -16,13 +16,15 @@ current-conditions stat box -- this chart's whole point is the multi-day
 trend, not a single "right now" number.
 
 Defaults to **PDX (Portland International) minus HRI (Hermiston
-Municipal)** -- the first pair this project is built around. Both are
-NWS ASOS/AWOS airport stations, chosen (over the Tempest-based sibling
-charts) because they bracket the Columbia River Gorge: when Portland's
-pressure is higher, air is pushed east through the gap (onshore,
-positive); when Hermiston's is higher, air is pushed west toward the coast
-(offshore, negative). `fetch_gradient.py` takes `--station-a`/`--station-b`
-so a different pair can be swapped in once more gradients are built.
+Municipal)** -- the first pair this project was built around, and still
+`fetch_gradient.py`/`fetch_metamesh_gradient.py`'s own CLI default. Both
+are NWS ASOS/AWOS airport stations, chosen (over the Tempest-based
+sibling charts) because they bracket the Columbia River Gorge: when
+Portland's pressure is higher, air is pushed east through the gap
+(onshore, positive); when Hermiston's is higher, air is pushed west
+toward the coast (offshore, negative). `--station-a`/`--station-b` point
+either script at a different pair for ad hoc use; see **Deployed pairs**
+below for the full set of pairs actually live on the site.
 
 ## Files
 
@@ -45,6 +47,9 @@ so a different pair can be swapped in once more gradients are built.
   duplicating them (see Notes below).
 - `requirements.txt` / `setup.sh` -- Python dependencies and the Poppins
   font fetch (no system packages needed here, unlike the map projects).
+- `deploy/pairs.py` -- the list of station pairs actually deployed live
+  (see **Deployed pairs** below); `deploy/publish_gradient.py` and
+  `deploy/publish_forecast_gradient.py` both loop over it.
 
 ## Usage
 
@@ -107,6 +112,12 @@ python3 build_forecast_chart.py
   fictitious ~-20 mb one. Verified against a live pull: the buggy version
   read -19.8 mb; the fixed version reads a plausible +2.7 mb for the same
   moment.
+- **Default labels** (`--label-a`/`--label-b`, when not given explicitly)
+  are each station's own bare 3-letter code (`bare_code()`, e.g. `KSEA` ->
+  `SEA`), not a fixed default -- an earlier version hardcoded `PDX`/`HRI`
+  as the defaults regardless of `--station-a`/`--station-b`, which would
+  have mislabeled every other pair in `deploy/pairs.py` had it shipped
+  that way.
 - **Pairing the two stations' observations**: the two stations don't
   report on the same schedule (KPDX might land on :55/:00/:05, KHRI on
   :53/:58/:03), so `merge_gradient()` treats station A's own observation
@@ -152,15 +163,23 @@ python3 build_forecast_chart.py
   reading.
 - **Zero line and onshore/offshore labels**: a dotted horizontal line at
   0 mb (`ZERO_LINE_COLOR`), with "Onshore Flow" text just above it and
-  "Offshore Flow" just below (a fixed 0.2 mb offset, not scaled to the
-  y-range -- with the range now generally ±8 mb rather than tracking the
-  window's own tighter swing, a range-proportional offset would push
-  these labels much farther from the line than intended), pinned near the
-  plot's left edge via a blended transform (`transAxes` for x, `transData`
-  for y) so they stay put regardless of where the line itself sits. Their
-  own window extents are included in the high/low markers'
-  collision-avoidance list (`occupied` in `build_chart()`), so a marker
-  label never lands on top of them.
+  "Offshore Flow" just below (`place_flow_labels()`, a fixed
+  `FLOW_LABEL_OFFSET_MB` = 0.2 mb either way, not scaled to the y-range --
+  with the range now generally ±8 mb rather than tracking the window's own
+  tighter swing, a range-proportional offset would push these labels much
+  farther from the line than intended). Tries each of
+  `FLOW_LABEL_X_CANDIDATES` (7 horizontal positions, left edge first) via
+  a blended transform (`transAxes` for x, `transData` for y), landing on
+  the first where neither label's box intersects any plotted line's own
+  path -- a pair whose gradient hugs zero for its *entire* window (e.g.
+  HRI-ALW, two nearby Basin stations with little pressure difference
+  between them) can cross the left-edge default's narrow band almost
+  continuously. Falls back to whichever candidate the line hits least
+  (`_line_hits()`, a vertex-in-box count -- matplotlib doesn't expose a
+  true intersection *area* between an arbitrary `Path` and a `Bbox`) if
+  none is fully clear. Their final window extents are included in the
+  high/low markers' collision-avoidance list (`occupied` in
+  `build_chart()`), so a marker label never lands on top of them.
 - **High/low markers** circle and label the window's highest and lowest
   gradient (`HIGH_COLOR`/`LOW_COLOR`, the same red/blue every chart in
   this family uses) -- always on, same reasoning as
@@ -234,10 +253,10 @@ boundary.
   reimplementing the observed-segment logic (pagination included).
   `build_forecast_chart.py` similarly imports its fonts, palette, sizing
   constants, and `insert_gaps()`/`smooth()`/`gradient_ylim()`/
-  `place_logo()` from `build_chart.py` -- same chart family (including the
-  same ±8 mb default y-range, fixed 0.2 mb onshore/offshore label offset,
-  and logo-placement mechanics), so duplicating those would just be a
-  maintenance hazard.
+  `place_logo()`/`place_flow_labels()` from `build_chart.py` -- same chart
+  family (including the same ±8 mb default y-range, onshore/offshore
+  label placement, and logo-placement mechanics), so duplicating those
+  would just be a maintenance hazard.
 - **Smoothing** applies only to the observed segment (same
   `SMOOTHING_WINDOW` as `build_chart.py`, since NWS's ~5-minute cadence is
   noisy at this scale) -- the forecast segment is left raw, since
@@ -261,6 +280,34 @@ boundary.
 - Everything else (zero line/onshore-offshore labels, logo placement, no
   current-conditions stat box, axis styling) is identical to `build_chart.py`.
 
+## Deployed pairs
+
+`deploy/pairs.py` lists every pair actually live on
+`images.ingallswx.com`, each an NWS ASOS/AWOS airport pair bracketing a
+specific Pacific Northwest terrain gap or valley -- confirmed live
+(both against api.weather.gov and, for the forecast chart, WindBorne
+MetaMesh) before adding a pair there:
+
+| Pair | Gap / corridor |
+| --- | --- |
+| AST-PDX | Astoria (river mouth) to Portland -- lower Columbia River / coastal gradient |
+| PDX-DLS | Portland to The Dalles -- western Columbia River Gorge |
+| PDX-GEG | Portland to Spokane -- a long, cross-Cascades/eastern-WA span |
+| PDX-HRI | Portland to Hermiston -- the original pair; central Gorge / Columbia Basin entrance |
+| SEA-ELN | Seattle to Ellensburg -- Snoqualmie Pass / Stampede Gap, the I-90 corridor |
+| HRI-ALW | Hermiston to Walla Walla -- an intra-Basin gradient around the Wallula Gap |
+
+`publish_gradient.py` and `publish_forecast_gradient.py` (see
+**Deployment** below) both loop over this same list in a single cron-driven
+run, one `<slug>_gradient.png` / `<slug>_gradient_forecast.png` pair of
+outputs per entry -- adding or removing a deployed pair is a `pairs.py`
+edit, not a crontab or script change. Note that KDLS's barometer had a
+multi-hour outage during testing (confirmed against its own raw METAR --
+it stopped reporting `barometricPressure` mid-day without a station
+change), so PDX-DLS's chart may show more/longer gaps than the other
+pairs day to day; that's real station flakiness `insert_gaps()` is
+already built to show honestly, not a bug in this project.
+
 ## Deployment
 
 See [`tri-cities-7day-forecast/deploy/DEPLOY.md`](../tri-cities-7day-forecast/deploy/DEPLOY.md)
@@ -278,45 +325,59 @@ venv/bin/pip install -r requirements.txt
 bash setup.sh
 ```
 
-Then install `deploy/crontab.example`'s lines via `crontab -e`:
+Then install `deploy/crontab.example`'s lines via `crontab -e`. Each line
+covers *every* pair in `deploy/pairs.py` in one run (same
+one-lock-many-outputs pattern as
+`hrrr-smoke-chart/deploy/publish_smoke.py` -- one pair's fetch failing
+doesn't stop the others):
 
 - `publish_gradient.py` (observed-only) needs no API key --
   `api.weather.gov` is free -- and runs every 15 minutes (see that file's
-  docstring for why 15 minutes is enough even though both stations' own
-  feeds update roughly every 5).
+  docstring for why 15 minutes is enough even though every pair's two
+  stations update roughly every 5).
 - `publish_forecast_gradient.py` (obs + MetaMesh forecast) needs
   `WB_API_KEY` -- skip that line in the crontab if `tempest-temp-chart`,
   `tri-cities-7day-forecast`, or any other MetaMesh-consuming project is
   already deployed on this droplet, since it sets the same variable -- and
   runs hourly.
 
-End-to-end test, observed-only:
+Each pair gets its own intermediate JSON (`gradient_obs_<slug>.json` /
+`gradient_forecast_<slug>.json`) so pairs never write over each other
+within the same run.
+
+End-to-end test, observed-only (all pairs):
 
 ```bash
 venv/bin/python3 deploy/publish_gradient.py
 tail -f state/publish.log
 ```
 
-Confirm `/var/www/images/pdx_hri_gradient.png` exists and is fresh, then
-load `https://images.ingallswx.com/pdx_hri_gradient.png` in a browser.
-Wait 15 minutes and confirm the file's timestamp updates on its own while
-the URL stays the same -- same overwrite-in-place-with-atomic-rename
-pattern, and same nginx `Cache-Control: no-cache, max-age=60` handling, as
-every other image served from that folder.
+Confirm each pair's log line reads `succeeded`, and that
+`/var/www/images/<slug>_gradient.png` exists and is fresh for all six
+(e.g. `pdx_hri_gradient.png`, `sea_eln_gradient.png`, ...) -- load one in
+a browser, e.g. `https://images.ingallswx.com/pdx_hri_gradient.png`. Wait
+15 minutes and confirm its timestamp updates on its own while the URL
+stays the same -- same overwrite-in-place-with-atomic-rename pattern, and
+same nginx `Cache-Control: no-cache, max-age=60` handling, as every other
+image served from that folder.
 
-End-to-end test, obs + MetaMesh forecast:
+End-to-end test, obs + MetaMesh forecast (all pairs):
 
 ```bash
 venv/bin/python3 deploy/publish_forecast_gradient.py
 tail -f state/publish.log
 ```
 
-Confirm `/var/www/images/pdx_hri_gradient_forecast.png` exists and is
-fresh, then load
+Confirm `/var/www/images/<slug>_gradient_forecast.png` exists and is
+fresh for all six, e.g.
 `https://images.ingallswx.com/pdx_hri_gradient_forecast.png`. This uses
 its own lock file (`state/forecast_run.lock`, distinct from
 `publish_gradient.py`'s `state/run.lock`) so a slow run of one never
 blocks the other.
+
+Adding a 7th pair later: add one `(station_a, station_b, slug)` tuple to
+`deploy/pairs.py` -- both publish scripts and both crontab lines already
+cover it, nothing else to change.
 
 No nginx changes needed -- `nginx-images.conf` already serves any file
 dropped into `/var/www/images/`, not just the forecast images it was

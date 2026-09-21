@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
 """
-Cron entry point for the droplet deployment. Fetches the past day's
-observed PDX/HRI gradient plus the next 5 days from WindBorne MetaMesh,
-then renders and atomically publishes pdx_hri_gradient_forecast.png.
+Cron entry point for the droplet deployment. Fetches and publishes every
+pair in deploy/pairs.py -- one <slug>_gradient_forecast.png per pair --
+in a single run under one lock, same one-lock-many-outputs pattern as
+hrrr-smoke-chart/deploy/publish_smoke.py and this project's own
+publish_gradient.py: one pair's fetch failing doesn't stop the others.
 
-A failed fetch is fatal -- there's no fallback source for either segment,
-so this tick publishes nothing and leaves the previous image in place.
+Each pair gets its own intermediate combined obs+forecast JSON
+(gradient_forecast_<slug>.json) so concurrent pairs within the same run
+never write over each other.
 
 Scheduled hourly (see deploy/crontab.example) -- MetaMesh reruns on its
-own schedule under an hour, but the forecast itself doesn't change fast
+own schedule under an hour, but the forecast itself doesn't move fast
 enough to justify the observed-only chart's 15-minute cadence, and this
-avoids spending WB_API_KEY's request quota faster than needed.
+avoids spending WB_API_KEY's request quota faster than needed across all
+6 pairs.
 
 An flock-based lock means an overlapping cron tick (e.g. a slow run still
-in progress when the next scheduled tick fires) skips instead of running a
-second pass concurrently -- same pattern as every other cron entry point
-in this repo (see columbia-basin-alerts-map/deploy/publish_alerts.py).
+in progress when the next scheduled tick fires) skips instead of running
+a second pass concurrently -- same pattern as every other cron entry
+point in this repo (see columbia-basin-alerts-map/deploy/publish_alerts.py).
+Uses its own lock file (state/forecast_run.lock), separate from
+publish_gradient.py's own state/run.lock, so a slow run of one never
+blocks the other.
 """
 import fcntl
 import os
@@ -23,20 +30,21 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # pressure-gradient-chart/
+DEPLOY_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(DEPLOY_DIR)  # pressure-gradient-chart/
 STATE_DIR = os.path.join(BASE_DIR, "state")
 LOCK_FILE = os.path.join(STATE_DIR, "forecast_run.lock")
 LOG_FILE = os.path.join(STATE_DIR, "publish.log")
 PYTHON = os.path.join(BASE_DIR, "venv", "bin", "python3")
-
-OUTPUT_NAME = "pdx_hri_gradient_forecast.png"
 
 # Where nginx serves static files from -- see
 # ../../tri-cities-7day-forecast/deploy/nginx-images.conf, reused as-is.
 WEB_ROOT = "/var/www/images"
 
 sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, DEPLOY_DIR)
 import build_forecast_chart  # noqa: E402
+from pairs import PAIRS  # noqa: E402
 
 
 def log(msg):
@@ -46,11 +54,23 @@ def log(msg):
         f.write(line + "\n")
 
 
+def publish_pair(station_a, station_b, slug):
+    obs_path = os.path.join(BASE_DIR, f"gradient_forecast_{slug}.json")
+    subprocess.run([PYTHON, "fetch_metamesh_gradient.py",
+                     "--station-a", station_a, "--station-b", station_b,
+                     "--output", obs_path],
+                    cwd=BASE_DIR, check=True)
+
+    output_name = f"{slug}_gradient_forecast.png"
+    final_path = os.path.join(WEB_ROOT, output_name)
+    tmp_path = os.path.join(WEB_ROOT, f".tmp_{output_name}")
+    build_forecast_chart.build_forecast_chart(obs_path, tmp_path)
+    os.replace(tmp_path, final_path)
+    return output_name
+
+
 def main():
     os.makedirs(STATE_DIR, exist_ok=True)
-    # A separate lock file from publish_gradient.py's own run.lock -- the
-    # two publish scripts fetch/render independently and shouldn't block
-    # each other just because both happen to be mid-run at once.
     lock_fd = open(LOCK_FILE, "w")
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -59,24 +79,20 @@ def main():
         return 0
 
     try:
-        log("Starting scheduled forecast build.")
-        env = os.environ.copy()
-        obs_path = os.path.join(BASE_DIR, "gradient_forecast.json")
-
-        subprocess.run([PYTHON, "fetch_metamesh_gradient.py"], cwd=BASE_DIR, check=True, env=env)
-
-        final_path = os.path.join(WEB_ROOT, OUTPUT_NAME)
-        tmp_path = os.path.join(WEB_ROOT, f".tmp_{OUTPUT_NAME}")
-        build_forecast_chart.build_forecast_chart(obs_path, tmp_path)
-        os.replace(tmp_path, final_path)
-        log(f"succeeded -- {OUTPUT_NAME} updated.")
-        return 0
-    except subprocess.CalledProcessError as e:
-        log(f"fetch_metamesh_gradient.py FAILED ({e}) -- skipping this tick entirely.")
-        return 1
-    except Exception as e:
-        log(f"Build FAILED ({e}) -- leaving previous published image in place.")
-        return 1
+        log(f"Starting scheduled forecast build ({len(PAIRS)} pairs).")
+        failures = 0
+        for station_a, station_b, slug in PAIRS:
+            pair_label = f"{station_a}-{station_b}"
+            try:
+                output_name = publish_pair(station_a, station_b, slug)
+                log(f"{pair_label}: succeeded -- {output_name} updated.")
+            except subprocess.CalledProcessError as e:
+                failures += 1
+                log(f"{pair_label}: fetch_metamesh_gradient.py FAILED ({e}) -- skipping this pair.")
+            except Exception as e:
+                failures += 1
+                log(f"{pair_label}: build FAILED ({e}) -- leaving its previous published image in place.")
+        return 1 if failures else 0
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         lock_fd.close()

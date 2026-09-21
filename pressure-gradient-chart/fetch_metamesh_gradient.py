@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from fetch_gradient import MATCH_TOLERANCE, merge_gradient, normalize_station_id, pressure_series
+from fetch_gradient import MATCH_TOLERANCE, bare_code, merge_gradient, normalize_station_id, pressure_series
 
 METAMESH_URL = "https://api.windbornesystems.com/forecasts/v1/point_forecast"
 
@@ -58,8 +58,10 @@ def parse_args():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--station-a", default="KPDX")
     ap.add_argument("--station-b", default="KHRI")
-    ap.add_argument("--label-a", default="PDX")
-    ap.add_argument("--label-b", default="HRI")
+    ap.add_argument("--label-a", default=None,
+                     help="Display label for station A (default: its bare 3-letter code, e.g. PDX for KPDX)")
+    ap.add_argument("--label-b", default=None,
+                     help="Display label for station B (default: its bare 3-letter code, e.g. HRI for KHRI)")
     ap.add_argument("--timezone", default="America/Los_Angeles")
     ap.add_argument("--obs-days", type=int, default=1,
                      help="Trailing local calendar days of NWS-observed gradient (default: 1)")
@@ -73,6 +75,8 @@ if __name__ == "__main__":
     args = parse_args()
     station_a_id = normalize_station_id(args.station_a)
     station_b_id = normalize_station_id(args.station_b)
+    label_a = args.label_a or bare_code(station_a_id)
+    label_b = args.label_b or bare_code(station_b_id)
     tz = ZoneInfo(args.timezone)
 
     now = datetime.now(tz)
@@ -90,8 +94,8 @@ if __name__ == "__main__":
     observations = [{
         "time": datetime.fromtimestamp(epoch, tz).isoformat(),
         "gradient_mb": round(pressure_a - pressure_b, 2),
-        f"{args.label_a.lower()}_mb": round(pressure_a, 1),
-        f"{args.label_b.lower()}_mb": round(pressure_b, 1),
+        f"{label_a.lower()}_mb": round(pressure_a, 1),
+        f"{label_b.lower()}_mb": round(pressure_b, 1),
         "is_forecast": False,
     } for epoch, pressure_a, pressure_b in merged_obs]
 
@@ -107,8 +111,8 @@ if __name__ == "__main__":
         forecast.append({
             "time": local_time.isoformat(),
             "gradient_mb": round(pressure_a - pressure_b, 2),
-            f"{args.label_a.lower()}_mb": round(pressure_a, 1),
-            f"{args.label_b.lower()}_mb": round(pressure_b, 1),
+            f"{label_a.lower()}_mb": round(pressure_a, 1),
+            f"{label_b.lower()}_mb": round(pressure_b, 1),
             "is_forecast": True,
         })
     forecast.sort(key=lambda o: o["time"])
@@ -126,15 +130,15 @@ if __name__ == "__main__":
                    "fetch_gradient.py) for the past segment. Forecast: WindBorne MetaMesh "
                    "point_forecast, pressure_msl, queried by station id for both stations, "
                    "for the future segment. Both differenced as "
-                   f"{args.label_a} minus {args.label_b}.",
-        "station_a": {"id": station_a_id, "label": args.label_a},
-        "station_b": {"id": station_b_id, "label": args.label_b},
+                   f"{label_a} minus {label_b}.",
+        "station_a": {"id": station_a_id, "label": label_a},
+        "station_b": {"id": station_b_id, "label": label_b},
         "timezone": args.timezone,
         "window_start": window_start.isoformat(),
         "now": now.isoformat(),
         "window_end": window_end.isoformat(),
         "forecast_init_time": init_time,
-        "gradient_label": f"{args.label_a} minus {args.label_b}",
+        "gradient_label": f"{label_a} minus {label_b}",
         "observations": observations + forecast,
     }
     with open(args.output, "w") as f:
@@ -142,4 +146,4 @@ if __name__ == "__main__":
 
     print(f"Saved {args.output}: {len(observations)} observed obs (last {args.obs_days}d) + "
           f"{len(forecast)} forecast points (next {args.forecast_days}d) for "
-          f"{args.label_a}-{args.label_b} (MetaMesh init {init_time})")
+          f"{label_a}-{label_b} (MetaMesh init {init_time})")

@@ -163,6 +163,80 @@ def place_logo(fig, axpos, line_paths):
     return logo_ax, rect_for(logo_y0)
 
 
+# Fixed mb offset from zero, not a fraction of the y-range -- with the
+# range generally +-8 mb (DEFAULT_Y_RANGE_MB) rather than scaling down to
+# the window's own tighter swing, a range-proportional offset would push
+# these labels much farther from the line than intended.
+FLOW_LABEL_OFFSET_MB = 0.2
+
+# Horizontal candidates for place_flow_labels(), in axes-fraction x --
+# left edge first (the usual spot), then progressively further right.
+# Finer-grained than mark_extreme's own handful of candidates -- a pair
+# whose gradient hugs zero for its *entire* window (e.g. HRI-ALW, two
+# nearby Basin stations with little pressure difference) can cross this
+# label's narrow +-FLOW_LABEL_OFFSET_MB band almost continuously, so
+# finding a genuinely clear x-slice can take more tries than a coarser
+# search would offer.
+FLOW_LABEL_X_CANDIDATES = (0.014, 0.15, 0.30, 0.45, 0.60, 0.75, 0.90)
+
+
+def _line_hits(line_paths, box):
+    """How many of a line's own plotted vertices fall inside box -- a
+    cheap stand-in for "how badly does this line cross this box" when
+    Path.intersects_bbox()'s plain yes/no isn't enough to rank candidates
+    that all technically collide (matplotlib doesn't expose an
+    intersection *area* between an arbitrary Path and a Bbox)."""
+    return sum(1 for p in line_paths for x, y in p.vertices if box.contains(x, y))
+
+
+def place_flow_labels(fig, ax, line_paths):
+    """Places "Onshore Flow" just above the zero line and "Offshore Flow"
+    just below it (FLOW_LABEL_OFFSET_MB fixed mb offset either way),
+    trying each of FLOW_LABEL_X_CANDIDATES left-to-right until landing on
+    one where neither label's box intersects any plotted line's own
+    drawn path (same Path.intersects_bbox() mechanism place_logo() and
+    mark_extreme() already use) -- a pair whose gradient naturally stays
+    small (e.g. HRI-ALW, two nearby stations with little pressure
+    difference between them) can otherwise sit right under the left-edge
+    default the whole chart, or even cross this label's narrow band
+    almost continuously. Falls back to whichever candidate the line hits
+    least (`_line_hits()`) if none is fully clear, rather than settling
+    for the last one tried regardless of how bad it is.
+    """
+    label_trans = blended_transform_factory(ax.transAxes, ax.transData)
+
+    def place(x_frac):
+        onshore = ax.text(x_frac, FLOW_LABEL_OFFSET_MB, "Onshore Flow", transform=label_trans,
+                            ha="left", va="bottom", fontproperties=f_med, fontsize=11,
+                            color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
+        offshore = ax.text(x_frac, -FLOW_LABEL_OFFSET_MB, "Offshore Flow", transform=label_trans,
+                             ha="left", va="top", fontproperties=f_med, fontsize=11,
+                             color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
+        return onshore, offshore
+
+    onshore_label = offshore_label = None
+    best_x, best_hits = FLOW_LABEL_X_CANDIDATES[0], None
+    for x_frac in FLOW_LABEL_X_CANDIDATES:
+        if onshore_label is not None:
+            onshore_label.remove()
+            offshore_label.remove()
+        onshore_label, offshore_label = place(x_frac)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        hits = (_line_hits(line_paths, onshore_label.get_window_extent(renderer))
+                + _line_hits(line_paths, offshore_label.get_window_extent(renderer)))
+        if hits == 0:
+            return onshore_label, offshore_label
+        if best_hits is None or hits < best_hits:
+            best_x, best_hits = x_frac, hits
+
+    if best_x != x_frac:  # last candidate tried isn't the best one -- redraw at best_x
+        onshore_label.remove()
+        offshore_label.remove()
+        onshore_label, offshore_label = place(best_x)
+    return onshore_label, offshore_label
+
+
 def gradient_ylim(values):
     """Symmetric +-half_range, where half_range is the larger of
     DEFAULT_Y_RANGE_MB and the observed min/max magnitude padded by
@@ -236,20 +310,9 @@ def build_chart(data_path, output_path):
     # A dotted reference line at 0 mb -- above it, station A (the west/
     # coastal side, PDX by default) is higher pressure than station B,
     # pushing air onshore through the gap between them; below it, station
-    # B is higher, pushing air offshore. Pinned near the plot's left edge
-    # (axes-fraction x, data-coordinate y) so the labels stay in the same
-    # spot regardless of where the line itself happens to sit that day.
+    # B is higher, pushing air offshore.
     ax.axhline(0, color=ZERO_LINE_COLOR, linewidth=1.3, linestyle=":", zorder=Z_ZERO)
-    label_trans = blended_transform_factory(ax.transAxes, ax.transData)
-    # A fixed mb offset, not a fraction of the y-range -- with the range
-    # now generally +-8 mb (DEFAULT_Y_RANGE_MB) rather than scaling down
-    # to the day's own tighter swing, a range-proportional offset would
-    # push these labels much farther from the line than intended.
-    label_offset = 0.2
-    onshore_label = ax.text(0.014, label_offset, "Onshore Flow", transform=label_trans, ha="left", va="bottom",
-                              fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
-    offshore_label = ax.text(0.014, -label_offset, "Offshore Flow", transform=label_trans, ha="left", va="top",
-                               fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
+    onshore_label, offshore_label = place_flow_labels(fig, ax, line_paths)
 
     # ---------- logo ----------
     logo_ax, logo_bbox = place_logo(fig, axpos, line_paths)

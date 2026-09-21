@@ -1,16 +1,21 @@
 # Add these lines to the droplet's existing crontab (crontab -e) alongside
 # everything else already there.
 #
+# Each line below covers *all* pairs in deploy/pairs.py (currently 6:
+# AST-PDX, PDX-DLS, PDX-GEG, PDX-HRI, SEA-ELN, HRI-ALW) in one run, one
+# <slug>_gradient.png / <slug>_gradient_forecast.png per pair -- adding or
+# removing a pair only means editing pairs.py, not this crontab.
+#
 # No API key needed for the observed-only chart -- api.weather.gov is
 # free, just requires the User-Agent fetch_gradient.py already sends.
 
-# Every 15 minutes. Both stations' own feeds actually update roughly every
-# 5 minutes, but the gradient moves slowly enough that a 15-minute
+# Every 15 minutes. Every pair's two stations actually update roughly
+# every 5 minutes, but the gradient moves slowly enough that a 15-minute
 # republish cadence doesn't lose anything a viewer would notice.
 
 */15 * * * * /opt/ingalls-weather-scripts/pressure-gradient-chart/venv/bin/python3 /opt/ingalls-weather-scripts/pressure-gradient-chart/deploy/publish_gradient.py >> /opt/ingalls-weather-scripts/pressure-gradient-chart/state/cron.log 2>&1
 
-# The obs + MetaMesh forecast chart needs WB_API_KEY (same WindBorne
+# The obs + MetaMesh forecast charts need WB_API_KEY (same WindBorne
 # account/key every other MetaMesh-consuming project in this repo uses,
 # e.g. tri-cities-7day-forecast/deploy/crontab.example) -- already set on
 # this droplet if any of those are deployed here; skip this line if so, it
@@ -19,7 +24,8 @@ WB_API_KEY=your_windborne_api_key_here
 
 # Hourly -- MetaMesh reruns on its own schedule under an hour, but the
 # forecast itself doesn't move fast enough to justify the observed-only
-# chart's 15-minute cadence, and this avoids spending WB_API_KEY's request
-# quota faster than needed.
+# charts' 15-minute cadence, and this avoids spending WB_API_KEY's request
+# quota faster than needed across all 6 pairs (12 MetaMesh queries/hour --
+# 2 per pair -- rather than 12 every 15 minutes).
 
 0 * * * * /opt/ingalls-weather-scripts/pressure-gradient-chart/venv/bin/python3 /opt/ingalls-weather-scripts/pressure-gradient-chart/deploy/publish_forecast_gradient.py >> /opt/ingalls-weather-scripts/pressure-gradient-chart/state/cron.log 2>&1

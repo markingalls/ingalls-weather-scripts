@@ -60,6 +60,14 @@ def normalize_station_id(station_id):
     return station_id if len(station_id) == 4 else f"K{station_id}"
 
 
+def bare_code(station_id):
+    """The 3-letter code a normalized 4-letter CONUS ICAO id (K-prefixed)
+    is built from, e.g. KPDX -> PDX -- used as the default --label-a/
+    --label-b when neither is given explicitly, so a pair pointed at a
+    new station doesn't silently inherit some other pair's label."""
+    return station_id[1:] if len(station_id) == 4 and station_id[0] == "K" else station_id
+
+
 def fetch_station_name(station_id):
     r = requests.get(f"{BASE_URL}/stations/{station_id}", headers=HEADERS, timeout=30)
     r.raise_for_status()
@@ -133,8 +141,10 @@ def parse_args():
                      help="Bare 3-letter or full ICAO id, e.g. PDX or KPDX (default: KPDX)")
     ap.add_argument("--station-b", default="KHRI",
                      help="Bare 3-letter or full ICAO id, e.g. HRI or KHRI (default: KHRI)")
-    ap.add_argument("--label-a", default="PDX")
-    ap.add_argument("--label-b", default="HRI")
+    ap.add_argument("--label-a", default=None,
+                     help="Display label for station A (default: its bare 3-letter code, e.g. PDX for KPDX)")
+    ap.add_argument("--label-b", default=None,
+                     help="Display label for station B (default: its bare 3-letter code, e.g. HRI for KHRI)")
     ap.add_argument("--timezone", default="America/Los_Angeles",
                      help="Local timezone both stations are treated as sharing (default: America/Los_Angeles)")
     ap.add_argument("--days", type=int, default=3,
@@ -149,6 +159,8 @@ if __name__ == "__main__":
     args = parse_args()
     station_a_id = normalize_station_id(args.station_a)
     station_b_id = normalize_station_id(args.station_b)
+    label_a = args.label_a or bare_code(station_a_id)
+    label_b = args.label_b or bare_code(station_b_id)
     tz = ZoneInfo(args.timezone)
 
     end_date = date.fromisoformat(args.date) if args.date else datetime.now(tz).date()
@@ -168,8 +180,8 @@ if __name__ == "__main__":
     observations = [{
         "time": datetime.fromtimestamp(epoch, tz).isoformat(),
         "gradient_mb": round(pressure_a - pressure_b, 2),
-        f"{args.label_a.lower()}_mb": round(pressure_a, 1),
-        f"{args.label_b.lower()}_mb": round(pressure_b, 1),
+        f"{label_a.lower()}_mb": round(pressure_a, 1),
+        f"{label_b.lower()}_mb": round(pressure_b, 1),
     } for epoch, pressure_a, pressure_b in merged]
 
     out = {
@@ -178,13 +190,13 @@ if __name__ == "__main__":
                    "hourly METAR). Uses barometricPressure directly -- already an "
                    "altimeter-setting-equivalent, near-sea-level value despite the field "
                    "name, not raw station pressure (see README.md) -- "
-                   f"differenced as {args.label_a} minus {args.label_b}.",
-        "station_a": {"id": station_a_id, "label": args.label_a, "name": name_a},
-        "station_b": {"id": station_b_id, "label": args.label_b, "name": name_b},
+                   f"differenced as {label_a} minus {label_b}.",
+        "station_a": {"id": station_a_id, "label": label_a, "name": name_a},
+        "station_b": {"id": station_b_id, "label": label_b, "name": name_b},
         "timezone": args.timezone,
         "window_start": window_start.isoformat(),
         "window_days": args.days,
-        "gradient_label": f"{args.label_a} minus {args.label_b}",
+        "gradient_label": f"{label_a} minus {label_b}",
         "observations": observations,
     }
     with open(args.output, "w") as f:
@@ -192,8 +204,8 @@ if __name__ == "__main__":
 
     if observations:
         print(f"Saved {args.output}: {len(observations)} paired obs for "
-              f"{args.label_a}-{args.label_b}, last {args.days} days ending {end_date} "
+              f"{label_a}-{label_b}, last {args.days} days ending {end_date} "
               f"({observations[0]['time']} .. {observations[-1]['time']})")
     else:
-        print(f"Saved {args.output}: 0 paired observations for {args.label_a}-{args.label_b}, "
+        print(f"Saved {args.output}: 0 paired observations for {label_a}-{label_b}, "
               f"last {args.days} days ending {end_date}")

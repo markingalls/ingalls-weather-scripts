@@ -8,7 +8,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
-from matplotlib.transforms import blended_transform_factory
 
 # Reuses fonts, palette, sizing constants, and the gap/smoothing helpers
 # directly from build_chart.py -- this is the same chart family (same
@@ -19,7 +18,7 @@ from build_chart import (
     AXIS_COLOR, BG, DEFAULT_Y_RANGE_MB, GRADIENT_COLOR, GRID_COLOR, HIGH_COLOR, INK,
     INK_SECONDARY, LOW_COLOR, MAX_GAP, SMOOTHING_WINDOW, Z_GRADIENT, Z_GRID,
     Z_MARKER, Z_ZERO, ZERO_LINE_COLOR, f_bold, f_med, f_reg, gradient_ylim, insert_gaps,
-    place_logo, smooth,
+    place_flow_labels, place_logo, smooth,
 )
 
 
@@ -119,12 +118,7 @@ def build_forecast_chart(data_path, output_path):
 
     # ---------- zero line + onshore/offshore labels ----------
     ax.axhline(0, color=ZERO_LINE_COLOR, linewidth=1.3, linestyle=":", zorder=Z_ZERO)
-    label_trans = blended_transform_factory(ax.transAxes, ax.transData)
-    label_offset = 0.2  # fixed mb offset -- see build_chart.py's own comment on this
-    onshore_label = ax.text(0.014, label_offset, "Onshore Flow", transform=label_trans, ha="left", va="bottom",
-                              fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
-    offshore_label = ax.text(0.014, -label_offset, "Offshore Flow", transform=label_trans, ha="left", va="top",
-                               fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
+    onshore_label, offshore_label = place_flow_labels(fig, ax, line_paths)
 
     # ---------- logo ----------
     # line_paths (both the observed and forecast lines' own drawn paths,

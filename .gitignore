@@ -234,13 +234,16 @@ tempest-pressure-chart/lookback/
 tempest-pressure-chart/state/
 
 # --- pressure-gradient-chart ---
-# gradient_obs.json/gradient_forecast.json are live data fetch_gradient.py
-# and fetch_metamesh_gradient.py regenerate every run, and the rendered
+# gradient_obs*.json/gradient_forecast*.json are live data fetch_gradient.py
+# and fetch_metamesh_gradient.py regenerate every run (one pair per file,
+# e.g. gradient_obs_pdx_hri.json -- see deploy/pairs.py), and the rendered
 # charts are outputs too -- neither is source, so don't track them.
 # state/ is the droplet-deploy guard's runtime state (lock files, logs) --
 # created on the server, not source.
-pressure-gradient-chart/gradient_obs.json
-pressure-gradient-chart/gradient_forecast.json
+pressure-gradient-chart/gradient_obs*.json
+pressure-gradient-chart/gradient_forecast*.json
 pressure-gradient-chart/gradient_chart*.png
 pressure-gradient-chart/gradient_forecast_chart*.png
+pressure-gradient-chart/*_gradient.png
+pressure-gradient-chart/*_gradient_forecast.png
 pressure-gradient-chart/state/

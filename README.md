@@ -77,20 +77,21 @@ workflows. Each project lives in its own directory with its own README.
   `images.ingallswx.com/hermiston_pressure.png` (refreshed every 5
   minutes) plus a rolling 5-day look-back archive at `..._day1.png`
   through `..._day5.png` (rotated nightly).
-- [`pressure-gradient-chart/`](pressure-gradient-chart/) — generates a
-  styled multi-day (3 days by default) pressure-gradient chart between two
-  NWS stations (station A minus station B pressure), with a dotted zero
-  line labeled "Onshore Flow" above and "Offshore Flow" below. Defaults to
-  PDX (Portland Intl) minus HRI (Hermiston Muni), the first pair this
-  project is built around. Sourced from `api.weather.gov`'s per-station
-  feed at each station's own ~5-minute reporting cadence (NWS
-  ASOS/AWOS specials, not just the hourly METAR). Deployed live at
-  `images.ingallswx.com/pdx_hri_gradient.png` (refreshed every 15
-  minutes). A second version (`fetch_metamesh_gradient.py` +
-  `build_forecast_chart.py`) plots the past day's observed gradient
-  (solid) plus the next 5 days from WindBorne MetaMesh (dashed), deployed
-  live at `images.ingallswx.com/pdx_hri_gradient_forecast.png` (refreshed
-  hourly).
+- [`pressure-gradient-chart/`](pressure-gradient-chart/) — generates
+  styled multi-day (3 days by default) pressure-gradient charts between
+  pairs of NWS stations (station A minus station B pressure), with a
+  dotted zero line labeled "Onshore Flow" above and "Offshore Flow"
+  below. Six pairs deployed live (see `deploy/pairs.py`): AST-PDX,
+  PDX-DLS, PDX-GEG, PDX-HRI, SEA-ELN, HRI-ALW, each bracketing a Pacific
+  Northwest terrain gap or valley. Sourced from `api.weather.gov`'s
+  per-station feed at each station's own ~5-minute reporting cadence
+  (NWS ASOS/AWOS specials, not just the hourly METAR). Deployed live at
+  `images.ingallswx.com/<slug>_gradient.png` per pair (e.g.
+  `pdx_hri_gradient.png`), refreshed every 15 minutes. A second version
+  per pair (`fetch_metamesh_gradient.py` + `build_forecast_chart.py`)
+  plots the past day's observed gradient (solid) plus the next 5 days
+  from WindBorne MetaMesh (dashed), deployed live at
+  `images.ingallswx.com/<slug>_gradient_forecast.png` (refreshed hourly).
 
 ## Shared resources
 
