@@ -140,13 +140,14 @@ python3 build_forecast_chart.py
   them** -- same `insert_gaps()` NaN-insertion approach as
   `tempest-pressure-chart`, with a longer `MAX_GAP` (15 minutes, vs. that
   chart's 6) sized for this chart's slower ~5-minute native cadence.
-- **Y-axis** defaults to a fixed ±8 mb (`DEFAULT_Y_RANGE_MB`,
-  `gradient_ylim()`) rather than scaling to the window's own observed
-  range -- keeps the axis, and so the zero line's visual position, stable
-  from one render to the next instead of rescaling on every small day-to-
-  day wobble. Only widened, by `OVERFLOW_PAD_MB` (2 mb) past the actual
-  min/max, on a window that genuinely exceeds ±8 mb on one or both sides.
-  Tick labels show an explicit `+`/`-` sign on every tick except 0 itself,
+- **Y-axis** (`gradient_ylim()`) is always symmetric around 0 -- the zero
+  line stays vertically centered regardless of the data, rather than
+  drifting off-center whenever only one side of the window overflows.
+  Half-range is ±`DEFAULT_Y_RANGE_MB` (8 mb) by default, or the observed
+  min/max magnitude padded by `OVERFLOW_PAD_MB` (2 mb) if that's bigger --
+  so a lopsided window (say, a +6.4 mb high with only a -0.3 mb low)
+  pushes *both* sides out to ±8.4, not just the top. Tick labels show an
+  explicit `+`/`-` sign on every tick except 0 itself,
   since the sign is the point of this chart, unlike a plain pressure
   reading.
 - **Zero line and onshore/offshore labels**: a dotted horizontal line at

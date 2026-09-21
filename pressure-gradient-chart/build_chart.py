@@ -37,12 +37,13 @@ GRADIENT_COLOR = "#2c3e6b"
 HIGH_COLOR = "#a3242b"
 LOW_COLOR = "#0b3d91"
 
-# Default y-axis range -- comfortably covers this gradient's typical
-# swing. Only widened (by OVERFLOW_PAD_MB past the actual min/max) on a
-# window that genuinely exceeds it, rather than always padding around
-# the observed range -- keeps the axis, and so the zero line's visual
-# position, stable from one render to the next instead of rescaling on
-# every small day-to-day wobble.
+# y-axis is always symmetric around 0 -- the zero line (and so the
+# onshore/offshore split) stays vertically centered no matter what the
+# data does, rather than drifting off-center whenever only one side
+# overflows. Half-range is +-DEFAULT_Y_RANGE_MB by default, or the
+# observed min/max magnitude padded by OVERFLOW_PAD_MB if that's bigger
+# (e.g. an actual high of +6.4 mb pushes both sides out to +-8.4, not
+# just the top to +8.4 while the bottom stays at the -8 floor).
 DEFAULT_Y_RANGE_MB = 8.0
 OVERFLOW_PAD_MB = 2.0
 
@@ -107,14 +108,13 @@ def smooth(values, window):
 
 
 def gradient_ylim(values):
-    """+-DEFAULT_Y_RANGE_MB by default; if the data's actual min/max falls
-    outside that, extends OVERFLOW_PAD_MB past it on whichever side(s)
-    overflowed, rather than clipping real data or padding a chart that
-    doesn't need it."""
-    low, high = min(values), max(values)
-    y_low = -DEFAULT_Y_RANGE_MB if low >= -DEFAULT_Y_RANGE_MB else low - OVERFLOW_PAD_MB
-    y_high = DEFAULT_Y_RANGE_MB if high <= DEFAULT_Y_RANGE_MB else high + OVERFLOW_PAD_MB
-    return y_low, y_high
+    """Symmetric +-half_range, where half_range is the larger of
+    DEFAULT_Y_RANGE_MB and the observed min/max magnitude padded by
+    OVERFLOW_PAD_MB -- so a lopsided window (e.g. a +6.4 mb high with only
+    a -0.3 mb low) still pushes *both* sides out to +-8.4, not just the
+    +8.4 top while the bottom stays pinned at the -8 floor."""
+    half_range = max(DEFAULT_Y_RANGE_MB, abs(min(values)) + OVERFLOW_PAD_MB, abs(max(values)) + OVERFLOW_PAD_MB)
+    return -half_range, half_range
 
 
 def build_chart(data_path, output_path):
