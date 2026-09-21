@@ -111,3 +111,9 @@ tpw-wm6-ensemble-map/output/*.png
 # so don't track them.
 tri-cities-jja-calendar/jja_highs.json
 tri-cities-jja-calendar/output/*.png
+# --- tri-cities-jja-history ---
+# jja_history.json is live data fetch_jja_history.py regenerates every
+# run, and the rendered grid in output/ is an output too -- neither is
+# source, so don't track them.
+tri-cities-jja-history/jja_history.json
+tri-cities-jja-history/output/*.png
