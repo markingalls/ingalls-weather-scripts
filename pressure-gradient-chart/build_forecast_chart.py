@@ -17,9 +17,9 @@ from matplotlib.transforms import Bbox, blended_transform_factory
 # an observed+forecast split instead of observed-only, so duplicating all
 # of that here would just be a maintenance hazard.
 from build_chart import (
-    AXIS_COLOR, BG, GRADIENT_COLOR, GRID_COLOR, HIGH_COLOR, INK, INK_SECONDARY,
-    LOW_COLOR, MAX_GAP, SCRIPT_DIR, SMOOTHING_WINDOW, Z_GRADIENT, Z_GRID, Z_MARKER,
-    Z_ZERO, ZERO_LINE_COLOR, f_bold, f_med, f_reg, insert_gaps, smooth,
+    AXIS_COLOR, BG, DEFAULT_Y_RANGE_MB, GRADIENT_COLOR, GRID_COLOR, HIGH_COLOR, INK,
+    INK_SECONDARY, LOW_COLOR, MAX_GAP, SCRIPT_DIR, SMOOTHING_WINDOW, Z_GRADIENT, Z_GRID,
+    Z_MARKER, Z_ZERO, ZERO_LINE_COLOR, f_bold, f_med, f_reg, gradient_ylim, insert_gaps, smooth,
 )
 
 
@@ -87,27 +87,26 @@ def build_forecast_chart(data_path, output_path):
             if gradient_line is None:
                 gradient_line = fc_line
 
-        # Dotted marker at "now" -- the observed/forecast boundary.
+        # Dotted marker at "now" -- the observed/forecast boundary. Unlike
+        # build_chart.py's observed-only chart (where "now" is simply the
+        # right edge of the plot), this chart keeps drawing past it into
+        # the forecast, so the boundary still needs an explicit marker.
         ax.axvline(now, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
-        day_low, day_high = min(gradients), max(gradients)
-        pad = 1.5
-        min_half_range = 2.5
-        y_low = min(day_low - pad, -min_half_range)
-        y_high = max(day_high + pad, min_half_range)
+        y_low, y_high = gradient_ylim(gradients)
         ax.set_ylim(y_low, y_high)
         ax.set_xlim(window_start, window_end)
     else:
         ax.text(0.5, 0.5, "No observations or forecast in this window", transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
-        y_low, y_high = -2.5, 2.5
+        y_low, y_high = -DEFAULT_Y_RANGE_MB, DEFAULT_Y_RANGE_MB
         ax.set_ylim(y_low, y_high)
         ax.set_xlim(window_start, window_end)
 
     # ---------- zero line + onshore/offshore labels ----------
     ax.axhline(0, color=ZERO_LINE_COLOR, linewidth=1.3, linestyle=":", zorder=Z_ZERO)
     label_trans = blended_transform_factory(ax.transAxes, ax.transData)
-    label_offset = 0.06 * (y_high - y_low)
+    label_offset = 0.2  # fixed mb offset -- see build_chart.py's own comment on this
     onshore_label = ax.text(0.014, label_offset, "Onshore Flow", transform=label_trans, ha="left", va="bottom",
                               fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
     offshore_label = ax.text(0.014, -label_offset, "Offshore Flow", transform=label_trans, ha="left", va="top",
@@ -165,8 +164,7 @@ def build_forecast_chart(data_path, output_path):
             t_val, v_val = times[idx], gradients[idx]
             ax.scatter([t_val], [v_val], s=160, facecolors="none", edgecolors=color,
                        linewidths=2.2, zorder=Z_MARKER)
-            suffix = " (fcst)" if is_forecast[idx] else ""
-            label_text = f"{prefix}: {v_val:+.1f} mb at {t_val.strftime('%-m/%-d %H:%M')}{suffix}"
+            label_text = f"{prefix}: {v_val:+.1f} mb at {t_val.strftime('%-m/%-d %H:%M')}"
 
             def place(ha, va, x_off, y_off):
                 return ax.annotate(label_text, xy=(t_val, v_val), xytext=(x_off, y_off),
@@ -246,9 +244,7 @@ def build_forecast_chart(data_path, output_path):
     subtitle_y = top_y + 0.058
     title_y = subtitle_y + 0.035
     title = f"Pressure Gradient — {label_a}–{label_b}"
-    init_dt = datetime.fromisoformat(data["forecast_init_time"].replace("Z", "+00:00")).astimezone(tz)
-    subtitle = (f"Past Day Observed + 5-Day MetaMesh Forecast (Init {init_dt.strftime('%-m/%-d %Hz')}) "
-                f"• Updated: {now.strftime('%H:%M')} PT")
+    subtitle = f"Observed + MetaMesh Forecast • {now.strftime('%H:%M')} PT"
     fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 

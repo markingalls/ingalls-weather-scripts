@@ -37,6 +37,15 @@ GRADIENT_COLOR = "#2c3e6b"
 HIGH_COLOR = "#a3242b"
 LOW_COLOR = "#0b3d91"
 
+# Default y-axis range -- comfortably covers this gradient's typical
+# swing. Only widened (by OVERFLOW_PAD_MB past the actual min/max) on a
+# window that genuinely exceeds it, rather than always padding around
+# the observed range -- keeps the axis, and so the zero line's visual
+# position, stable from one render to the next instead of rescaling on
+# every small day-to-day wobble.
+DEFAULT_Y_RANGE_MB = 8.0
+OVERFLOW_PAD_MB = 2.0
+
 Z_GRID = 2
 Z_ZERO = 3
 Z_GRADIENT = 4
@@ -97,6 +106,17 @@ def smooth(values, window):
     return smoothed
 
 
+def gradient_ylim(values):
+    """+-DEFAULT_Y_RANGE_MB by default; if the data's actual min/max falls
+    outside that, extends OVERFLOW_PAD_MB past it on whichever side(s)
+    overflowed, rather than clipping real data or padding a chart that
+    doesn't need it."""
+    low, high = min(values), max(values)
+    y_low = -DEFAULT_Y_RANGE_MB if low >= -DEFAULT_Y_RANGE_MB else low - OVERFLOW_PAD_MB
+    y_high = DEFAULT_Y_RANGE_MB if high <= DEFAULT_Y_RANGE_MB else high + OVERFLOW_PAD_MB
+    return y_low, y_high
+
+
 def build_chart(data_path, output_path):
     data = json.load(open(data_path))
     tz = ZoneInfo(data["timezone"])
@@ -132,26 +152,17 @@ def build_chart(data_path, output_path):
         gradient_line = ax.plot(plot_times, plot_gradients, color=GRADIENT_COLOR, linewidth=2.6,
                                  zorder=Z_GRADIENT, label="Pressure gradient")[0]
 
-        # Dotted marker at the last observation -- same reasoning as
-        # tempest-pressure-chart's own "still live today" marker.
-        ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
-
-        # Pad the day's raw (unsmoothed) range the same way tempest-
-        # pressure-chart does, but also guarantee at least +-2.5 mb of
-        # room around 0 either way -- the zero line and its onshore/
-        # offshore labels need that space even on a day the gradient
-        # never actually crosses sign.
-        day_low, day_high = min(gradients), max(gradients)
-        pad = 1.5
-        min_half_range = 2.5
-        y_low = min(day_low - pad, -min_half_range)
-        y_high = max(day_high + pad, min_half_range)
+        y_low, y_high = gradient_ylim(gradients)
         ax.set_ylim(y_low, y_high)
-        ax.set_xlim(window_start, window_end)
+        # Right edge is the last observation itself, not the window's
+        # calendar boundary -- the data runs all the way to the edge of
+        # the plot, with "now" simply being wherever that edge falls,
+        # rather than a dotted marker partway through empty space.
+        ax.set_xlim(window_start, times[-1])
     else:
         ax.text(0.5, 0.5, "No observations in this window", transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
-        y_low, y_high = -2.5, 2.5
+        y_low, y_high = -DEFAULT_Y_RANGE_MB, DEFAULT_Y_RANGE_MB
         ax.set_ylim(y_low, y_high)
         ax.set_xlim(window_start, window_end)
 
@@ -164,7 +175,11 @@ def build_chart(data_path, output_path):
     # spot regardless of where the line itself happens to sit that day.
     ax.axhline(0, color=ZERO_LINE_COLOR, linewidth=1.3, linestyle=":", zorder=Z_ZERO)
     label_trans = blended_transform_factory(ax.transAxes, ax.transData)
-    label_offset = 0.06 * (y_high - y_low)
+    # A fixed mb offset, not a fraction of the y-range -- with the range
+    # now generally +-8 mb (DEFAULT_Y_RANGE_MB) rather than scaling down
+    # to the day's own tighter swing, a range-proportional offset would
+    # push these labels much farther from the line than intended.
+    label_offset = 0.2
     onshore_label = ax.text(0.014, label_offset, "Onshore Flow", transform=label_trans, ha="left", va="bottom",
                               fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
     offshore_label = ax.text(0.014, -label_offset, "Offshore Flow", transform=label_trans, ha="left", va="top",
@@ -303,8 +318,7 @@ def build_chart(data_path, output_path):
     last_day_str = window_end - timedelta(days=1)
     date_range = f"{window_start.strftime('%B %-d')} – {last_day_str.strftime('%B %-d, %Y')}"
     title = f"Pressure Gradient — {label_a}–{label_b}"
-    subtitle = (f"Last {window_days} Days ({date_range}) • Updated: {times[-1].strftime('%H:%M')} PT"
-                if times else f"Last {window_days} Days ({date_range})")
+    subtitle = f"{date_range} • {times[-1].strftime('%H:%M')} PT" if times else date_range
     fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 

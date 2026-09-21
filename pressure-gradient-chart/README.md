@@ -3,10 +3,10 @@
 Generates a styled multi-day pressure-gradient chart for Ingalls Weather's
 Instagram: the difference between two stations' own pressure (station A
 minus station B) across a trailing local-calendar-day window (3 days by
-default), in 24-hour time -- since the window's last day is still in
-progress, the line legitimately stops partway through it rather than
-reaching the right edge, marked with a dotted vertical line at the most
-recent observation. A dotted horizontal line at 0 mb marks the sign
+default), in 24-hour time. The x-axis right edge is simply the most
+recent observation itself -- there's no dotted "now" marker partway
+through empty space, since the data already runs all the way to the
+edge of the plot. A dotted horizontal line at 0 mb marks the sign
 change, labeled "Onshore Flow" above and "Offshore Flow" below. Same
 canvas footprint and fonts as
 [`tempest-pressure-chart/`](../tempest-pressure-chart/) -- a cousin chart,
@@ -130,29 +130,36 @@ python3 build_forecast_chart.py
   `window_start`/`window_days` in `gradient_obs.json` drive the chart's
   x-axis directly, rather than re-deriving it from the observations
   themselves.
-- **X-axis spans the full window** (`window_start` through
-  `window_start + window_days`), with ticks every 12 hours labeled with
-  both date and time (`%-m/%-d %Hh`) -- a bare `%H:%M`, fine for
-  `tempest-pressure-chart`'s single-day chart, would leave two different
-  days' midnights looking identical here.
+- **X-axis right edge is the last observation itself** (`times[-1]`), not
+  `window_start + window_days` -- the data runs all the way to the edge
+  of the plot, with "now" simply being wherever that edge falls. Ticks
+  come every 12 hours, labeled with both date and time (`%-m/%-d %Hh`) --
+  a bare `%H:%M`, fine for `tempest-pressure-chart`'s single-day chart,
+  would leave two different days' midnights looking identical here.
 - **Data outages show as a break in the line, not a straight line across
   them** -- same `insert_gaps()` NaN-insertion approach as
   `tempest-pressure-chart`, with a longer `MAX_GAP` (15 minutes, vs. that
   chart's 6) sized for this chart's slower ~5-minute native cadence.
-- **Y-axis** pads a flat ±1.5 mb around the window's observed range, same
-  as `tempest-pressure-chart`, but additionally guarantees at least ±2.5 mb
-  of room around 0 mb either way -- the zero line and its onshore/offshore
-  labels need that space even across a window the gradient never actually
-  changes sign. Tick labels show an explicit `+`/`-` sign on every tick
-  except 0 itself, since the sign is the point of this chart, unlike a
-  plain pressure reading.
+- **Y-axis** defaults to a fixed ±8 mb (`DEFAULT_Y_RANGE_MB`,
+  `gradient_ylim()`) rather than scaling to the window's own observed
+  range -- keeps the axis, and so the zero line's visual position, stable
+  from one render to the next instead of rescaling on every small day-to-
+  day wobble. Only widened, by `OVERFLOW_PAD_MB` (2 mb) past the actual
+  min/max, on a window that genuinely exceeds ±8 mb on one or both sides.
+  Tick labels show an explicit `+`/`-` sign on every tick except 0 itself,
+  since the sign is the point of this chart, unlike a plain pressure
+  reading.
 - **Zero line and onshore/offshore labels**: a dotted horizontal line at
-  0 mb (`ZERO_LINE_COLOR`), with "Onshore Flow" text above it and
-  "Offshore Flow" below, pinned near the plot's left edge via a blended
-  transform (`transAxes` for x, `transData` for y) so they stay put
-  regardless of where the line itself sits. Their own window extents are
-  included in the high/low markers' collision-avoidance list (`occupied`
-  in `build_chart()`), so a marker label never lands on top of them.
+  0 mb (`ZERO_LINE_COLOR`), with "Onshore Flow" text just above it and
+  "Offshore Flow" just below (a fixed 0.2 mb offset, not scaled to the
+  y-range -- with the range now generally ±8 mb rather than tracking the
+  window's own tighter swing, a range-proportional offset would push
+  these labels much farther from the line than intended), pinned near the
+  plot's left edge via a blended transform (`transAxes` for x, `transData`
+  for y) so they stay put regardless of where the line itself sits. Their
+  own window extents are included in the high/low markers'
+  collision-avoidance list (`occupied` in `build_chart()`), so a marker
+  label never lands on top of them.
 - **High/low markers** circle and label the window's highest and lowest
   gradient (`HIGH_COLOR`/`LOW_COLOR`, the same red/blue every chart in
   this family uses) -- always on, same reasoning as
@@ -207,17 +214,21 @@ boundary.
   `MATCH_TOLERANCE` directly from `fetch_gradient.py` rather than
   reimplementing the observed-segment logic (pagination included).
   `build_forecast_chart.py` similarly imports its fonts, palette, sizing
-  constants, and `insert_gaps()`/`smooth()` from `build_chart.py` -- same
-  chart family, so duplicating those would just be a maintenance hazard.
+  constants, and `insert_gaps()`/`smooth()`/`gradient_ylim()` from
+  `build_chart.py` -- same chart family (including the same ±8 mb default
+  y-range and fixed 0.2 mb onshore/offshore label offset), so duplicating
+  those would just be a maintenance hazard.
 - **Smoothing** applies only to the observed segment (same
   `SMOOTHING_WINDOW` as `build_chart.py`, since NWS's ~5-minute cadence is
   noisy at this scale) -- the forecast segment is left raw, since
   MetaMesh's hourly cadence is already coarse enough that smoothing it
   would blur real hour-to-hour model detail rather than remove noise.
 - **High/low markers** cover the *entire* observed+forecast window, not
-  just the observed segment, and note `(fcst)` in the label when the
-  extreme falls in the forecast portion. Its collision-avoidance loop
-  carries two extra, larger-offset fallback placements beyond
+  just the observed segment -- the label itself doesn't distinguish
+  whether the extreme fell in the observed or forecast portion, since the
+  dotted "now" line and the solid/dashed line style already show that.
+  Its collision-avoidance loop carries two extra, larger-offset fallback
+  placements beyond
   `build_chart.py`'s own four, and picks whichever in-bounds candidate
   overlaps existing labels least if none is fully clear -- a forecast
   extreme landing right at the window's last point (in the bottom-right
