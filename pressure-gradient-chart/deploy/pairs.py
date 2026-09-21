@@ -29,6 +29,9 @@ verifying a new station before use.
   the I-90 corridor gap in the central Cascades.
 - HRI-ALW: Hermiston to Walla Walla -- an intra-Basin gradient around the
   Wallula Gap / lower Walla Walla valley.
+- DLS-HRI: The Dalles to Hermiston -- the eastern Gorge / Basin-approach
+  segment, splitting PDX-HRI's own longer span into its western
+  (PDX-DLS) and eastern (this one) halves.
 """
 PAIRS = [
     ("AST", "PDX", "ast_pdx"),
@@ -37,4 +40,5 @@ PAIRS = [
     ("PDX", "HRI", "pdx_hri"),
     ("SEA", "ELN", "sea_eln"),
     ("HRI", "ALW", "hri_alw"),
+    ("DLS", "HRI", "dls_hri"),
 ]

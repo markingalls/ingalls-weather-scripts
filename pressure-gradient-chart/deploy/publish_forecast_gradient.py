@@ -13,8 +13,8 @@ never write over each other.
 Scheduled hourly (see deploy/crontab.example) -- MetaMesh reruns on its
 own schedule under an hour, but the forecast itself doesn't move fast
 enough to justify the observed-only chart's 15-minute cadence, and this
-avoids spending WB_API_KEY's request quota faster than needed across all
-6 pairs.
+avoids spending WB_API_KEY's request quota faster than needed across
+every pair in deploy/pairs.py.
 
 An flock-based lock means an overlapping cron tick (e.g. a slow run still
 in progress when the next scheduled tick fires) skips instead of running

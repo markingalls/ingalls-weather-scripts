@@ -296,6 +296,7 @@ MetaMesh) before adding a pair there:
 | PDX-HRI | Portland to Hermiston -- the original pair; central Gorge / Columbia Basin entrance |
 | SEA-ELN | Seattle to Ellensburg -- Snoqualmie Pass / Stampede Gap, the I-90 corridor |
 | HRI-ALW | Hermiston to Walla Walla -- an intra-Basin gradient around the Wallula Gap |
+| DLS-HRI | The Dalles to Hermiston -- eastern Gorge / Basin-approach segment, splitting PDX-HRI's own span into its western (PDX-DLS) and eastern (this one) halves |
 
 `publish_gradient.py` and `publish_forecast_gradient.py` (see
 **Deployment** below) both loop over this same list in a single cron-driven

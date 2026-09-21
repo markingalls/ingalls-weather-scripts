@@ -81,9 +81,9 @@ workflows. Each project lives in its own directory with its own README.
   styled multi-day (3 days by default) pressure-gradient charts between
   pairs of NWS stations (station A minus station B pressure), with a
   dotted zero line labeled "Onshore Flow" above and "Offshore Flow"
-  below. Six pairs deployed live (see `deploy/pairs.py`): AST-PDX,
-  PDX-DLS, PDX-GEG, PDX-HRI, SEA-ELN, HRI-ALW, each bracketing a Pacific
-  Northwest terrain gap or valley. Sourced from `api.weather.gov`'s
+  below. Seven pairs deployed live (see `deploy/pairs.py`): AST-PDX,
+  PDX-DLS, PDX-GEG, PDX-HRI, SEA-ELN, HRI-ALW, DLS-HRI, each bracketing a
+  Pacific Northwest terrain gap or valley. Sourced from `api.weather.gov`'s
   per-station feed at each station's own ~5-minute reporting cadence
   (NWS ASOS/AWOS specials, not just the hourly METAR). Deployed live at
   `images.ingallswx.com/<slug>_gradient.png` per pair (e.g.
