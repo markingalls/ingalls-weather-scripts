@@ -1,120 +1,57 @@
 import argparse
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 import matplotlib.dates as mdates
 import matplotlib.ticker as mticker
 from matplotlib.transforms import Bbox, blended_transform_factory
 
-# ---------- fonts (same family as tempest-pressure-chart) ----------
-FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
-f_bold = fm.FontProperties(fname=FONT_DIR + "Poppins-Bold.ttf")
-f_reg = fm.FontProperties(fname=FONT_DIR + "Poppins-Regular.ttf")
-f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
-
-# ---------- palette (same canvas/style as tempest-pressure-chart) ----------
-BG = "#f7f6f2"
-INK = "#2b2a26"
-INK_SECONDARY = "#5a584f"
-GRID_COLOR = "#000000"
-AXIS_COLOR = "#000000"
-ZERO_LINE_COLOR = "#5a584f"
-
-# A distinct color from the tempest-pressure-chart family's green -- this
-# chart plots a difference between two stations, not one station's own
-# reading, so it gets its own hue rather than borrowing the single-station
-# charts' green.
-GRADIENT_COLOR = "#2c3e6b"
-
-# Same red/blue high/low convention every sibling chart in this family
-# uses for its day-high/day-low callouts.
-HIGH_COLOR = "#a3242b"
-LOW_COLOR = "#0b3d91"
-
-Z_GRID = 2
-Z_ZERO = 3
-Z_GRADIENT = 4
-Z_MARKER = 5
-
-# Both stations report roughly every 5 minutes (NWS specials, not just the
-# hourly METAR) -- a gap much longer than that means one of them (or its
-# feed) was actually down, not just a skipped sample.
-MAX_GAP = timedelta(minutes=15)
-
-# A short smoothing window sized for this chart's ~5-minute-cadence data
-# (window=3 samples ~= 15 minutes) -- much shorter than tempest-pressure-
-# chart's 15-sample window, which is tuned for that chart's ~1/minute
-# Tempest cadence. Smooths sensor/reporting jitter without flattening the
-# gradient's real swings.
-SMOOTHING_WINDOW = 3
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Reuses fonts, palette, sizing constants, and the gap/smoothing helpers
+# directly from build_chart.py -- this is the same chart family (same
+# canvas, same zero-line/onshore-offshore/high-low mechanics), just with
+# an observed+forecast split instead of observed-only, so duplicating all
+# of that here would just be a maintenance hazard.
+from build_chart import (
+    AXIS_COLOR, BG, GRADIENT_COLOR, GRID_COLOR, HIGH_COLOR, INK, INK_SECONDARY,
+    LOW_COLOR, MAX_GAP, SCRIPT_DIR, SMOOTHING_WINDOW, Z_GRADIENT, Z_GRID, Z_MARKER,
+    Z_ZERO, ZERO_LINE_COLOR, f_bold, f_med, f_reg, insert_gaps, smooth,
+)
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Render a multi-day pressure-gradient chart "
-                                               "(station A minus station B pressure) for "
-                                               "whichever window --data holds observations for.")
-    ap.add_argument("--data", default="gradient_obs.json")
-    ap.add_argument("--output", default="gradient_chart.png")
+    ap = argparse.ArgumentParser(description="Render a pressure-gradient chart combining "
+                                               "the past day's NWS-observed gradient (solid) "
+                                               "with a WindBorne MetaMesh forecast (dashed).")
+    ap.add_argument("--data", default="gradient_forecast.json")
+    ap.add_argument("--output", default="gradient_forecast_chart.png")
     return ap.parse_args()
 
 
-def insert_gaps(times, values, max_gap):
-    """Returns (times, values) with a NaN-valued point inserted at the
-    midpoint of any consecutive pair more than max_gap apart -- matplotlib
-    breaks a line at a NaN y-value rather than drawing a straight segment
-    across it, so a real data outage shows as a visible gap instead of
-    reading as continuous data."""
-    if not times:
-        return times, values
-    out_times, out_values = [times[0]], [values[0]]
-    for i in range(1, len(times)):
-        if times[i] - times[i - 1] > max_gap:
-            out_times.append(times[i - 1] + (times[i] - times[i - 1]) / 2)
-            out_values.append(float("nan"))
-        out_times.append(times[i])
-        out_values.append(values[i])
-    return out_times, out_values
-
-
-def smooth(values, window):
-    """Centered simple moving average, window in samples. Edges use
-    whatever partial window is actually available rather than padding
-    with NaN or truncating."""
-    n = len(values)
-    half = window // 2
-    smoothed = []
-    for i in range(n):
-        window_vals = values[max(0, i - half):min(n, i + half + 1)]
-        smoothed.append(sum(window_vals) / len(window_vals))
-    return smoothed
-
-
-def build_chart(data_path, output_path):
+def build_forecast_chart(data_path, output_path):
     data = json.load(open(data_path))
     tz = ZoneInfo(data["timezone"])
     label_a, label_b = data["station_a"]["label"], data["station_b"]["label"]
 
-    times = [datetime.fromisoformat(o["time"]) for o in data["observations"]]
-    gradients = [o["gradient_mb"] for o in data["observations"]]
+    all_obs = data["observations"]
+    times = [datetime.fromisoformat(o["time"]) for o in all_obs]
+    gradients = [o["gradient_mb"] for o in all_obs]
+    is_forecast = [o["is_forecast"] for o in all_obs]
+
+    obs_times = [t for t, f in zip(times, is_forecast) if not f]
+    obs_gradients = [g for g, f in zip(gradients, is_forecast) if not f]
+    fc_times = [t for t, f in zip(times, is_forecast) if f]
+    fc_gradients = [g for g, f in zip(gradients, is_forecast) if f]
 
     window_start = datetime.fromisoformat(data["window_start"])
-    window_days = data["window_days"]
-    window_end = window_start + timedelta(days=window_days)
+    window_end = datetime.fromisoformat(data["window_end"])
+    now = datetime.fromisoformat(data["now"])
 
-    # ---------- figure (same footprint as tempest-pressure-chart) ----------
-    # Full 0.65 height -- no current-conditions stat box here to reserve
-    # room for (this chart only ever renders a several-day window, not a
-    # single still-updating "today", so there's no single "current"
-    # reading to headline), same height tempest-pressure-chart's own
-    # --no-current-conditions archive layout uses.
+    # ---------- figure (same footprint as build_chart.py) ----------
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
     fig.patch.set_facecolor(BG)
     ax_height = 0.65
@@ -122,25 +59,37 @@ def build_chart(data_path, output_path):
     ax.set_facecolor("white")
 
     axpos = ax.get_position()
-    left_x, right_x, top_y = axpos.x0, axpos.x1, axpos.y1
+    left_x, top_y = axpos.x0, axpos.y1
     center_x = (axpos.x0 + axpos.x1) / 2
 
     gradient_line = None
     if times:
-        smoothed_gradients = smooth(gradients, SMOOTHING_WINDOW)
-        plot_times, plot_gradients = insert_gaps(times, smoothed_gradients, MAX_GAP)
-        gradient_line = ax.plot(plot_times, plot_gradients, color=GRADIENT_COLOR, linewidth=2.6,
-                                 zorder=Z_GRADIENT, label="Pressure gradient")[0]
+        # Observed: smoothed the same way build_chart.py's single-series
+        # chart is (NWS's ~5-minute cadence is noisy at this scale).
+        # Forecast: left raw -- MetaMesh's hourly cadence is already
+        # coarse enough that a 3-sample moving average would just blur
+        # real hour-to-hour model detail rather than remove noise.
+        if obs_times:
+            smoothed_obs = smooth(obs_gradients, SMOOTHING_WINDOW)
+            plot_obs_times, plot_obs_gradients = insert_gaps(obs_times, smoothed_obs, MAX_GAP)
+            gradient_line = ax.plot(plot_obs_times, plot_obs_gradients, color=GRADIENT_COLOR,
+                                     linewidth=2.6, zorder=Z_GRADIENT, label="Observed")[0]
 
-        # Dotted marker at the last observation -- same reasoning as
-        # tempest-pressure-chart's own "still live today" marker.
-        ax.axvline(times[-1], color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
+        if fc_times:
+            # Prepend the last observed point so the dashed segment
+            # visually connects to the solid one with no gap at the
+            # boundary, same idea as tri-cities-temp-chart's own
+            # observed/forecast handoff.
+            boundary_times = ([obs_times[-1]] + fc_times) if obs_times else fc_times
+            boundary_gradients = ([obs_gradients[-1]] + fc_gradients) if obs_gradients else fc_gradients
+            fc_line = ax.plot(boundary_times, boundary_gradients, color=GRADIENT_COLOR, linewidth=2.6,
+                               linestyle="--", dashes=(5, 2.5), zorder=Z_GRADIENT, label="MetaMesh Forecast")[0]
+            if gradient_line is None:
+                gradient_line = fc_line
 
-        # Pad the day's raw (unsmoothed) range the same way tempest-
-        # pressure-chart does, but also guarantee at least +-2.5 mb of
-        # room around 0 either way -- the zero line and its onshore/
-        # offshore labels need that space even on a day the gradient
-        # never actually crosses sign.
+        # Dotted marker at "now" -- the observed/forecast boundary.
+        ax.axvline(now, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
+
         day_low, day_high = min(gradients), max(gradients)
         pad = 1.5
         min_half_range = 2.5
@@ -149,19 +98,13 @@ def build_chart(data_path, output_path):
         ax.set_ylim(y_low, y_high)
         ax.set_xlim(window_start, window_end)
     else:
-        ax.text(0.5, 0.5, "No observations in this window", transform=ax.transAxes,
+        ax.text(0.5, 0.5, "No observations or forecast in this window", transform=ax.transAxes,
                  ha="center", va="center", fontproperties=f_med, fontsize=13, color=INK_SECONDARY)
         y_low, y_high = -2.5, 2.5
         ax.set_ylim(y_low, y_high)
         ax.set_xlim(window_start, window_end)
 
     # ---------- zero line + onshore/offshore labels ----------
-    # A dotted reference line at 0 mb -- above it, station A (the west/
-    # coastal side, PDX by default) is higher pressure than station B,
-    # pushing air onshore through the gap between them; below it, station
-    # B is higher, pushing air offshore. Pinned near the plot's left edge
-    # (axes-fraction x, data-coordinate y) so the labels stay in the same
-    # spot regardless of where the line itself happens to sit that day.
     ax.axhline(0, color=ZERO_LINE_COLOR, linewidth=1.3, linestyle=":", zorder=Z_ZERO)
     label_trans = blended_transform_factory(ax.transAxes, ax.transData)
     label_offset = 0.06 * (y_high - y_low)
@@ -171,10 +114,7 @@ def build_chart(data_path, output_path):
                                fontproperties=f_med, fontsize=11, color=INK_SECONDARY, style="italic", zorder=Z_ZERO)
 
     # ---------- logo ----------
-    # Same placement logic as tempest-pressure-chart: bottom-right by
-    # default, moving to top-right if the gradient line's actual drawn
-    # path would pass behind it there.
-    LOGO_PATH = os.path.join(SCRIPT_DIR, "..", "assets", "ingalls_weather_logo.png")
+    LOGO_PATH = f"{SCRIPT_DIR}/../assets/ingalls_weather_logo.png"
     logo_ax = None
     if os.path.exists(LOGO_PATH):
         logo_img = plt.imread(LOGO_PATH)
@@ -208,14 +148,8 @@ def build_chart(data_path, output_path):
         logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
         logo_ax.axis("off")
-    else:
-        print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
-    # ---------- high / low markers ----------
-    # Always on, same reasoning as tempest-pressure-chart -- there's only
-    # the one series here, so the day's most-onshore and most-offshore
-    # reading are always worth calling out. Marked against the raw
-    # (unsmoothed) readings, same as the y-axis padding above.
+    # ---------- high / low markers (across the full observed+forecast window) ----------
     if times:
         low_idx = min(range(len(gradients)), key=lambda i: gradients[i])
         high_idx = max(range(len(gradients)), key=lambda i: gradients[i])
@@ -231,7 +165,8 @@ def build_chart(data_path, output_path):
             t_val, v_val = times[idx], gradients[idx]
             ax.scatter([t_val], [v_val], s=160, facecolors="none", edgecolors=color,
                        linewidths=2.2, zorder=Z_MARKER)
-            label_text = f"{prefix}: {v_val:+.1f} mb at {t_val.strftime('%H:%M')}"
+            suffix = " (fcst)" if is_forecast[idx] else ""
+            label_text = f"{prefix}: {v_val:+.1f} mb at {t_val.strftime('%-m/%-d %H:%M')}{suffix}"
 
             def place(ha, va, x_off, y_off):
                 return ax.annotate(label_text, xy=(t_val, v_val), xytext=(x_off, y_off),
@@ -239,13 +174,21 @@ def build_chart(data_path, output_path):
                                     fontproperties=f_bold, fontsize=12, color=color, zorder=Z_MARKER,
                                     bbox=dict(facecolor="white", edgecolor="none", pad=2))
 
+            # A couple of extra, larger-offset fallbacks beyond
+            # build_chart.py's own four -- this chart's forecast segment
+            # often puts its extreme right at the window's last point,
+            # in the bottom-right corner the logo already claims, where
+            # none of the tighter offsets clear it.
             candidates = [
                 ("left", "bottom", 15, 10),
                 ("right", "bottom", -15, 10),
                 ("left", "center", 15, -8),
                 ("right", "center", -15, -8),
+                ("right", "bottom", -15, 45),
+                ("right", "top", -15, -45),
             ]
             txt = None
+            best_placement, best_overlap = None, None
             for ha, va, x_off, y_off in candidates:
                 if txt is not None:
                     txt.remove()
@@ -254,9 +197,22 @@ def build_chart(data_path, output_path):
                 txt_box = txt.get_window_extent(renderer)
                 fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
                         and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
-                clear = not any(txt_box.overlaps(b) for b in occupied)
-                if fits and clear:
+                overlap = sum(max(0, min(txt_box.xmax, b.xmax) - max(txt_box.xmin, b.xmin))
+                              * max(0, min(txt_box.ymax, b.ymax) - max(txt_box.ymin, b.ymin))
+                              for b in occupied)
+                if fits and overlap == 0:
                     break
+                if fits and (best_overlap is None or overlap < best_overlap):
+                    best_placement, best_overlap = (ha, va, x_off, y_off), overlap
+            else:
+                # No candidate was both in-bounds and fully clear -- redraw
+                # whichever in-bounds candidate overlapped the least,
+                # rather than leaving whatever the last-tried one happened
+                # to be.
+                if best_placement is not None:
+                    txt.remove()
+                    txt = place(*best_placement)
+                    fig.canvas.draw()
             occupied.append(txt.get_window_extent(renderer))
 
         mark_extreme(low_idx, LOW_COLOR, "Low")
@@ -265,9 +221,6 @@ def build_chart(data_path, output_path):
     # ---------- axes styling ----------
     ax.set_ylabel(f"{label_a} − {label_b} Pressure (mb)", fontproperties=f_med, fontsize=12, color=INK)
     ax.set_xlabel("Time", fontproperties=f_med, fontsize=12, color=INK)
-    # Explicit +/- sign on every tick except 0 itself -- the sign is the
-    # point of this chart (unlike a plain pressure reading), but "+0"
-    # reads oddly for the one tick that has no sign to show.
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda v, _: "0" if v == 0 else f"{v:+.0f}"))
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.25, linewidth=0.9, zorder=Z_GRID)
@@ -277,36 +230,32 @@ def build_chart(data_path, output_path):
         ax.spines[spine].set_color(AXIS_COLOR)
         ax.spines[spine].set_linewidth(1.0)
 
-    # Every 12 hours (2 ticks/day) with a date+time label -- a 3-day (or
-    # longer) window needs the date on every tick, unlike a single-day
-    # chart's bare "%H:%M", since "00:00" alone no longer identifies which
-    # day it falls on.
     ax.xaxis.set_major_locator(mdates.HourLocator(interval=12, tz=tz))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%-m/%-d %Hh", tz=tz))
     ax.tick_params(axis="both", colors=AXIS_COLOR, labelsize=10, length=4)
     for tick in ax.get_xticklabels():
         tick.set_fontproperties(f_reg)
         tick.set_color(INK_SECONDARY)
-        tick.set_fontsize(10)
+        tick.set_fontsize(9)
     for tick in ax.get_yticklabels():
         tick.set_fontproperties(f_reg)
         tick.set_color(INK_SECONDARY)
         tick.set_fontsize(10)
 
     # ---------- title / subtitle ----------
-    # Derived from top_y (axpos.y1), same as tempest-pressure-chart's own
-    # --no-current-conditions archive-day charts -- there's no stat-box
-    # band below to reserve a fixed gap for, since this chart never draws
-    # one.
     subtitle_y = top_y + 0.058
     title_y = subtitle_y + 0.035
-    last_day_str = window_end - timedelta(days=1)
-    date_range = f"{window_start.strftime('%B %-d')} – {last_day_str.strftime('%B %-d, %Y')}"
     title = f"Pressure Gradient — {label_a}–{label_b}"
-    subtitle = (f"Last {window_days} Days ({date_range}) • Updated: {times[-1].strftime('%H:%M')} PT"
-                if times else f"Last {window_days} Days ({date_range})")
+    init_dt = datetime.fromisoformat(data["forecast_init_time"].replace("Z", "+00:00")).astimezone(tz)
+    subtitle = (f"Past Day Observed + 5-Day MetaMesh Forecast (Init {init_dt.strftime('%-m/%-d %Hz')}) "
+                f"• Updated: {now.strftime('%H:%M')} PT")
     fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
+
+    # ---------- legend (solid vs dashed needs a key, unlike the single-series chart) ----------
+    if obs_times and fc_times:
+        ax.legend(loc="lower right", bbox_to_anchor=(1.0, 1.01), ncol=2, frameon=False,
+                   prop=f_reg, fontsize=10, labelcolor=INK_SECONDARY)
 
     # ---------- attribution ----------
     fig.text(center_x, 0.02, "Ingalls Weather",
@@ -319,7 +268,7 @@ def build_chart(data_path, output_path):
 
 def main():
     args = parse_args()
-    build_chart(args.data, args.output)
+    build_forecast_chart(args.data, args.output)
 
 
 if __name__ == "__main__":

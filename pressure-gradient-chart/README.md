@@ -1,35 +1,48 @@
 # Pressure Gradient Chart
 
-Generates a styled same-day pressure-gradient chart for Ingalls Weather's
-Instagram: the difference between two stations' own sea-level pressure
-(station A minus station B) across the full 24-hour local calendar day, in
-24-hour time -- since this is a same-day chart, the line legitimately stops
-partway through the day rather than reaching the right edge, marked with a
-dotted vertical line at the most recent observation. A dotted horizontal
-line at 0 mb marks the sign change, labeled "Onshore Flow" above and
-"Offshore Flow" below. A single current-conditions stat box (Current
-Gradient) sits above the plot. Same canvas footprint, fonts, and overall
-layout as [`tempest-pressure-chart/`](../tempest-pressure-chart/) -- a
-cousin chart, not a sibling station, since both sides here come from NWS
-stations rather than a personal Tempest station.
+Generates a styled multi-day pressure-gradient chart for Ingalls Weather's
+Instagram: the difference between two stations' own pressure (station A
+minus station B) across a trailing local-calendar-day window (3 days by
+default), in 24-hour time -- since the window's last day is still in
+progress, the line legitimately stops partway through it rather than
+reaching the right edge, marked with a dotted vertical line at the most
+recent observation. A dotted horizontal line at 0 mb marks the sign
+change, labeled "Onshore Flow" above and "Offshore Flow" below. Same
+canvas footprint and fonts as
+[`tempest-pressure-chart/`](../tempest-pressure-chart/) -- a cousin chart,
+not a sibling station, since both sides here come from NWS stations
+rather than a personal Tempest station. Unlike that chart, there's no
+current-conditions stat box -- this chart's whole point is the multi-day
+trend, not a single "right now" number.
 
 Defaults to **PDX (Portland International) minus HRI (Hermiston
 Municipal)** -- the first pair this project is built around. Both are
 NWS ASOS/AWOS airport stations, chosen (over the Tempest-based sibling
 charts) because they bracket the Columbia River Gorge: when Portland's
-sea-level pressure is higher, air is pushed east through the gap (onshore,
+pressure is higher, air is pushed east through the gap (onshore,
 positive); when Hermiston's is higher, air is pushed west toward the coast
 (offshore, negative). `fetch_gradient.py` takes `--station-a`/`--station-b`
 so a different pair can be swapped in once more gradients are built.
 
 ## Files
 
-- `fetch_gradient.py` -- pulls a day's near-real-time, already-near-sea-
-  level pressure observations for both stations from api.weather.gov (see
-  Notes below), pairs them up by nearest observation time, and writes
-  `gradient_obs.json`. Run this any time you want the chart to reflect the
-  latest observations.
+- `fetch_gradient.py` -- pulls the last N days' (3 by default)
+  near-real-time, already-near-sea-level pressure observations for both
+  stations from api.weather.gov (see Notes below), pairs them up by
+  nearest observation time, and writes `gradient_obs.json`. Run this any
+  time you want the chart to reflect the latest observations.
 - `build_chart.py` -- renders `gradient_obs.json` into `gradient_chart.png`.
+- `fetch_metamesh_gradient.py` -- the obs + forecast sibling: pulls the
+  past day's observed gradient (imports `fetch_gradient.py`'s own
+  functions directly, rather than reimplementing them) plus the next 5
+  days from WindBorne MetaMesh, and writes `gradient_forecast.json` with
+  an `is_forecast` flag on every point. Requires `WB_API_KEY` in the
+  environment.
+- `build_forecast_chart.py` -- renders `gradient_forecast.json` into
+  `gradient_forecast_chart.png`: a solid observed line, a dashed forecast
+  line, and a dotted "now" boundary between them. Imports its fonts,
+  palette, and gap/smoothing helpers from `build_chart.py` rather than
+  duplicating them (see Notes below).
 - `requirements.txt` / `setup.sh` -- Python dependencies and the Poppins
   font fetch (no system packages needed here, unlike the map projects).
 
@@ -38,28 +51,42 @@ so a different pair can be swapped in once more gradients are built.
 ```bash
 bash setup.sh                      # first time / fresh environment only
 
-# Default: today, PDX minus HRI
+# Observed-only: last 3 days, PDX minus HRI
 python3 fetch_gradient.py
 python3 build_chart.py
 
-# A specific day or station pair
-python3 fetch_gradient.py --date 2026-08-30 --station-a KPDX --station-b KHRI
+# A longer window, a different end date, or a different station pair
+python3 fetch_gradient.py --days 5 --date 2026-08-30 --station-a KPDX --station-b KHRI
 python3 build_chart.py
+
+# Observed + MetaMesh forecast: past day observed, next 5 days forecast
+export WB_API_KEY=...               # your WindBorne API key
+python3 fetch_metamesh_gradient.py
+python3 build_forecast_chart.py
 ```
 
 ## Notes
 
 - **Source**: `api.weather.gov`'s per-station `/observations` feed for
-  each station, `start`/`end`-windowed to the local calendar day. This is
-  deliberately *not* the once-an-hour synoptic METAR product -- NWS/FAA
-  ASOS and AWOS sites also transmit "special" observations whenever
-  conditions change enough to warrant one, and api.weather.gov folds all
-  of those into the same feed, so a busy station like KPDX or KHRI
-  actually reports roughly every 5 minutes, not on a fixed schedule.
+  each station, `start`/`end`-windowed to the requested trailing days
+  (local midnight `--days` ago through the end of today, capped at "now").
+  This is deliberately *not* the once-an-hour synoptic METAR product --
+  NWS/FAA ASOS and AWOS sites also transmit "special" observations
+  whenever conditions change enough to warrant one, and api.weather.gov
+  folds all of those into the same feed, so a busy station like KPDX or
+  KHRI actually reports roughly every 5 minutes, not on a fixed schedule.
   Confirmed live: a 2-hour window for KPDX returned 25 observations (one
   every ~4.8 minutes), and a full day returned 309 (one every ~4.7
   minutes) -- no API key needed, just a `User-Agent` identifying the
   requester (`fetch_gradient.py`'s `HEADERS`).
+- **Pagination**: the endpoint caps a single request at 500 observations,
+  and a multi-day window at ~5-minute cadence blows past that (3 days is
+  ~850 per station) -- `fetch_observations()` follows the feed's own
+  `pagination.next` cursor (pages come back newest-first) until a page's
+  oldest observation reaches the window's start. The cursor URL doesn't
+  carry the original `start` bound, so `pressure_series()` explicitly
+  re-filters every observation back into `[start_utc, end_utc)` rather
+  than trusting the last page to stop exactly there.
 - **No further sea-level reduction is applied** -- `fetch_gradient.py`
   uses each observation's own `barometricPressure` field as-is. Despite
   the name, that field is *not* a station's raw absolute pressure; it's
@@ -93,50 +120,114 @@ python3 build_chart.py
   cadence -- much shorter than `tempest-pressure-chart`'s 15-sample window,
   which is tuned for that chart's ~1/minute Tempest cadence) is applied to
   the plotted line before gap-breaking, same order-of-operations reasoning
-  as that sibling chart. The current-conditions stat box and the y-axis
-  bounds still use the single latest/full-range *raw* readings.
-- **Day boundary** is a fixed local timezone (`--timezone`, default
-  `America/Los_Angeles` -- both KPDX and KHRI sit in Pacific time), local
-  midnight to midnight, not a per-station lookup (NWS stations don't carry
-  a timezone field the way a Tempest station's own API response does).
-- **X-axis spans the full 24-hour local day**, same tick layout as
-  `tempest-pressure-chart`.
+  as that sibling chart. The high/low markers and the y-axis bounds still
+  use the full-window *raw* readings.
+- **Window boundary** is a fixed local timezone (`--timezone`, default
+  `America/Los_Angeles` -- both KPDX and KHRI sit in Pacific time), not a
+  per-station lookup (NWS stations don't carry a timezone field the way a
+  Tempest station's own API response does). `--days` (default 3) counts
+  trailing local calendar days ending on `--date` (today, by default);
+  `window_start`/`window_days` in `gradient_obs.json` drive the chart's
+  x-axis directly, rather than re-deriving it from the observations
+  themselves.
+- **X-axis spans the full window** (`window_start` through
+  `window_start + window_days`), with ticks every 12 hours labeled with
+  both date and time (`%-m/%-d %Hh`) -- a bare `%H:%M`, fine for
+  `tempest-pressure-chart`'s single-day chart, would leave two different
+  days' midnights looking identical here.
 - **Data outages show as a break in the line, not a straight line across
   them** -- same `insert_gaps()` NaN-insertion approach as
   `tempest-pressure-chart`, with a longer `MAX_GAP` (15 minutes, vs. that
   chart's 6) sized for this chart's slower ~5-minute native cadence.
-- **Y-axis** pads a flat ±1.5 mb around the day's observed range, same as
-  `tempest-pressure-chart`, but additionally guarantees at least ±2.5 mb of
-  room around 0 mb either way -- the zero line and its onshore/offshore
-  labels need that space even on a day the gradient never actually changes
-  sign. Tick labels show an explicit `+`/`-` sign (`%+.0f`), since the sign
-  itself is the point of this chart, unlike a plain pressure reading.
+- **Y-axis** pads a flat ±1.5 mb around the window's observed range, same
+  as `tempest-pressure-chart`, but additionally guarantees at least ±2.5 mb
+  of room around 0 mb either way -- the zero line and its onshore/offshore
+  labels need that space even across a window the gradient never actually
+  changes sign. Tick labels show an explicit `+`/`-` sign on every tick
+  except 0 itself, since the sign is the point of this chart, unlike a
+  plain pressure reading.
 - **Zero line and onshore/offshore labels**: a dotted horizontal line at
   0 mb (`ZERO_LINE_COLOR`), with "Onshore Flow" text above it and
   "Offshore Flow" below, pinned near the plot's left edge via a blended
   transform (`transAxes` for x, `transData` for y) so they stay put
-  regardless of where the line itself sits that day, rather than drifting
-  with the x-axis span.
-- **High/low markers** circle and label the day's highest and lowest
+  regardless of where the line itself sits. Their own window extents are
+  included in the high/low markers' collision-avoidance list (`occupied`
+  in `build_chart()`), so a marker label never lands on top of them.
+- **High/low markers** circle and label the window's highest and lowest
   gradient (`HIGH_COLOR`/`LOW_COLOR`, the same red/blue every chart in
   this family uses) -- always on, same reasoning as
   `tempest-pressure-chart`. Label values show an explicit sign (e.g. `Low:
   -3.2 mb`). Same above-left/above-right/below-left/below-right fallback
   placement mechanism as that sibling chart.
-- **Current-conditions stat box** reuses `tempest-pressure-chart`'s
-  single-stat, centered-chip layout, but its background comes from
-  `GRADIENT_COLOR_TABLE` -- a table diverging around 0 mb (warm/orange for
-  a negative, offshore reading; blue for a positive, onshore one) via the
-  same `interp_color()`/`text_color_for_bg()` mechanism as that sibling
-  chart's absolute-pressure ramp, since this chart plots a signed
-  difference rather than an absolute reading.
+- **No current-conditions stat box**, unlike `tempest-pressure-chart` --
+  this chart's plot reclaims that vertical space (the full 0.65-of-figure
+  axes height, same as that chart's own `--no-current-conditions` archive
+  layout) rather than headlining a single "current" reading, since the
+  point of a multi-day chart is the trend, not one instant.
 - **Line color** (`GRADIENT_COLOR`, a muted navy) is deliberately its own
   hue, not `tempest-pressure-chart`'s forest green -- this chart plots a
   difference between two NWS stations, not one Tempest station's own
   reading, so it doesn't share that chart's "family" green.
-- Chart styling (fonts, dimensions, logo placement, current-conditions
-  stat box mechanics) otherwise mirrors `tempest-pressure-chart/build_chart.py`
-  directly -- edit `build_chart.py` to adjust.
+- Chart styling (fonts, dimensions, logo placement) otherwise mirrors
+  `tempest-pressure-chart/build_chart.py` directly -- edit `build_chart.py`
+  to adjust.
+
+## Obs + MetaMesh forecast version
+
+`fetch_metamesh_gradient.py` + `build_forecast_chart.py` render a second
+chart: the past day's NWS-observed gradient (solid line) plus the next 5
+days from WindBorne MetaMesh (dashed line), split at a dotted "now"
+boundary.
+
+- **Forecast source**: MetaMesh's `pressure_msl` field (already mean sea
+  level pressure, no reduction needed), queried by station id for both
+  stations via `/forecasts/v1/point_forecast` -- the same endpoint and
+  `WB_API_KEY` env var every other MetaMesh-consuming project in this repo
+  uses (e.g. `tri-cities-7day-forecast/fetch_metamesh_forecast.py`).
+  Confirmed live that MetaMesh accepts **KHRI directly as a station id**
+  (not just coordinates), and that both stations' forecasts share the
+  exact same hourly time grid -- no interpolation/pairing needed on the
+  forecast side, unlike the observed segment's two independently-timed
+  NWS feeds. Also confirmed `pressure_msl` tracks this project's own
+  `barometricPressure`-based observed readings closely at the same hour
+  (e.g. 1017.08 mb MetaMesh vs. 1017.27 mb observed for KPDX, 1014.08 mb
+  vs. 1014.2 mb for KHRI), so the observed-to-forecast handoff doesn't
+  visibly jump.
+- **Combining the two segments**: `fetch_metamesh_gradient.py` writes one
+  time-ascending `observations` array covering both, each point flagged
+  `is_forecast: true/false`. `build_forecast_chart.py` splits on that flag
+  to plot two `Line2D`s (solid observed, dashed forecast,
+  `dashes=(5, 2.5)` -- the same dash pattern
+  `tri-cities-temp-chart/build_chart.py` uses for its own forecast line),
+  prepending the last observed point onto the forecast series so the
+  dashed segment starts exactly where the solid one ends, with no visual
+  gap at the boundary.
+- **Code reuse**: `fetch_metamesh_gradient.py` imports
+  `normalize_station_id`/`pressure_series`/`merge_gradient`/
+  `MATCH_TOLERANCE` directly from `fetch_gradient.py` rather than
+  reimplementing the observed-segment logic (pagination included).
+  `build_forecast_chart.py` similarly imports its fonts, palette, sizing
+  constants, and `insert_gaps()`/`smooth()` from `build_chart.py` -- same
+  chart family, so duplicating those would just be a maintenance hazard.
+- **Smoothing** applies only to the observed segment (same
+  `SMOOTHING_WINDOW` as `build_chart.py`, since NWS's ~5-minute cadence is
+  noisy at this scale) -- the forecast segment is left raw, since
+  MetaMesh's hourly cadence is already coarse enough that smoothing it
+  would blur real hour-to-hour model detail rather than remove noise.
+- **High/low markers** cover the *entire* observed+forecast window, not
+  just the observed segment, and note `(fcst)` in the label when the
+  extreme falls in the forecast portion. Its collision-avoidance loop
+  carries two extra, larger-offset fallback placements beyond
+  `build_chart.py`'s own four, and picks whichever in-bounds candidate
+  overlaps existing labels least if none is fully clear -- a forecast
+  extreme landing right at the window's last point (in the bottom-right
+  corner the logo already claims) is a real, not just hypothetical, case
+  here.
+- **Legend**: unlike the observed-only chart (a single series needs no
+  key), this chart adds a small top-right legend distinguishing "Observed"
+  from "MetaMesh Forecast" by line style.
+- Everything else (zero line/onshore-offshore labels, logo placement, no
+  current-conditions stat box, axis styling) is identical to `build_chart.py`.
 
 ## Deployment
 
@@ -155,12 +246,19 @@ venv/bin/pip install -r requirements.txt
 bash setup.sh
 ```
 
-Then install `deploy/crontab.example`'s line via `crontab -e` -- no API
-key needed, `api.weather.gov` is free. `publish_gradient.py` runs every 15
-minutes (see that file's docstring for why 15 minutes is enough even
-though both stations' own feeds update roughly every 5).
+Then install `deploy/crontab.example`'s lines via `crontab -e`:
 
-End-to-end test:
+- `publish_gradient.py` (observed-only) needs no API key --
+  `api.weather.gov` is free -- and runs every 15 minutes (see that file's
+  docstring for why 15 minutes is enough even though both stations' own
+  feeds update roughly every 5).
+- `publish_forecast_gradient.py` (obs + MetaMesh forecast) needs
+  `WB_API_KEY` -- skip that line in the crontab if `tempest-temp-chart`,
+  `tri-cities-7day-forecast`, or any other MetaMesh-consuming project is
+  already deployed on this droplet, since it sets the same variable -- and
+  runs hourly.
+
+End-to-end test, observed-only:
 
 ```bash
 venv/bin/python3 deploy/publish_gradient.py
@@ -173,6 +271,20 @@ Wait 15 minutes and confirm the file's timestamp updates on its own while
 the URL stays the same -- same overwrite-in-place-with-atomic-rename
 pattern, and same nginx `Cache-Control: no-cache, max-age=60` handling, as
 every other image served from that folder.
+
+End-to-end test, obs + MetaMesh forecast:
+
+```bash
+venv/bin/python3 deploy/publish_forecast_gradient.py
+tail -f state/publish.log
+```
+
+Confirm `/var/www/images/pdx_hri_gradient_forecast.png` exists and is
+fresh, then load
+`https://images.ingallswx.com/pdx_hri_gradient_forecast.png`. This uses
+its own lock file (`state/forecast_run.lock`, distinct from
+`publish_gradient.py`'s `state/run.lock`) so a slow run of one never
+blocks the other.
 
 No nginx changes needed -- `nginx-images.conf` already serves any file
 dropped into `/var/www/images/`, not just the forecast images it was
