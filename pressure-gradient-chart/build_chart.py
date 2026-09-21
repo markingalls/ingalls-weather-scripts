@@ -241,6 +241,13 @@ def build_chart(data_path, output_path):
         occupied = [onshore_label.get_window_extent(renderer), offshore_label.get_window_extent(renderer)]
         if logo_ax is not None:
             occupied.append(logo_ax.get_window_extent(renderer))
+        # The line's own drawn path, not just other labels/the logo -- an
+        # extreme is a point ON the line, so the line keeps running right
+        # past it in both directions, and a label offset that clears every
+        # other label can still land right on top of (or hugging right up
+        # against) the line itself a little further along.
+        line_paths = [gradient_line.get_transform().transform_path(gradient_line.get_path())] \
+            if gradient_line is not None else []
 
         def mark_extreme(idx, color, prefix):
             t_val, v_val = times[idx], gradients[idx]
@@ -254,13 +261,23 @@ def build_chart(data_path, output_path):
                                     fontproperties=f_bold, fontsize=12, color=color, zorder=Z_MARKER,
                                     bbox=dict(facecolor="white", edgecolor="none", pad=2))
 
+            # Larger offsets than tempest-pressure-chart's own four -- that
+            # chart's single-station line is far smoother, so a modest
+            # offset almost always clears it; this chart's noisier,
+            # closer-together wiggles need more clearance to reliably miss
+            # the line on the first few tries.
             candidates = [
-                ("left", "bottom", 15, 10),
-                ("right", "bottom", -15, 10),
-                ("left", "center", 15, -8),
-                ("right", "center", -15, -8),
+                ("left", "bottom", 15, 12),
+                ("right", "bottom", -15, 12),
+                ("left", "top", 15, -12),
+                ("right", "top", -15, -12),
+                ("left", "bottom", 15, 30),
+                ("right", "bottom", -15, 30),
+                ("left", "top", 15, -30),
+                ("right", "top", -15, -30),
             ]
             txt = None
+            best_placement, best_overlap = None, None
             for ha, va, x_off, y_off in candidates:
                 if txt is not None:
                     txt.remove()
@@ -269,9 +286,23 @@ def build_chart(data_path, output_path):
                 txt_box = txt.get_window_extent(renderer)
                 fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
                         and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
-                clear = not any(txt_box.overlaps(b) for b in occupied)
-                if fits and clear:
+                on_line = any(p.intersects_bbox(txt_box, filled=False) for p in line_paths)
+                overlap = sum(max(0, min(txt_box.xmax, b.xmax) - max(txt_box.xmin, b.xmin))
+                              * max(0, min(txt_box.ymax, b.ymax) - max(txt_box.ymin, b.ymin))
+                              for b in occupied)
+                if fits and not on_line and overlap == 0:
                     break
+                if fits and not on_line and (best_overlap is None or overlap < best_overlap):
+                    best_placement, best_overlap = (ha, va, x_off, y_off), overlap
+            else:
+                # No candidate was in-bounds, clear of the line, AND fully
+                # clear of other labels -- redraw whichever in-bounds,
+                # off-the-line candidate overlapped other labels least,
+                # rather than leaving whatever the last-tried one was.
+                if best_placement is not None:
+                    txt.remove()
+                    txt = place(*best_placement)
+                    fig.canvas.draw()
             occupied.append(txt.get_window_extent(renderer))
 
         mark_extreme(low_idx, LOW_COLOR, "Low")

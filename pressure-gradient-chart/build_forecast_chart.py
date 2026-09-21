@@ -63,6 +63,7 @@ def build_forecast_chart(data_path, output_path):
     center_x = (axpos.x0 + axpos.x1) / 2
 
     gradient_line = None
+    fc_line = None
     if times:
         # Observed: smoothed the same way build_chart.py's single-series
         # chart is (NWS's ~5-minute cadence is noisy at this scale).
@@ -159,6 +160,14 @@ def build_forecast_chart(data_path, output_path):
         occupied = [onshore_label.get_window_extent(renderer), offshore_label.get_window_extent(renderer)]
         if logo_ax is not None:
             occupied.append(logo_ax.get_window_extent(renderer))
+        # Both the solid observed and dashed forecast lines' own drawn
+        # paths -- an extreme is a point ON one of them, so that line
+        # keeps running right past it in both directions, and a label
+        # offset that clears every other label can still land right on
+        # top of (or hugging right up against) the line itself a little
+        # further along.
+        line_paths = [ln.get_transform().transform_path(ln.get_path())
+                      for ln in (gradient_line, fc_line) if ln is not None]
 
         def mark_extreme(idx, color, prefix):
             t_val, v_val = times[idx], gradients[idx]
@@ -172,18 +181,22 @@ def build_forecast_chart(data_path, output_path):
                                     fontproperties=f_bold, fontsize=12, color=color, zorder=Z_MARKER,
                                     bbox=dict(facecolor="white", edgecolor="none", pad=2))
 
-            # A couple of extra, larger-offset fallbacks beyond
-            # build_chart.py's own four -- this chart's forecast segment
-            # often puts its extreme right at the window's last point,
-            # in the bottom-right corner the logo already claims, where
-            # none of the tighter offsets clear it.
+            # More, and larger-offset, fallbacks beyond build_chart.py's
+            # own eight -- this chart's forecast segment often puts its
+            # extreme right at the window's last point, in the
+            # bottom-right corner the logo already claims, where none of
+            # the tighter offsets clear both the logo and the line.
             candidates = [
-                ("left", "bottom", 15, 10),
-                ("right", "bottom", -15, 10),
-                ("left", "center", 15, -8),
-                ("right", "center", -15, -8),
-                ("right", "bottom", -15, 45),
-                ("right", "top", -15, -45),
+                ("left", "bottom", 15, 12),
+                ("right", "bottom", -15, 12),
+                ("left", "top", 15, -12),
+                ("right", "top", -15, -12),
+                ("left", "bottom", 15, 30),
+                ("right", "bottom", -15, 30),
+                ("left", "top", 15, -30),
+                ("right", "top", -15, -30),
+                ("right", "bottom", -15, 50),
+                ("right", "top", -15, -50),
             ]
             txt = None
             best_placement, best_overlap = None, None
@@ -195,18 +208,20 @@ def build_forecast_chart(data_path, output_path):
                 txt_box = txt.get_window_extent(renderer)
                 fits = (ax_box.xmin <= txt_box.xmin and txt_box.xmax <= ax_box.xmax
                         and ax_box.ymin <= txt_box.ymin and txt_box.ymax <= ax_box.ymax)
+                on_line = any(p.intersects_bbox(txt_box, filled=False) for p in line_paths)
                 overlap = sum(max(0, min(txt_box.xmax, b.xmax) - max(txt_box.xmin, b.xmin))
                               * max(0, min(txt_box.ymax, b.ymax) - max(txt_box.ymin, b.ymin))
                               for b in occupied)
-                if fits and overlap == 0:
+                if fits and not on_line and overlap == 0:
                     break
-                if fits and (best_overlap is None or overlap < best_overlap):
+                if fits and not on_line and (best_overlap is None or overlap < best_overlap):
                     best_placement, best_overlap = (ha, va, x_off, y_off), overlap
             else:
-                # No candidate was both in-bounds and fully clear -- redraw
-                # whichever in-bounds candidate overlapped the least,
-                # rather than leaving whatever the last-tried one happened
-                # to be.
+                # No candidate was in-bounds, clear of both lines, AND
+                # fully clear of other labels -- redraw whichever
+                # in-bounds, off-the-line candidate overlapped other
+                # labels least, rather than leaving whatever the
+                # last-tried one was.
                 if best_placement is not None:
                     txt.remove()
                     txt = place(*best_placement)

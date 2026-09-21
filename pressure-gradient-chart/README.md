@@ -165,8 +165,17 @@ python3 build_forecast_chart.py
   gradient (`HIGH_COLOR`/`LOW_COLOR`, the same red/blue every chart in
   this family uses) -- always on, same reasoning as
   `tempest-pressure-chart`. Label values show an explicit sign (e.g. `Low:
-  -3.2 mb`). Same above-left/above-right/below-left/below-right fallback
-  placement mechanism as that sibling chart.
+  -3.2 mb`). Placement tries 8 offset/alignment candidates (more, and
+  larger, than `tempest-pressure-chart`'s own 4 -- this chart's noisier,
+  closer-together wiggles need more clearance to reliably miss the line),
+  rejecting any that overlap another label/the logo *or* the line's own
+  drawn path (`Path.intersects_bbox()` against the line's transformed
+  path, not just the other labels' bounding boxes) -- an extreme sits ON
+  the line, which keeps running right past it in both directions, so a
+  label offset that clears every other label can still land right on top
+  of the line a little further along. Falls back to whichever
+  in-bounds, off-the-line candidate overlaps other labels least if none
+  is fully clear.
 - **No current-conditions stat box**, unlike `tempest-pressure-chart` --
   this chart's plot reclaims that vertical space (the full 0.65-of-figure
   axes height, same as that chart's own `--no-current-conditions` archive
@@ -228,13 +237,14 @@ boundary.
   just the observed segment -- the label itself doesn't distinguish
   whether the extreme fell in the observed or forecast portion, since the
   dotted "now" line and the solid/dashed line style already show that.
-  Its collision-avoidance loop carries two extra, larger-offset fallback
-  placements beyond
-  `build_chart.py`'s own four, and picks whichever in-bounds candidate
-  overlaps existing labels least if none is fully clear -- a forecast
-  extreme landing right at the window's last point (in the bottom-right
-  corner the logo already claims) is a real, not just hypothetical, case
-  here.
+  Its collision-avoidance loop checks both the solid and dashed lines'
+  own drawn paths (same `Path.intersects_bbox()` mechanism as
+  `build_chart.py`), plus two extra, larger-offset fallback placements
+  beyond `build_chart.py`'s own eight, and picks whichever in-bounds,
+  off-both-lines candidate overlaps existing labels least if none is
+  fully clear -- a forecast extreme landing right at the window's last
+  point (in the bottom-right corner the logo already claims) is a real,
+  not just hypothetical, case here.
 - **Legend**: unlike the observed-only chart (a single series needs no
   key), this chart adds a small top-right legend distinguishing "Observed"
   from "MetaMesh Forecast" by line style.
