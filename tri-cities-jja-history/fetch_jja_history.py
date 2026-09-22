@@ -5,7 +5,10 @@ see tri-cities-jja-calendar/fetch_jja_highs.py for why ACIS's `normal`
 flag gives this directly, no client-side percentile math needed) across
 several years of JJA, and writes jja_history.json: for each year, the
 average daily-high departure for June, July, August, and the full JJA
-season.
+season, plus each year's raw (not departure) JJA mean high, and the
+constant 1991-2020 JJA mean high itself (`normal_mean_high`) -- together
+what build_trend_chart.py plots as a long-term line chart, alongside
+build_history_grid.py's year x month departure grid.
 
 One ACIS StnData call spans the whole start-year..end-year range (ACIS
 doesn't mind the non-summer months coming back too; they're just filtered
@@ -73,14 +76,25 @@ if __name__ == "__main__":
 
     resp = fetch(args.sid, date(start_year, 6, 1), date(end_year, 8, 31))
 
-    # departures_by_year[year][month] = [daily departures in that month]
+    # departures_by_year[year][month] = [daily departures in that month];
+    # maxt_by_year[year] = [raw daily highs across JJA]; normal_by_day
+    # (unique calendar day -> normal high) since a calendar day's normal is
+    # the same every year -- collecting it once per unique day, rather than
+    # once per year, means the mean below isn't biased by which years
+    # happen to have more/fewer missing days.
     departures_by_year = {y: {m: [] for m in MONTHS} for y in range(start_year, end_year + 1)}
+    maxt_by_year = {y: [] for y in range(start_year, end_year + 1)}
+    normal_by_day = {}
     for d, maxt, normal, departure in resp.get("data", []):
-        if departure == "M":
-            continue
         y, m = int(d[:4]), int(d[5:7])
-        if m in MONTHS and y in departures_by_year:
+        if m not in MONTHS or y not in departures_by_year:
+            continue
+        if departure != "M":
             departures_by_year[y][m].append(float(departure))
+        if maxt != "M":
+            maxt_by_year[y].append(float(maxt))
+        if normal != "M":
+            normal_by_day[d[5:]] = float(normal)
 
     years = {}
     for y in range(start_year, end_year + 1):
@@ -91,6 +105,7 @@ if __name__ == "__main__":
             "july": mean(by_month[7]),
             "august": mean(by_month[8]),
             "season": mean(season_deps),
+            "maxt_mean": mean(maxt_by_year[y]),
             "n_days": len(season_deps),
         }
 
@@ -102,6 +117,7 @@ if __name__ == "__main__":
         "start_year": start_year,
         "end_year": end_year,
         "normals_period": NORMALS_PERIOD,
+        "normal_mean_high": mean(list(normal_by_day.values())),
         "years": years,
     }
     with open(args.output, "w") as f:

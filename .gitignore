@@ -116,4 +116,5 @@ tri-cities-jja-calendar/output/*.png
 # run, and the rendered grid in output/ is an output too -- neither is
 # source, so don't track them.
 tri-cities-jja-history/jja_history.json
+tri-cities-jja-history/jja_history_full.json
 tri-cities-jja-history/output/*.png
