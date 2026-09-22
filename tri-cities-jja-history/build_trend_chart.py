@@ -71,7 +71,7 @@ def main():
 
     fig = plt.figure(figsize=(16, 9), dpi=200)
     fig.patch.set_facecolor(BG)
-    ax = fig.add_axes([0.06, 0.14, 0.90, 0.62])
+    ax = fig.add_axes([0.06, 0.12, 0.90, 0.66])
     ax.set_facecolor("white")
 
     ax.fill_between(all_years, all_means, normal_mean, where=all_means >= normal_mean, interpolate=True,
@@ -160,7 +160,11 @@ def main():
     fig.text(center_x, 0.02, "ACIS/xmACIS (observed & 1991-2020 normals) — Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
-    plt.savefig(output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
+    # No bbox_inches="tight" -- unlike tri-cities-temp-chart's crop-to-
+    # content convention, this stays on the fixed 16x9 canvas the other
+    # tri-cities-jja-* graphics (the calendar, the history grid) use, so
+    # all of them come out the same pixel dimensions.
+    plt.savefig(output, facecolor=fig.get_facecolor())
     print(f"saved {output}")
 
 
