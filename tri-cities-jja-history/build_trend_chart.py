@@ -33,7 +33,6 @@ TEMP_COLOR = "#164f29"
 NORMAL_LINE_COLOR = "#c9531c"
 ABOVE_FILL = "#e8a3a3"
 BELOW_FILL = "#a9c6e8"
-TREND_COLOR = "#5a584f"
 FILL_ALPHA = 0.55
 
 MIN_SEASON_DAYS = 80  # a year needs at least this many of JJA's 92 days to count as usable
@@ -70,10 +69,6 @@ def main():
     output = args.output or f"output/tri_cities_jja_trend_{years[0]}-{years[-1]}.png"
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
 
-    slope, intercept = np.polyfit(years, means, 1)
-    trend = slope * all_years + intercept
-    slope_per_decade = slope * 10
-
     fig = plt.figure(figsize=(16, 9), dpi=200)
     fig.patch.set_facecolor(BG)
     ax = fig.add_axes([0.06, 0.14, 0.90, 0.62])
@@ -86,12 +81,6 @@ def main():
 
     ax.axhline(normal_mean, color=NORMAL_LINE_COLOR, linewidth=2.0, linestyle="--", dashes=(6, 3),
                zorder=3, label=f"{data['normals_period']} average ({normal_mean:.1f}°F)")
-
-    # The trend line itself is a fitted model, not observed data, so it's
-    # drawn continuously across the full range rather than breaking at
-    # the same gaps the observed line does.
-    ax.plot(all_years, trend, color=TREND_COLOR, linewidth=1.8, linestyle=":", dashes=(1, 2),
-            zorder=3, label=f"Linear trend ({slope_per_decade:+.2f}°F/decade)")
 
     ax.plot(all_years, all_means, color=TEMP_COLOR, linewidth=2.4, marker="o", markersize=5.5,
             zorder=4, label="JJA mean high (observed)")
@@ -124,13 +113,12 @@ def main():
     center_x = (axpos.x0 + axpos.x1) / 2
 
     handles, labels = ax.get_legend_handles_labels()
-    order = ["JJA mean high (observed)", f"{data['normals_period']} average ({normal_mean:.1f}°F)",
-             f"Linear trend ({slope_per_decade:+.2f}°F/decade)"]
+    order = ["JJA mean high (observed)", f"{data['normals_period']} average ({normal_mean:.1f}°F)"]
     by_label = dict(zip(labels, handles))
     handles = [by_label[l] for l in order if l in by_label]
     leg = fig.legend(handles, [l for l in order if l in by_label],
                       loc="lower left", bbox_to_anchor=(left_x, top_y + 0.012),
-                      bbox_transform=fig.transFigure, ncol=3, frameon=False,
+                      bbox_transform=fig.transFigure, ncol=2, frameon=False,
                       prop=f_reg, fontsize=11, handlelength=1.8, columnspacing=1.8)
     for text in leg.get_texts():
         text.set_color(INK_SECONDARY)

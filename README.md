@@ -58,8 +58,7 @@ workflows. Each project lives in its own directory with its own README.
   Tri-Cities JJA high-temperature departure from the 1991-2020 average
   (years across as columns, June/July/August/season as rows), plus a
   line chart of raw JJA mean high across the station's full usable
-  period of record against that same average, with a linear trend line
-  (xmACIS).
+  period of record (back to 1894) against that same average (xmACIS).
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest

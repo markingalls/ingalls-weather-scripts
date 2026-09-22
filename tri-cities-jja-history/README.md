@@ -16,8 +16,8 @@ share one `fetch_jja_history.py`/`jja_history.json` pipeline:
 - **Trend chart** (`build_trend_chart.py`) -- a line chart of *raw* JJA
   mean high temperature across the station's full usable period of
   record (back to 1894 -- see Notes), against a single 1991-2020 average
-  reference line, with a linear trend line. Meant for the opposite case:
-  the long run, not a handful of recent years.
+  reference line. Meant for the opposite case: the long run, not a
+  handful of recent years.
 
 ## Files
 
@@ -72,7 +72,7 @@ python3 fetch_jja_history.py --sid "KPDX 5" --station KPDX --label "Portland, OR
   `tri-cities-temp-chart` use): KPSC's own raw daily data is essentially
   missing 1946-1997, so its own *usable* period of record only starts in
   1998 -- fine for a percentile climatology or a recent-years grid, not
-  for a century-plus trend line. PSCthr and KPSC return identical
+  for a century-plus view. PSCthr and KPSC return identical
   maxt/normal/departure for the modern period both cover (spot-checked),
   so switching to PSCthr doesn't change the history grid's output at all,
   only what the trend chart can reach further back.
@@ -83,9 +83,7 @@ python3 fetch_jja_history.py --sid "KPDX 5" --station KPDX --label "Portland, OR
   a usable JJA regardless of range requested, and the observed line is
   plotted with real gaps (`NaN` for a dropped year) rather than a
   straight connector across one -- a straight line through a 4-6 year gap
-  would read as smoothed/interpolated data it isn't. The fitted trend
-  line, not being observed data, is still drawn continuously across the
-  full range.
+  would read as smoothed/interpolated data it isn't.
 - **The grid's color scale is +-10°F, not the calendar's +-15°F.** A
   single day's high can swing far from normal; a month's or a season's
   *average* can't -- at +-15°F nearly every cell would land pale and
@@ -109,8 +107,6 @@ python3 fetch_jja_history.py --sid "KPDX 5" --station KPDX --label "Portland, OR
   Immaterial at any scale this chart displays; `normal_mean_high` is
   computed directly from the `normal` column rather than backed out of
   `departure`; see `fetch_jja_history.py`'s `normal_by_day`.
-- **Trend line**: an ordinary least-squares fit (`numpy.polyfit`, degree
-  1) across all usable years' raw JJA mean highs, labeled in °F/decade.
 - Styling (fonts, colors, logo placement, background-aware cell text
   color in the grid) mirrors `tri-cities-jja-calendar/build_calendar.py`
   and `tri-cities-temp-chart/build_chart.py` -- edit `build_history_grid.py`
