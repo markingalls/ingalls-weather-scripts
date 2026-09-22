@@ -52,20 +52,26 @@ def main():
     start_year, end_year = data["start_year"], data["end_year"]
     normal_mean = data["normal_mean_high"]
 
-    years, means = [], []
-    for y in range(start_year, end_year + 1):
+    # A dense year-by-year array, NaN where a year falls short of
+    # MIN_SEASON_DAYS, so the plotted line actually breaks across a real
+    # multi-year gap (this station's threaded record is missing 1900-1903
+    # entirely, for one) instead of drawing a straight connector through
+    # it that would look like interpolated data.
+    all_years = np.arange(start_year, end_year + 1)
+    all_means = np.full(all_years.shape, np.nan)
+    for i, y in enumerate(all_years):
         v = data["years"].get(str(y))
         if v and v["maxt_mean"] is not None and v["n_days"] >= MIN_SEASON_DAYS:
-            years.append(y)
-            means.append(v["maxt_mean"])
-    years = np.array(years)
-    means = np.array(means)
+            all_means[i] = v["maxt_mean"]
+
+    valid = ~np.isnan(all_means)
+    years, means = all_years[valid], all_means[valid]
 
     output = args.output or f"output/tri_cities_jja_trend_{years[0]}-{years[-1]}.png"
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
 
     slope, intercept = np.polyfit(years, means, 1)
-    trend = slope * years + intercept
+    trend = slope * all_years + intercept
     slope_per_decade = slope * 10
 
     fig = plt.figure(figsize=(16, 9), dpi=200)
@@ -73,18 +79,21 @@ def main():
     ax = fig.add_axes([0.06, 0.14, 0.90, 0.62])
     ax.set_facecolor("white")
 
-    ax.fill_between(years, means, normal_mean, where=means >= normal_mean, interpolate=True,
+    ax.fill_between(all_years, all_means, normal_mean, where=all_means >= normal_mean, interpolate=True,
                      color=ABOVE_FILL, alpha=FILL_ALPHA, linewidth=0, zorder=1)
-    ax.fill_between(years, means, normal_mean, where=means < normal_mean, interpolate=True,
+    ax.fill_between(all_years, all_means, normal_mean, where=all_means < normal_mean, interpolate=True,
                      color=BELOW_FILL, alpha=FILL_ALPHA, linewidth=0, zorder=1)
 
     ax.axhline(normal_mean, color=NORMAL_LINE_COLOR, linewidth=2.0, linestyle="--", dashes=(6, 3),
                zorder=3, label=f"{data['normals_period']} average ({normal_mean:.1f}°F)")
 
-    ax.plot(years, trend, color=TREND_COLOR, linewidth=1.8, linestyle=":", dashes=(1, 2),
+    # The trend line itself is a fitted model, not observed data, so it's
+    # drawn continuously across the full range rather than breaking at
+    # the same gaps the observed line does.
+    ax.plot(all_years, trend, color=TREND_COLOR, linewidth=1.8, linestyle=":", dashes=(1, 2),
             zorder=3, label=f"Linear trend ({slope_per_decade:+.2f}°F/decade)")
 
-    ax.plot(years, means, color=TEMP_COLOR, linewidth=2.4, marker="o", markersize=5.5,
+    ax.plot(all_years, all_means, color=TEMP_COLOR, linewidth=2.4, marker="o", markersize=5.5,
             zorder=4, label="JJA mean high (observed)")
 
     ax.set_ylabel("JJA Mean High Temperature (°F)", fontproperties=f_med, fontsize=12, color=INK)

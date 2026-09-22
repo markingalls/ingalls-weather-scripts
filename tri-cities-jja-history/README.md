@@ -15,9 +15,9 @@ share one `fetch_jja_history.py`/`jja_history.json` pipeline:
   decades.
 - **Trend chart** (`build_trend_chart.py`) -- a line chart of *raw* JJA
   mean high temperature across the station's full usable period of
-  record, against a single 1991-2020 average reference line, with a
-  linear trend line. Meant for the opposite case: the long run, not a
-  handful of recent years.
+  record (back to 1894 -- see Notes), against a single 1991-2020 average
+  reference line, with a linear trend line. Meant for the opposite case:
+  the long run, not a handful of recent years.
 
 ## Files
 
@@ -47,13 +47,13 @@ share one `fetch_jja_history.py`/`jja_history.json` pipeline:
 ```bash
 bash setup.sh                      # first time / fresh environment only
 
-# History grid: KPSC / Pasco, WA, 2019 through the most recently completed JJA
+# History grid: Tri-Cities Area / PSCthr, 2019 through the most recently completed JJA
 python3 fetch_jja_history.py
 python3 build_history_grid.py
 
-# Trend chart: full usable period of record (see Notes) -- a separate
-# --output so it doesn't overwrite the grid's jja_history.json
-python3 fetch_jja_history.py --start-year 1998 --output jja_history_full.json
+# Trend chart: full usable period of record, back to 1894 (see Notes) --
+# a separate --output so it doesn't overwrite the grid's jja_history.json
+python3 fetch_jja_history.py --start-year 1894 --output jja_history_full.json
 python3 build_trend_chart.py
 
 # A specific range or station (either chart)
@@ -63,20 +63,29 @@ python3 fetch_jja_history.py --sid "KPDX 5" --station KPDX --label "Portland, OR
 
 ## Notes
 
-- **Source**: ACIS (xmACIS), station `KPSC 5` by default -- same source,
-  same `normal`/`departure` element flags, as
-  [`tri-cities-jja-calendar`](../tri-cities-jja-calendar/)'s
-  `fetch_jja_highs.py`.
-- **KPSC's "full usable period of record" is 1998-present, not its
-  nominal 1945-present.** The station's raw daily data has isolated
-  coverage in 1945 and then a large gap until 1998 (confirmed by pulling
-  the full period of record: only 10,854 of 29,759 days since 1945-04-01
-  have data, and every JJA from 1998 on has at least 89 of 92 days vs.
-  essentially nothing 1946-1997) -- the same gap
-  `tri-cities-temp-chart/fetch_climatology.py` documents for the
-  1991-2020 percentile window. `build_trend_chart.py`'s
-  `MIN_SEASON_DAYS` (80) drops any year that falls short of a usable JJA
-  regardless of range requested.
+- **Source**: ACIS (xmACIS), station `PSCthr 9` by default -- ACIS's
+  "Tri-Cities Area" *threaded* station, which splices the area's older
+  COOP records together with the modern KPSC airport record into one
+  long, largely gap-free daily series back to 1894-02-01. This is
+  deliberately not KPSC alone (`KPSC 5`, what
+  [`tri-cities-jja-calendar`](../tri-cities-jja-calendar/) and
+  `tri-cities-temp-chart` use): KPSC's own raw daily data is essentially
+  missing 1946-1997, so its own *usable* period of record only starts in
+  1998 -- fine for a percentile climatology or a recent-years grid, not
+  for a century-plus trend line. PSCthr and KPSC return identical
+  maxt/normal/departure for the modern period both cover (spot-checked),
+  so switching to PSCthr doesn't change the history grid's output at all,
+  only what the trend chart can reach further back.
+- **Even PSCthr has a few gap years**: 1900-1903 entirely, and partial
+  seasons in 1905, 1954-56, and 1978-79 (confirmed by pulling its full
+  period of record and counting valid JJA days per year).
+  `build_trend_chart.py`'s `MIN_SEASON_DAYS` (80) drops any year short of
+  a usable JJA regardless of range requested, and the observed line is
+  plotted with real gaps (`NaN` for a dropped year) rather than a
+  straight connector across one -- a straight line through a 4-6 year gap
+  would read as smoothed/interpolated data it isn't. The fitted trend
+  line, not being observed data, is still drawn continuously across the
+  full range.
 - **The grid's color scale is +-10°F, not the calendar's +-15°F.** A
   single day's high can swing far from normal; a month's or a season's
   *average* can't -- at +-15°F nearly every cell would land pale and

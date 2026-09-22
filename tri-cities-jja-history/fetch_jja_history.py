@@ -14,9 +14,19 @@ One ACIS StnData call spans the whole start-year..end-year range (ACIS
 doesn't mind the non-summer months coming back too; they're just filtered
 out client-side), rather than one call per year.
 
-Defaults to KPSC (Tri-Cities Airport, Pasco, WA), 2019 through the most
-recently *completed* JJA (see tri-cities-jja-calendar/fetch_jja_highs.py's
-same default_year logic).
+Defaults to ACIS's "Tri-Cities Area" threaded station (sid `PSCthr 9`),
+2019 through the most recently *completed* JJA (see
+tri-cities-jja-calendar/fetch_jja_highs.py's same default_year logic).
+
+A "threaded" ACIS station splices together the area's older COOP
+stations with the modern KPSC airport record into one long, largely
+gap-free daily series back to 1894 -- unlike KPSC alone, whose own raw
+data is essentially missing 1946-1997 (see
+tri-cities-temp-chart/fetch_climatology.py and this project's own
+Notes). PSCthr and KPSC agree exactly for the modern period both cover
+(confirmed by spot-checking maxt/normal/departure for recent dates), so
+switching to PSCthr doesn't change anything for a recent-years query --
+it just also works for the full period of record.
 """
 import argparse
 import json
@@ -26,9 +36,9 @@ import requests
 
 BASE_URL = "https://data.rcc-acis.org/StnData"
 
-DEFAULT_SID = "KPSC 5"
-DEFAULT_STATION = "KPSC"
-DEFAULT_LABEL = "Pasco, WA"
+DEFAULT_SID = "PSCthr 9"
+DEFAULT_STATION = "PSCthr"
+DEFAULT_LABEL = "Tri-Cities, WA"
 DEFAULT_START_YEAR = 2019
 
 NORMALS_PERIOD = "1991-2020"
@@ -63,8 +73,8 @@ def mean(values):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--sid", default=DEFAULT_SID, help='ACIS station id, e.g. "KPSC 5"')
-    ap.add_argument("--station", default=DEFAULT_STATION, help="Short station identifier shown in the graphic title, e.g. KPSC")
+    ap.add_argument("--sid", default=DEFAULT_SID, help='ACIS station id, e.g. "PSCthr 9"')
+    ap.add_argument("--station", default=DEFAULT_STATION, help="Short station identifier shown in the graphic title, e.g. PSCthr")
     ap.add_argument("--label", default=DEFAULT_LABEL, help="Human-readable location, e.g. 'Pasco, WA'")
     ap.add_argument("--start-year", type=int, default=DEFAULT_START_YEAR)
     ap.add_argument("--end-year", type=int, default=None, help="defaults to the most recently completed JJA")
@@ -123,6 +133,12 @@ if __name__ == "__main__":
     with open(args.output, "w") as f:
         json.dump(out, f, indent=2)
 
+    def fmt(v):
+        return f"{v:+.1f}" if v is not None else "  n/a"
+
     print(f"Saved {args.output}: {start_year}-{end_year} for {args.station}")
     for y, v in years.items():
-        print(f"  {y}: Jun {v['june']:+.1f}  Jul {v['july']:+.1f}  Aug {v['august']:+.1f}  Season {v['season']:+.1f}  ({v['n_days']} days)")
+        if v["n_days"] == 0:
+            print(f"  {y}: no data")
+            continue
+        print(f"  {y}: Jun {fmt(v['june'])}  Jul {fmt(v['july'])}  Aug {fmt(v['august'])}  Season {fmt(v['season'])}  ({v['n_days']} days)")
