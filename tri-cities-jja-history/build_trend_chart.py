@@ -71,7 +71,7 @@ def main():
 
     fig = plt.figure(figsize=(16, 9), dpi=200)
     fig.patch.set_facecolor(BG)
-    ax = fig.add_axes([0.06, 0.12, 0.90, 0.66])
+    ax = fig.add_axes([0.06, 0.12, 0.90, 0.71])
     ax.set_facecolor("white")
 
     ax.fill_between(all_years, all_means, normal_mean, where=all_means >= normal_mean, interpolate=True,
