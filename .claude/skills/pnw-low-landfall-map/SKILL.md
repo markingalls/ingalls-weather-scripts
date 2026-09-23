@@ -25,6 +25,11 @@ README first). This skill covers running it for a new low.
      either way.
    - `Clustering:` tells you whether the map shows one mean track or
      north/south cluster means.
+   - `L: OPC analyzed low ...` means the "L" is NOAA's current analyzed
+     position. A `NOTE: no current NOAA-analyzed low matches` line means
+     the "L" fell back to the WM-6 mean track. If so, check OPC's High
+     Seas Forecast (`FZPN02 KWBC`) yourself: the low may be unnamed or
+     outside the matching window, and a wrong seed also shows up here.
 5. Look at the PNG in `output/` for label collisions before sending it.
    For tweaks, iterate with `--file output/snapshot_<init>.npz` so you
    don't re-fetch.

@@ -45,6 +45,7 @@ import argparse
 import json
 import math
 import os
+import re
 import struct
 import sys
 import tempfile
@@ -129,8 +130,8 @@ MAP_FRAME_INSET_PX = 22
 # Map domain -- NE Pacific from where the low is tracked from, east across
 # the Cascades, Cape Mendocino (S) to northern Vancouver Island (N).
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -139.0, -116.0
-LAT_MIN, LAT_MAX = 37.9, 54.3
+LON_MIN, LON_MAX = -141.5, -118.5
+LAT_MIN, LAT_MAX = 36.3, 53.2
 
 # Member MSLP is fetched over a slightly larger box than the map so a low
 # near the frame edge still has a full local-minimum search window around
@@ -231,11 +232,31 @@ TRACK_COLOR = "#1f5fa8"
 CLUSTER_COLORS = ["#1f5fa8", "#0f8b8d"]  # north, south
 MEMBER_TRACK_ALPHA = 0.30
 
-# The "L" start marker goes on the first mean-track point at least this far
-# inside the frame's west/south edges -- clear of the edge and of the logo
-# in the bottom-left corner.
-L_MARKER_MARGIN_LON_DEG = 2.5
+# The "L" marker (and its three-line label beneath it) needs to be at
+# least this far inside the frame's west/south edges -- the latitude
+# margin also keeps it above the logo in the bottom-left corner.
+L_MARKER_MARGIN_LON_DEG = 1.0
 L_MARKER_MARGIN_LAT_DEG = 3.5
+
+# ---------------------------------------------------------------------------
+# NOAA analyzed low position for the "L" -- see fetch_noaa_lows(). The "L"
+# marks where NOAA's own surface analysis puts the low, not a model
+# position, whenever one of these analyses has a low matching the tracked
+# system.
+#   - OPC High Seas Forecast, NE Pacific (FZPN02 KWBC / HSFEPI): OPC's
+#     6-hourly analyzed lows N of 30N, whole-degree positions.
+#   - WPC coded surface analysis, high-res (ASUS02 KWBC / CODSUS): the
+#     3-hourly unified surface analysis, tenth-degree positions -- but its
+#     lows only reach out to ~135W, so a low still well offshore is
+#     usually OPC-only.
+# ---------------------------------------------------------------------------
+OPC_HSF_URL = "https://tgftp.nws.noaa.gov/data/raw/fz/fzpn02.kwbc.hsf.epi.txt"
+WPC_CODSUS_URL = "https://tgftp.nws.noaa.gov/data/raw/as/asus02.kwbc.cod.sus.txt"
+# An analyzed low matches the tracked system if it's within this distance
+# of the ensemble mean track's position at the analysis time.
+NOAA_MATCH_KM = 400.0
+# Analyses older than this aren't "current" -- fall back to the mean track.
+NOAA_MAX_AGE_HOURS = 12
 
 # Two landfall groups are drawn as separate clusters only when a
 # 2-component Gaussian mixture fit to landfall latitude beats a single
@@ -425,8 +446,8 @@ def fetch_all(start_utc, end_utc, api_key):
     """Fetch every member's MSLP for each 3-hourly step from start_utc to
     end_utc, all pinned to one WM-6 run (the latest complete one) so the
     steps don't straddle two runs as WM-6 updates hourly. start_utc None =
-    the current 3-hourly step (not before the run's forecast zero); end_utc
-    None = DEFAULT_WINDOW_HOURS after the start."""
+    the latest 00/06/12/18Z synoptic time (not before the run's forecast
+    zero); end_utc None = DEFAULT_WINDOW_HOURS after the start."""
     run = wb_get("run_information", api_key)
     if run.get("in_progress"):
         sys.exit("Latest WM-6 run is still in progress -- try again in a few minutes.")
@@ -434,8 +455,12 @@ def fetch_all(start_utc, end_utc, api_key):
     forecast_zero = datetime.fromisoformat(run["forecast_zero"].replace("Z", "+00:00"))
     available = {a["forecast_hour"] for a in run["available"]}
     if start_utc is None:
-        now_fh = (datetime.now(timezone.utc) - forecast_zero).total_seconds() / 3600
-        start_utc = forecast_zero + timedelta(hours=max(0, math.floor(now_fh / STEP_HOURS) * STEP_HOURS))
+        # The latest 00/06/12/18Z synoptic time -- the time OPC's most
+        # recent analysis is valid for, so the tracks start where the
+        # NOAA-analyzed "L" is (see fetch_noaa_lows()).
+        now = datetime.now(timezone.utc)
+        synoptic = now.replace(hour=now.hour - now.hour % 6, minute=0, second=0, microsecond=0)
+        start_utc = max(forecast_zero, synoptic)
     if end_utc is None:
         end_utc = start_utc + timedelta(hours=DEFAULT_WINDOW_HOURS)
 
@@ -463,6 +488,114 @@ def fetch_all(start_utc, end_utc, api_key):
     meta = {"initialization_time": results[0][3]["initialization_time"],
             "forecast_zero": results[0][3]["forecast_zero"]}
     return lat, lon, mslp, valid_times, meta
+
+
+# ---------------------------------------------------------------------------
+# NOAA analyzed lows
+# ---------------------------------------------------------------------------
+MONTHS = {m: i for i, m in enumerate(
+    ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"], 1)}
+
+
+def parse_opc_hsf(text):
+    """Analyzed lows from an OPC High Seas Forecast: every "LOW ..." /
+    "... CENTER ..." position in an entry that isn't an "NN HOUR
+    FORECAST", valid at the product's SYNOPSIS VALID time. Returns
+    [(valid_utc, lat, lon, hpa, "OPC")]."""
+    issued = re.search(r"\d{4} UTC \w{3} (\w{3}) (\d{1,2}) (\d{4})", text)
+    syn = re.search(r"SYNOPSIS VALID (\d{2})00 UTC (\w{3}) (\d{1,2})", text)
+    if not issued or not syn:
+        return []
+    year = int(issued.group(3))
+    if MONTHS[syn.group(2)] > MONTHS[issued.group(1)]:  # Dec synopsis in a Jan issuance
+        year -= 1
+    valid = datetime(year, MONTHS[syn.group(2)], int(syn.group(3)), int(syn.group(1)), tzinfo=timezone.utc)
+    lows = []
+    # Entries start with "." at the beginning of a line.
+    for entry in re.split(r"\n(?=\.)", text):
+        entry = " ".join(entry.split())
+        if re.match(r"\.\d+ HOUR FORECAST", entry):
+            continue
+        for m in re.finditer(
+                r"(?:LOW|CENTER)\s+(\d{1,2}(?:\.\d)?)N\s*(\d{1,3}(?:\.\d)?)([EW])\s+(\d{3,4})\s*MB", entry):
+            lon = float(m.group(2)) * (-1 if m.group(3) == "W" else 1)
+            lows.append((valid, float(m.group(1)), lon, float(m.group(4)), "OPC"))
+    return lows
+
+
+def parse_wpc_codsus(text):
+    """Lows from WPC's high-res coded surface bulletin ("LOWS <hPa>
+    <LLLOOOO> ...": lat*10 then W lon*10), valid at its "VALID MMDDHHZ"
+    time. Returns [(valid_utc, lat, lon, hpa, "WPC")]."""
+    head = re.search(r"VALID (\d{2})(\d{2})(\d{2})Z", text)
+    year = re.search(r" (\d{4})\s*$", text[:head.start()] if head else "", re.M)
+    if not head or not year:
+        return []
+    valid = datetime(int(year.group(1)), int(head.group(1)), int(head.group(2)), int(head.group(3)),
+                     tzinfo=timezone.utc)
+    keywords = {"HIGHS", "LOWS", "COLD", "WARM", "STNRY", "OCFNT", "TROF", "$$"}
+    tokens = text[head.end():].split()
+    lows, in_lows, i = [], False, 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in keywords:
+            in_lows = tok == "LOWS"
+        elif in_lows and i + 1 < len(tokens) and len(tokens[i + 1]) == 7 and tokens[i + 1].isdigit():
+            code = tokens[i + 1]
+            lows.append((valid, int(code[:3]) / 10, -int(code[3:]) / 10, float(tok), "WPC"))
+            i += 1
+        i += 1
+    return lows
+
+
+def fetch_noaa_lows():
+    """Current NOAA analyzed lows from OPC and WPC (see OPC_HSF_URL /
+    WPC_CODSUS_URL). A source that can't be fetched or parsed is skipped
+    with a note -- the map then falls back to the mean track for the
+    "L"."""
+    lows = []
+    for name, url, parser in [("OPC High Seas Forecast", OPC_HSF_URL, parse_opc_hsf),
+                              ("WPC coded surface analysis", WPC_CODSUS_URL, parse_wpc_codsus)]:
+        try:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+            found = parser(resp.text)
+            print(f"  {name}: {len(found)} analyzed lows"
+                  + (f", valid {found[0][0]:%Y-%m-%d %HZ}" if found else ""))
+            lows += found
+        except Exception as exc:  # network/format problems shouldn't block the map
+            print(f"  NOTE: couldn't read {name} ({exc})")
+    return lows
+
+
+def match_noaa_low(noaa_lows, mean_positions, t0):
+    """The most recent NOAA-analyzed low (OPC preferred on a tie) within
+    NOAA_MATCH_KM of the ensemble mean track at its analysis time, and no
+    older than NOAA_MAX_AGE_HOURS. `mean_positions` is [(hours since t0,
+    lat, lon)]; an analysis up to 6 h before the track's start is compared
+    against its first point. Returns (valid_utc, lat, lon, hpa, source) or
+    None."""
+    if not mean_positions:
+        return None
+    now = datetime.now(timezone.utc)
+    hrs = np.array([p[0] for p in mean_positions])
+    best = None
+    for low in noaa_lows:
+        valid, lat, lon, hpa, source = low
+        if now - valid > timedelta(hours=NOAA_MAX_AGE_HOURS):
+            continue
+        h = (valid - t0).total_seconds() / 3600
+        if h < hrs[0] - 6 or h > hrs[-1]:
+            continue
+        hc = min(max(h, hrs[0]), hrs[-1])
+        ref_lat = np.interp(hc, hrs, [p[1] for p in mean_positions])
+        ref_lon = np.interp(hc, hrs, [p[2] for p in mean_positions])
+        if haversine_km(lat, lon, ref_lat, ref_lon) > NOAA_MATCH_KM:
+            continue
+        key = (valid, source == "OPC")
+        if best is None or key > best[0]:
+            best = (key, low)
+    return best[1] if best else None
 
 
 # ---------------------------------------------------------------------------
@@ -741,7 +874,7 @@ def fmt_local(dt_utc, with_day=True):
     return f"{local.strftime('%a')} {local:%H:%M}" if with_day else f"{local:%H:%M}"
 
 
-def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None):
+def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None, noaa_lows=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_med = fm.FontProperties(fname=POPPINS_MED_PATH)
     baloo_bold = fm.FontProperties(fname=BALOO_BOLD_PATH)
@@ -857,15 +990,30 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
         ax.plot(coast_lon[ext], coast_lat[ext], color=PROB_COLORS[min(b, len(PROB_COLORS) - 1)],
                 linewidth=6.4, solid_capstyle="butt", solid_joinstyle="round", transform=pc, zorder=4.1)
 
-    # "L" on the mean track, with the ensemble-mean central pressure and
-    # time there -- at the first 3-hourly point far enough inside the frame
-    # (L_MARKER_MARGIN_*) that the letter and its label don't run off the
-    # edge or into the logo. With the default window starting "now", the
-    # low is often still out in the frame's southwest corner.
+    # "L" -- where NOAA (OPC/WPC) currently analyzes the low, when one of
+    # their analyses has a low matching this system (match_noaa_low()).
+    # Otherwise, the ensemble mean track's first point far enough inside
+    # the frame (L_MARKER_MARGIN_*) to stay clear of the edge and logo,
+    # labeled as the WM-6 position.
+    def clear_of_edge(lat_, lon_):
+        return lon_ >= LON_MIN + L_MARKER_MARGIN_LON_DEG and lat_ >= LAT_MIN + L_MARKER_MARGIN_LAT_DEG
+
     start_mean = [p for p in mean_track(tracks, list(range(n_members)), coast, hours) if not np.isnan(p[3])]
-    l_points = [p for p in start_mean
-                if p[2] >= LON_MIN + L_MARKER_MARGIN_LON_DEG and p[1] >= LAT_MIN + L_MARKER_MARGIN_LAT_DEG]
-    l_point = l_points[0] if l_points else None
+    l_point = None  # (lat, lon, hpa, valid_utc, source label)
+    noaa = match_noaa_low(noaa_lows or [], [(p[0], p[1], p[2]) for p in start_mean], t0)
+    if noaa and clear_of_edge(noaa[1], noaa[2]):
+        l_point = (noaa[1], noaa[2], noaa[3], noaa[0], f"NOAA {noaa[4]} analysis")
+        print(f"L: {noaa[4]} analyzed low {noaa[1]:.1f}N {-noaa[2]:.1f}W {noaa[3]:.0f} mb, "
+              f"valid {noaa[0]:%Y-%m-%d %HZ}")
+    else:
+        if noaa:
+            print("NOTE: NOAA-analyzed low is too close to the frame edge/logo to label; using the mean track.")
+        else:
+            print("NOTE: no current NOAA-analyzed low matches this system; L is on the WM-6 mean track.")
+        for h, la, lo, hpa in start_mean:
+            if clear_of_edge(la, lo):
+                l_point = (la, lo, hpa, hour_to_utc(h), "WM-6 ens. mean")
+                break
 
     # Mean track(s) -- white-haloed, dotted every 6 h with a time label
     # every 12 h, ending in a ringed landfall marker.
@@ -886,7 +1034,7 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
             # Skip a time label that would land on top of the landfall
             # marker's or the "L" marker's own label.
             near_landfall = haversine_km(la, lo, mt[-1][1], mt[-1][2]) < 200
-            near_l = l_point is not None and haversine_km(la, lo, l_point[1], l_point[2]) < 150
+            near_l = l_point is not None and haversine_km(la, lo, l_point[0], l_point[1]) < 150
             if valid.hour % 12 == 0 and i > 0 and not near_landfall and not near_l:
                 ax.text(lo, la + 0.32, fmt_local(valid), fontsize=7.5, fontproperties=poppins_med,
                         color="#2b2a26", ha="center", va="bottom", transform=pc, zorder=6,
@@ -901,13 +1049,15 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
                 linespacing=1.1, transform=pc, zorder=6.5,
                 path_effects=[pe.withStroke(linewidth=2.4, foreground="white")])
 
-    if l_points:
-        h0, la0, lo0, hpa0 = l_points[0]
+    if l_point:
+        la0, lo0, hpa0, valid0, source0 = l_point
         ax.text(lo0, la0, "L", fontsize=26, fontproperties=baloo_bold, color="#c0392b",
                 ha="center", va="center", transform=pc, zorder=7,
                 path_effects=[pe.withStroke(linewidth=2.0, foreground="white")])
-        ax.text(lo0, la0 - 0.55, f"{hpa0:.0f} mb\n{fmt_local(hour_to_utc(h0))}", fontsize=7.5,
-                fontproperties=poppins_med, color="#c0392b", ha="center", va="top", linespacing=1.1,
+        # Label above the letter: the tracks run off to the east/northeast
+        # and the logo sits below, so above is the side that stays clear.
+        ax.text(lo0, la0 + 0.6, f"{source0}\n{hpa0:.0f} mb • {fmt_local(valid0)}", fontsize=7.5,
+                fontproperties=poppins_med, color="#c0392b", ha="center", va="bottom", linespacing=1.1,
                 transform=pc, zorder=7, path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
 
     # Town callouts -- on the land side of the band.
@@ -985,7 +1135,10 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
     fig.text(0.03, 0.922, f"Init {init_dt.strftime('%Y-%m-%d %H')}z • Times Pacific",
              fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.012, "WindBorne WM-6 — Ingalls Weather", fontsize=9,
+    credit = "WindBorne WM-6"
+    if l_point and l_point[4].startswith("NOAA"):
+        credit += f" • Current low: {l_point[4]}"
+    fig.text(0.5, 0.012, f"{credit} — Ingalls Weather", fontsize=9,
              fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1025,6 +1178,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=float, nargs=2, metavar=("LAT", "LON"), default=None,
                         help="Start the tracks from this position instead of the deepest "
                              "ensemble-mean low in SEED_BOX.")
+    parser.add_argument("--no-noaa", action="store_true",
+                        help="Don't look up NOAA's (OPC/WPC) analyzed low position for the L marker.")
     parser.add_argument("--file", type=Path, default=None,
                         help="Render from a saved snapshot (.npz) instead of fetching live.")
     parser.add_argument("--out", type=Path, default=None,
@@ -1057,4 +1212,8 @@ if __name__ == "__main__":
 
     init_tag = meta["initialization_time"][:13].replace("-", "").replace("T", "_")
     out_path = args.out or (OUTPUT_DIR / f"pnw_low_landfall_{init_tag}.png")
-    build_map(lat, lon, mslp, valid_times, meta, out_path, seed_override=args.seed)
+    noaa_lows = None
+    if not args.no_noaa:
+        print("Reading NOAA analyzed lows for the L marker...")
+        noaa_lows = fetch_noaa_lows()
+    build_map(lat, lon, mslp, valid_times, meta, out_path, seed_override=args.seed, noaa_lows=noaa_lows)

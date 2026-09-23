@@ -9,6 +9,8 @@ WindBorne's WeatherMesh-6 global ensemble:
 - **Bold line**: the ensemble mean track. If the members' landfall points
   split into two real groups, you get a northern and a southern
   **cluster mean** instead (see *Clustering* below).
+- **Red "L"**: where NOAA currently analyzes the low (see *Current low
+  position* below), with its source, pressure, and time.
 - **Colored coastline**: the chance the low's center makes landfall
   within 100 km of each point on the outer coast. This is the share of
   *all* 128 members, so members whose low fills offshore count as "no".
@@ -43,8 +45,8 @@ python build_map.py --file output/snapshot_20260923_22.npz      # no re-fetch
 By default there's nothing to edit: `python build_map.py` picks up the
 current low.
 
-- **Window:** starts at the current 3-hourly step of the latest WM-6 run
-  and runs 72 h. Tracks stop at landfall, so a long window only costs a
+- **Window:** starts at the latest 00/06/12/18Z synoptic time (the time
+  OPC's latest analysis is valid) in the latest WM-6 run, and runs 72 h. Tracks stop at landfall, so a long window only costs a
   few more fetched steps.
 - **Seed:** the tracks start from the deepest ensemble-mean low inside
   `SEED_BOX` (140-126W, 38-50N, the offshore approach) at the window's
@@ -105,6 +107,38 @@ assumed. As a check, the mean of the 128 members matched
 
 `--file` snapshots store MSLP as int16 hundredths of a hPa above 900 hPa
 (~30 MB). They're gitignored.
+
+## Current low position (NOAA OPC/WPC)
+
+The "L" is NOAA's analyzed position, not a model position. At render
+time, `fetch_noaa_lows()` reads two sources:
+
+- **OPC High Seas Forecast, NE Pacific** (`FZPN02 KWBC` / HSFEPI, from
+  `tgftp.nws.noaa.gov`): the Ocean Prediction Center's analyzed lows
+  north of 30N, from each non-forecast "LOW 40N140W 1011 MB" entry, valid
+  at the product's SYNOPSIS time. Issued every 6 h, with whole-degree
+  positions.
+- **WPC coded surface analysis, high-res** (`ASUS02 KWBC` / CODSUS): the
+  3-hourly unified surface analysis, with tenth-degree positions. Its
+  lows only reach out to about 135W, so a low still well offshore usually
+  appears only in OPC's product.
+
+`match_noaa_low()` takes the most recent analyzed low that is:
+
+- within 400 km of the ensemble mean track at its analysis time;
+- no more than 12 h old;
+- from OPC, if two sources tie.
+
+The console prints which low it used (`L: OPC analyzed low ...`). If no
+analysis matches, the "L" falls back to the ensemble mean track's first
+point, labeled "WM-6 ens. mean". The same fallback applies if the
+analyzed low sits too close to the frame edge or logo, if NOAA is
+unreachable, or with `--no-noaa`. When a NOAA position is used, the
+footer credits it.
+
+The "L" doesn't always sit exactly at the start of the tracks. OPC's
+positions are whole degrees and come from NOAA's analysis, while the
+tracks come from WM-6.
 
 ## Method
 
