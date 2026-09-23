@@ -52,6 +52,11 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`pnw-low-landfall-map/`](pnw-low-landfall-map/) — one-off
+  Instagram-portrait map of a Pacific surface low's landfall across the
+  WindBorne WM-6 ensemble. It shows all 128 member tracks, the ensemble
+  mean track (or cluster means when landfall is bimodal), and the chance
+  of landfall within 100 km along the outer coast.
 
 ## Shared resources
 
