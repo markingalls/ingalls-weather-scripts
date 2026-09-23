@@ -1,5 +1,6 @@
 """
-WM-6 Ensemble Surface Low Landfall Map -- one-off builder
+WM-6 Ensemble Surface Low Landfall Map -- reusable builder for any
+Pacific low approaching the Pacific Northwest coast
 Ingalls Weather
 
 Styled Instagram-portrait (4:5) map of a Pacific surface low approaching
@@ -17,7 +18,7 @@ WeatherMesh-6 global ensemble:
 
 USAGE
 -----
-    python build_map.py                         # latest WM-6 run
+    python build_map.py                         # latest run, next 72 h, auto seed
     python build_map.py --start 2026-09-24T06 --end 2026-09-26T06
     python build_map.py --seed 42 -134.5         # follow a different low
     python build_map.py --file output/snapshot_<init>.npz   # no re-fetch
@@ -150,14 +151,17 @@ MAP_CLIP_BOX = box(LON_MIN - BASEMAP_PAD_DEG, LAT_MIN - BASEMAP_PAD_DEG,
 SATELLITE_HEIGHT_M = 4_000_000
 
 # ---------------------------------------------------------------------------
-# Tracking window & seed. The low is found at TRACK_START in the ensemble
-# mean -- the deepest MSLP minimum inside SEED_BOX -- and each member's
-# track starts from its own nearest local minimum to that point. Defaults
-# are for the Thursday-night/Friday-morning 2026-09-25 low; override with
-# --start/--end/--seed for another system.
+# Tracking window & seed. The low is found at the window's first step in
+# the ensemble mean -- the deepest MSLP minimum inside SEED_BOX, the
+# offshore approach to the PNW coast -- and each member's track starts from
+# its own nearest local minimum to that point. By default the window starts
+# at the current 3-hourly step (or the run's forecast zero, if later) and
+# runs DEFAULT_WINDOW_HOURS: tracks stop at landfall anyway, so a generous
+# window just costs a few more fetched steps. For a low that isn't the
+# deepest thing in SEED_BOX yet, or isn't there at the window's start,
+# pass --start (when it's offshore) and/or --seed (where it is then).
 # ---------------------------------------------------------------------------
-DEFAULT_TRACK_START_UTC = "2026-09-24T06"
-DEFAULT_TRACK_END_UTC = "2026-09-26T06"
+DEFAULT_WINDOW_HOURS = 72
 SEED_BOX = (-140.0, 38.0, -126.0, 50.0)  # lon_min, lat_min, lon_max, lat_max
 SEED_MAX_KM = 400.0
 
@@ -226,6 +230,12 @@ PROB_COLORS = ["#fef3c7", "#fde68a", "#fbbf24", "#f59e0b", "#ea580c",
 TRACK_COLOR = "#1f5fa8"
 CLUSTER_COLORS = ["#1f5fa8", "#0f8b8d"]  # north, south
 MEMBER_TRACK_ALPHA = 0.30
+
+# The "L" start marker goes on the first mean-track point at least this far
+# inside the frame's west/south edges -- clear of the edge and of the logo
+# in the bottom-left corner.
+L_MARKER_MARGIN_LON_DEG = 2.5
+L_MARKER_MARGIN_LAT_DEG = 3.5
 
 # Two landfall groups are drawn as separate clusters only when a
 # 2-component Gaussian mixture fit to landfall latitude beats a single
@@ -414,13 +424,20 @@ def fetch_member_mslp(init_time, forecast_hour, api_key):
 def fetch_all(start_utc, end_utc, api_key):
     """Fetch every member's MSLP for each 3-hourly step from start_utc to
     end_utc, all pinned to one WM-6 run (the latest complete one) so the
-    steps don't straddle two runs as WM-6 updates hourly."""
+    steps don't straddle two runs as WM-6 updates hourly. start_utc None =
+    the current 3-hourly step (not before the run's forecast zero); end_utc
+    None = DEFAULT_WINDOW_HOURS after the start."""
     run = wb_get("run_information", api_key)
     if run.get("in_progress"):
         sys.exit("Latest WM-6 run is still in progress -- try again in a few minutes.")
     init_time = run["initialization_time"]
     forecast_zero = datetime.fromisoformat(run["forecast_zero"].replace("Z", "+00:00"))
     available = {a["forecast_hour"] for a in run["available"]}
+    if start_utc is None:
+        now_fh = (datetime.now(timezone.utc) - forecast_zero).total_seconds() / 3600
+        start_utc = forecast_zero + timedelta(hours=max(0, math.floor(now_fh / STEP_HOURS) * STEP_HOURS))
+    if end_utc is None:
+        end_utc = start_utc + timedelta(hours=DEFAULT_WINDOW_HOURS)
 
     first = math.ceil((start_utc - forecast_zero).total_seconds() / 3600 / STEP_HOURS) * STEP_HOURS
     last = math.floor((end_utc - forecast_zero).total_seconds() / 3600 / STEP_HOURS) * STEP_HOURS
@@ -713,11 +730,15 @@ def contiguous_runs(values):
     return [list(r) for r in np.split(np.arange(len(values)), breaks)]
 
 
+def round_to_hour(dt):
+    """Interpolated landfall times aren't good to the minute -- the tracks
+    are 3-hourly -- so they're shown to the nearest hour."""
+    return (dt + timedelta(minutes=30)).replace(minute=0, second=0, microsecond=0)
+
+
 def fmt_local(dt_utc, with_day=True):
     local = dt_utc.astimezone(LOCAL_TZ)
-    h12 = local.hour % 12 or 12
-    ampm = "AM" if local.hour < 12 else "PM"
-    return f"{local.strftime('%a')} {h12} {ampm}" if with_day else f"{h12} {ampm}"
+    return f"{local.strftime('%a')} {local:%H:%M}" if with_day else f"{local:%H:%M}"
 
 
 def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None):
@@ -836,6 +857,16 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
         ax.plot(coast_lon[ext], coast_lat[ext], color=PROB_COLORS[min(b, len(PROB_COLORS) - 1)],
                 linewidth=6.4, solid_capstyle="butt", solid_joinstyle="round", transform=pc, zorder=4.1)
 
+    # "L" on the mean track, with the ensemble-mean central pressure and
+    # time there -- at the first 3-hourly point far enough inside the frame
+    # (L_MARKER_MARGIN_*) that the letter and its label don't run off the
+    # edge or into the logo. With the default window starting "now", the
+    # low is often still out in the frame's southwest corner.
+    start_mean = [p for p in mean_track(tracks, list(range(n_members)), coast, hours) if not np.isnan(p[3])]
+    l_points = [p for p in start_mean
+                if p[2] >= LON_MIN + L_MARKER_MARGIN_LON_DEG and p[1] >= LAT_MIN + L_MARKER_MARGIN_LAT_DEG]
+    l_point = l_points[0] if l_points else None
+
     # Mean track(s) -- white-haloed, dotted every 6 h with a time label
     # every 12 h, ending in a ringed landfall marker.
     halo = [pe.withStroke(linewidth=4.2, foreground="white")]
@@ -853,9 +884,10 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
             ax.plot(lo, la, "o", color=color, markersize=4.5, markeredgecolor="white",
                     markeredgewidth=1.0, transform=pc, zorder=5.5)
             # Skip a time label that would land on top of the landfall
-            # marker's own label.
+            # marker's or the "L" marker's own label.
             near_landfall = haversine_km(la, lo, mt[-1][1], mt[-1][2]) < 200
-            if valid.hour % 12 == 0 and i > 0 and not near_landfall:
+            near_l = l_point is not None and haversine_km(la, lo, l_point[1], l_point[2]) < 150
+            if valid.hour % 12 == 0 and i > 0 and not near_landfall and not near_l:
                 ax.text(lo, la + 0.32, fmt_local(valid), fontsize=7.5, fontproperties=poppins_med,
                         color="#2b2a26", ha="center", va="bottom", transform=pc, zorder=6,
                         path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
@@ -864,20 +896,17 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
             continue
         ax.plot(lo_lf, la_lf, "o", color="white", markersize=11, markeredgecolor=color,
                 markeredgewidth=2.4, transform=pc, zorder=6)
-        ax.text(lo_lf - 0.45, la_lf, f"Landfall\n~{fmt_local(hour_to_utc(h_lf))}",
+        ax.text(lo_lf - 0.45, la_lf, f"Landfall\n~{fmt_local(round_to_hour(hour_to_utc(h_lf)))}",
                 fontsize=8, fontproperties=poppins_med, color=color, ha="right", va="center",
                 linespacing=1.1, transform=pc, zorder=6.5,
                 path_effects=[pe.withStroke(linewidth=2.4, foreground="white")])
 
-    # "L" at the low's starting position, with its ensemble-mean central
-    # pressure.
-    start_mean = mean_track(tracks, list(range(n_members)), coast, hours)
-    if start_mean:
-        _, la0, lo0, hpa0 = start_mean[0]
+    if l_points:
+        h0, la0, lo0, hpa0 = l_points[0]
         ax.text(lo0, la0, "L", fontsize=26, fontproperties=baloo_bold, color="#c0392b",
                 ha="center", va="center", transform=pc, zorder=7,
                 path_effects=[pe.withStroke(linewidth=2.0, foreground="white")])
-        ax.text(lo0, la0 - 0.55, f"{hpa0:.0f} mb\n{fmt_local(t0)}", fontsize=7.5,
+        ax.text(lo0, la0 - 0.55, f"{hpa0:.0f} mb\n{fmt_local(hour_to_utc(h0))}", fontsize=7.5,
                 fontproperties=poppins_med, color="#c0392b", ha="center", va="top", linespacing=1.1,
                 transform=pc, zorder=7, path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
 
@@ -989,10 +1018,10 @@ def parse_utc(s):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Build an Ingalls Weather WM-6 ensemble surface-low landfall map.")
-    parser.add_argument("--start", type=str, default=DEFAULT_TRACK_START_UTC,
-                        help=f"Track start, UTC, YYYY-MM-DDTHH (default {DEFAULT_TRACK_START_UTC}).")
-    parser.add_argument("--end", type=str, default=DEFAULT_TRACK_END_UTC,
-                        help=f"Track end, UTC, YYYY-MM-DDTHH (default {DEFAULT_TRACK_END_UTC}).")
+    parser.add_argument("--start", type=str, default=None,
+                        help="Track start, UTC, YYYY-MM-DDTHH (default: the current 3-hourly step).")
+    parser.add_argument("--end", type=str, default=None,
+                        help=f"Track end, UTC, YYYY-MM-DDTHH (default: {DEFAULT_WINDOW_HOURS} h after --start).")
     parser.add_argument("--seed", type=float, nargs=2, metavar=("LAT", "LON"), default=None,
                         help="Start the tracks from this position instead of the deepest "
                              "ensemble-mean low in SEED_BOX.")
@@ -1016,7 +1045,8 @@ if __name__ == "__main__":
             sys.exit("WB_API_KEY not set -- get a token at "
                      "https://app.windbornesystems.com/api_tokens, or pass --file "
                      "to render from a saved snapshot instead.")
-        lat, lon, mslp, valid_times, meta = fetch_all(parse_utc(args.start), parse_utc(args.end), api_key)
+        lat, lon, mslp, valid_times, meta = fetch_all(parse_utc(args.start) if args.start else None,
+                                                       parse_utc(args.end) if args.end else None, api_key)
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         init_tag = meta["initialization_time"][:13].replace("-", "").replace("T", "_")
         # Stored as int16 hundredths of a hPa above 900 hPa -- exact to the

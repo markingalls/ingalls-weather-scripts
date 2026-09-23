@@ -1,7 +1,7 @@
 # WM-6 Ensemble Surface Low Landfall Map
 
-One-off, Instagram-portrait (4:5, 1728x2160) map of a Pacific surface low
-coming ashore in the Pacific Northwest, built from all 128 members of
+Reusable, Instagram-portrait (4:5, 1728x2160) map of a Pacific surface
+low coming ashore in the Pacific Northwest, built from all 128 members of
 WindBorne's WeatherMesh-6 global ensemble:
 
 - **Thin blue lines**: each member's own surface-low track, from its own
@@ -24,20 +24,56 @@ from `admin0`/`admin1_boundary_lines.json`, clipped to land. Unclipped,
 they draw maritime boundaries across the water, such as the US/Canada
 line down the Strait of Juan de Fuca.
 
-Defaults are set for the low that comes ashore Thursday night into Friday
-morning, 2026-09-25. Point it at another system with `--start`, `--end`,
-and `--seed`.
+All times are shown in Pacific, on a 24-hour clock. The landfall time is
+rounded to the nearest hour, since the tracks are 3-hourly.
 
 ## Usage
 
 ```bash
 bash setup.sh                       # first time / fresh environment only
 export WB_API_KEY=...
-python build_map.py                 # latest WM-6 run, default window/seed
-python build_map.py --start 2026-09-24T06 --end 2026-09-26T06   # UTC
-python build_map.py --seed 42 -134.5                            # lat lon
+python build_map.py                 # latest WM-6 run, next 72 h, auto-found low
+python build_map.py --start 2026-09-24T06 --end 2026-09-26T06   # UTC window
+python build_map.py --seed 42 -134.5                            # lat lon at --start
 python build_map.py --file output/snapshot_20260923_22.npz      # no re-fetch
 ```
+
+## Running it for a future low
+
+By default there's nothing to edit: `python build_map.py` picks up the
+current low.
+
+- **Window:** starts at the current 3-hourly step of the latest WM-6 run
+  and runs 72 h. Tracks stop at landfall, so a long window only costs a
+  few more fetched steps.
+- **Seed:** the tracks start from the deepest ensemble-mean low inside
+  `SEED_BOX` (140-126W, 38-50N, the offshore approach) at the window's
+  first step.
+- **Title:** uses the weekday of the median landfall, e.g. "Friday".
+
+Check the console output after each run. `Seed (...)` prints where the
+tracks started. If that isn't your low (another low is deeper in
+`SEED_BOX`, or yours hasn't entered it yet):
+
+1. Pass `--start` for a time when your low is well offshore, and
+   `--seed LAT LON` for where it is then. Each member starts from its
+   own nearest closed center within 400 km of the seed.
+2. Re-render with `--file output/snapshot_<init>.npz` while you adjust
+   labels or constants, so you don't re-fetch.
+
+These need editing in `build_map.py` only for lows outside the usual
+setup:
+
+- A low coming ashore north of Vancouver Island or south of Cape
+  Mendocino: `LON_MIN`/`LON_MAX`/`LAT_MIN`/`LAT_MAX`, `COAST_LAT_MIN`/
+  `COAST_LAT_MAX`, `SEED_BOX`, and `COAST_TOWNS`. Keep the lon:lat span
+  ratio near the current 23:16.4, or the perspective frame won't fill
+  the 4:5 layout's width.
+- A fast-moving low (over ~300 km per 3 h) that leaves tracks broken:
+  `MAX_STEP_KM`.
+
+Clustering, the >2% cutoff, the mean track, and the town callouts all
+adapt to the data on their own.
 
 The fetch takes about 30 seconds: 17 steps, about 2 MB each. All steps
 come from a single WM-6 run, the latest complete one per
@@ -73,7 +109,7 @@ assumed. As a check, the mean of the 128 members matched
 ## Method
 
 **Seed.** The track starts at the deepest ensemble-mean MSLP inside
-`SEED_BOX` at `--start`, unless `--seed` is given. Each member starts
+`SEED_BOX` at the window's first step, unless `--seed` is given. Each member starts
 from its own nearest closed center within 400 km of that point.
 
 **Tracking** (`track_member()`). Each member's field gets a light Gaussian
