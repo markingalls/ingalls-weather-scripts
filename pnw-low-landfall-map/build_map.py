@@ -60,6 +60,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
+from matplotlib.transforms import offset_copy
 from matplotlib.lines import Line2D
 import numpy as np
 import requests
@@ -237,6 +238,10 @@ MEMBER_TRACK_ALPHA = 0.30
 # margin also keeps it above the logo in the bottom-left corner.
 L_MARKER_MARGIN_LON_DEG = 1.0
 L_MARKER_MARGIN_LAT_DEG = 3.5
+# Central-pressure label under the "L": size, and how far below the L's
+# center its top sits (points).
+L_PRESSURE_FONTSIZE = 17
+L_PRESSURE_OFFSET_PT = 6
 
 # ---------------------------------------------------------------------------
 # NOAA analyzed low position for the "L" -- see fetch_noaa_lows(). The "L"
@@ -1057,9 +1062,12 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
         # Central pressure only, just below the letter, the way surface
         # analyses label a low. (The source and time are in the console
         # output and, for a NOAA position, the footer credit.)
-        ax.text(lo0, la0 - 0.5, f"{hpa0:.0f}", fontsize=8.5,
+        # Offset in points (not degrees) so the gap under the letter is
+        # the same whatever the map's scale.
+        ax.text(lo0, la0, f"{hpa0:.0f}", fontsize=L_PRESSURE_FONTSIZE,
                 fontproperties=poppins_med, color="#c0392b", ha="center", va="top",
-                transform=pc, zorder=7, path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
+                transform=offset_copy(pc._as_mpl_transform(ax), fig=fig, y=-L_PRESSURE_OFFSET_PT, units="points"),
+                zorder=7, path_effects=[pe.withStroke(linewidth=2.6, foreground="white")])
 
     # Town callouts -- on the land side of the band.
     for name, t_lat, t_lon in COAST_TOWNS:
