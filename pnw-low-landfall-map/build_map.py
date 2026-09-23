@@ -123,7 +123,7 @@ FETCH_WORKERS = 6
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.64, 10.8
 FIG_DPI = 200
-AXES_RECT = [0.03, 0.195, 0.94, 0.685]  # [left, bottom, width, height], figure fraction
+AXES_RECT = [0.03, 0.150, 0.94, 0.730]  # [left, bottom, width, height], figure fraction
 MAP_FRAME_INSET_PX = 22
 
 # ---------------------------------------------------------------------------
@@ -131,7 +131,7 @@ MAP_FRAME_INSET_PX = 22
 # the Cascades, Cape Mendocino (S) to northern Vancouver Island (N).
 # ---------------------------------------------------------------------------
 LON_MIN, LON_MAX = -141.5, -118.5
-LAT_MIN, LAT_MAX = 36.3, 53.2
+LAT_MIN, LAT_MAX = 35.5, 53.8
 
 # Member MSLP is fetched over a slightly larger box than the map so a low
 # near the frame edge still has a full local-minimum search window around
@@ -1054,10 +1054,11 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
         ax.text(lo0, la0, "L", fontsize=26, fontproperties=baloo_bold, color="#c0392b",
                 ha="center", va="center", transform=pc, zorder=7,
                 path_effects=[pe.withStroke(linewidth=2.0, foreground="white")])
-        # Label above the letter: the tracks run off to the east/northeast
-        # and the logo sits below, so above is the side that stays clear.
-        ax.text(lo0, la0 + 0.6, f"{source0}\n{hpa0:.0f} mb • {fmt_local(valid0)}", fontsize=7.5,
-                fontproperties=poppins_med, color="#c0392b", ha="center", va="bottom", linespacing=1.1,
+        # Central pressure only, just below the letter, the way surface
+        # analyses label a low. (The source and time are in the console
+        # output and, for a NOAA position, the footer credit.)
+        ax.text(lo0, la0 - 0.5, f"{hpa0:.0f}", fontsize=8.5,
+                fontproperties=poppins_med, color="#c0392b", ha="center", va="top",
                 transform=pc, zorder=7, path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
 
     # Town callouts -- on the land side of the band.
@@ -1094,13 +1095,13 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
                              label=f"{n_members} individual member tracks"))
     leg = fig.legend(handles=handles, loc="center", frameon=False, fontsize=8.5,
                      ncol=2 if len(handles) > 2 else len(handles), prop=poppins_reg, handlelength=2.2, columnspacing=1.6,
-                     bbox_to_anchor=((frame_left + frame_right) / 2, frame_bottom - 0.022))
+                     bbox_to_anchor=((frame_left + frame_right) / 2, frame_bottom - 0.019))
     for text in leg.get_texts():
         text.set_color("#2b2a26")
 
     cbar_width, cbar_height = (frame_right - frame_left) * 0.62, 0.014
     cbar_left = (frame_left + frame_right) / 2 - cbar_width / 2
-    cbar_bottom = frame_bottom - 0.083
+    cbar_bottom = frame_bottom - 0.073
     cax = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     # Equal-width boxes per bin (the 70-100% bin would otherwise swamp the
     # bar), labeled at the bin edges.
@@ -1119,7 +1120,7 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
     fig.text((frame_left + frame_right) / 2, cbar_bottom + cbar_height + 0.008,
              f"Chance the low's center makes landfall within {LANDFALL_RADIUS_KM:.0f} km",
              fontsize=9, fontproperties=poppins_med, color="#3a3835", ha="center", va="bottom")
-    fig.text((frame_left + frame_right) / 2, cbar_bottom - 0.034,
+    fig.text((frame_left + frame_right) / 2, cbar_bottom - 0.027,
              f"Share of all {n_members} members. {n_no_landfall} members' lows fill or stay offshore "
              f"before reaching the coast.", fontsize=7.5, fontproperties=poppins_reg,
              color="#5a584f", ha="center", va="top")

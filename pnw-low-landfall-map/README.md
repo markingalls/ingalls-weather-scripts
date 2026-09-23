@@ -10,7 +10,8 @@ WindBorne's WeatherMesh-6 global ensemble:
   split into two real groups, you get a northern and a southern
   **cluster mean** instead (see *Clustering* below).
 - **Red "L"**: where NOAA currently analyzes the low (see *Current low
-  position* below), with its source, pressure, and time.
+  position* below), with its central pressure (hPa) beneath it, the way
+  surface analyses label a low. The source goes in the footer credit.
 - **Colored coastline**: the chance the low's center makes landfall
   within 100 km of each point on the outer coast. This is the share of
   *all* 128 members, so members whose low fills offshore count as "no".
@@ -131,7 +132,7 @@ time, `fetch_noaa_lows()` reads two sources:
 
 The console prints which low it used (`L: OPC analyzed low ...`). If no
 analysis matches, the "L" falls back to the ensemble mean track's first
-point, labeled "WM-6 ens. mean". The same fallback applies if the
+point, and the footer drops the NOAA credit. The same fallback applies if the
 analyzed low sits too close to the frame edge or logo, if NOAA is
 unreachable, or with `--no-noaa`. When a NOAA position is used, the
 footer credits it.
