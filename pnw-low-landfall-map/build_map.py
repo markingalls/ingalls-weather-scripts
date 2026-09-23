@@ -58,8 +58,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-from matplotlib.collections import LineCollection
-from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.lines import Line2D
 import numpy as np
 import requests
@@ -86,12 +84,16 @@ OUTPUT_DIR = THIS_DIR / "output"
 COUNTRIES_FILE = MAPS_DIR / "countries_slim.json"
 STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
+ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada"}
 
-LAND_COLOR = "#F5E7B3"
-OCEAN_COLOR = "#D2E8F3"
+# Land is the same soft warm gray as ../columbia-basin-lightning-map, so
+# the probability band's yellows/oranges are the only warm color on the
+# map; ocean stays a pale blue so the coastline reads at a glance.
+LAND_COLOR = "#e3e1da"
+OCEAN_COLOR = "#dbe9f0"
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -112,11 +114,10 @@ FETCH_WORKERS = 6
 
 # ---------------------------------------------------------------------------
 # Figure geometry -- 4:5 portrait, Instagram's tallest feed aspect, at 2x
-# Instagram's 1080x1350 upload size (1728x2160 px). PlateCarree like the
-# repo's other regional PNW maps (../dew-point-storm-map/,
-# ../wildcad-fires-map/); the domain's lon/lat spans below are sized so
-# cartopy's aspect-preserving fit fills AXES_RECT's width with no side
-# gutters.
+# Instagram's 1080x1350 upload size (1728x2160 px). Projection is the same
+# NearsidePerspective "satellite view" as ../columbia-basin-lightning-map
+# (see build_map()); the domain below is sized so its projected shape
+# fills AXES_RECT's width with no side gutters.
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.64, 10.8
 FIG_DPI = 200
@@ -127,8 +128,8 @@ MAP_FRAME_INSET_PX = 22
 # Map domain -- NE Pacific from where the low is tracked from, east across
 # the Cascades, Cape Mendocino (S) to northern Vancouver Island (N).
 # ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -137.0, -119.0
-LAT_MIN, LAT_MAX = 38.3, 54.7
+LON_MIN, LON_MAX = -139.0, -116.0
+LAT_MIN, LAT_MAX = 37.9, 54.3
 
 # Member MSLP is fetched over a slightly larger box than the map so a low
 # near the frame edge still has a full local-minimum search window around
@@ -137,7 +138,16 @@ FETCH_PAD_DEG = 3.0
 FETCH_BOX = (LON_MIN - FETCH_PAD_DEG, LAT_MIN - FETCH_PAD_DEG,
              LON_MAX + FETCH_PAD_DEG, LAT_MAX + FETCH_PAD_DEG)
 
-MAP_CLIP_BOX = box(*FETCH_BOX)
+# Basemap geometries are clipped to a box padded well past the map: the
+# perspective view's rectangular frame reaches further in lon/lat at its
+# corners than LON_MIN/LON_MAX/LAT_MIN/LAT_MAX do along its edges, and the
+# land fill has to reach all the way out into them.
+BASEMAP_PAD_DEG = 8.0
+MAP_CLIP_BOX = box(LON_MIN - BASEMAP_PAD_DEG, LAT_MIN - BASEMAP_PAD_DEG,
+                   LON_MAX + BASEMAP_PAD_DEG, LAT_MAX + BASEMAP_PAD_DEG)
+
+# Same satellite height as ../columbia-basin-lightning-map.
+SATELLITE_HEIGHT_M = 4_000_000
 
 # ---------------------------------------------------------------------------
 # Tracking window & seed. The low is found at TRACK_START in the ensemble
@@ -206,8 +216,11 @@ COAST_TOWNS = [
 # from a neutral "very unlikely" gray through yellow/orange/red to deep
 # purple. Tracks are drawn in blues so they never read as part of this
 # scale.
-PROB_BOUNDS = [0, 5, 10, 20, 30, 40, 50, 60, 70, 100]
-PROB_COLORS = ["#d9d5c7", "#fde68a", "#fbbf24", "#f59e0b", "#ea580c",
+# Coast below PROB_MIN_SHOWN_PCT isn't highlighted at all (and gets no
+# town callout) -- a 1-in-128 member landfall isn't a real signal.
+PROB_MIN_SHOWN_PCT = 2
+PROB_BOUNDS = [PROB_MIN_SHOWN_PCT, 5, 10, 20, 30, 40, 50, 60, 70, 100]
+PROB_COLORS = ["#fef3c7", "#fde68a", "#fbbf24", "#f59e0b", "#ea580c",
                "#dc2626", "#b91c1c", "#9d174d", "#581c87"]
 
 TRACK_COLOR = "#1f5fa8"
@@ -585,28 +598,70 @@ def cluster_landfalls(tracks):
     return [idx], "single group -- " + desc
 
 
-def mean_track(tracks, members, coast):
-    """Mean position of `members`' tracks at each step, while at least
-    half of them are still offshore, then on to their mean landfall point
-    (snapped to the coast line) at their mean landfall time. Averaging on
-    past the point where most members have already come ashore would mean
-    averaging over an ever-smaller, ever-less-representative subset."""
+def smooth_track(points):
+    """1-2-1 smoothing of a track's interior positions (endpoints -- the
+    start and the landfall point -- stay put). Centers are found on the
+    0.25 deg grid, so a raw track zig-zags by a grid cell here and there
+    even when the low is moving steadily; this takes that stair-stepping
+    out without moving the track anywhere it didn't go."""
+    if len(points) < 3:
+        return points
+    arr = np.array([(p[1], p[2]) for p in points])
+    sm = arr.copy()
+    sm[1:-1] = 0.25 * arr[:-2] + 0.5 * arr[1:-1] + 0.25 * arr[2:]
+    return [(p[0], la, lo, p[3]) for p, (la, lo) in zip(points, sm)]
+
+
+def position_at(track, hour):
+    """A member's (lat, lon) at `hour`. Past its landfall (or last tracked
+    point) it's carried on along its last step's motion, so the mean of a
+    set of members doesn't lurch back toward the coast as the first ones
+    come ashore and stop -- it keeps moving the way they were going. None
+    before the track starts or if it's a single point."""
+    pts = track["points"]
+    if len(pts) < 2 or hour < pts[0][0]:
+        return None
+    for a, b in zip(pts[:-1], pts[1:]):
+        if a[0] <= hour <= b[0] and b[0] > a[0]:
+            f = (hour - a[0]) / (b[0] - a[0])
+            return a[1] + f * (b[1] - a[1]), a[2] + f * (b[2] - a[2])
+    # Past the end: extrapolate from the last full 3-hour step.
+    a, b = pts[-3] if len(pts) >= 3 and pts[-1][0] - pts[-2][0] < 1e-6 else pts[-2], pts[-1]
+    dt = b[0] - a[0]
+    if dt <= 0:
+        return b[1], b[2]
+    f = (hour - b[0]) / dt
+    return b[1] + f * (b[1] - a[1]), b[2] + f * (b[2] - a[2])
+
+
+def mean_track(tracks, members, coast, hours):
+    """Mean position of `members` at each step (see position_at() for how
+    members already ashore are carried along), until the mean position
+    itself crosses the coast -- that crossing is the mean track's landfall.
+    Averaging positions, rather than drawing the ensemble-mean field's own
+    low, keeps the mean track honest where members' lows fill at different
+    times. The last point is the coast crossing (hour interpolated); its
+    pressure entry is NaN."""
+    members = [k for k in members if len(tracks[k]["points"]) >= 2]
     if not members:
         return []
-    hours = sorted({p[0] for k in members for p in tracks[k]["points"] if p[0] == int(p[0])})
     out = []
     for hour in hours:
-        pts = [p for k in members for p in tracks[k]["points"]
-               if p[0] == hour and not (tracks[k]["landfall"] and tracks[k]["landfall"][0] <= hour)]
-        if len(pts) < 0.5 * len(members):
-            break
-        out.append((hour, float(np.mean([p[1] for p in pts])), float(np.mean([p[2] for p in pts])),
-                    float(np.mean([p[3] for p in pts]))))
-    landed = [tracks[k]["landfall"] for k in members if tracks[k]["landfall"]]
-    if landed:
-        m_lat, m_lon = np.mean([l[1] for l in landed]), np.mean([l[2] for l in landed])
-        snap = coast.interpolate(coast.project(Point(m_lon, m_lat)))
-        out.append((float(np.mean([l[0] for l in landed])), snap.y, snap.x, np.nan))
+        pos = [position_at(tracks[k], hour) for k in members]
+        pos = [p for p in pos if p is not None]
+        if len(pos) < 0.5 * len(members):
+            if out:
+                break
+            continue
+        lat_m, lon_m = float(np.mean([p[0] for p in pos])), float(np.mean([p[1] for p in pos]))
+        hpa = [p[3] for k in members for p in tracks[k]["points"] if p[0] == hour]
+        if out:
+            cross = crossing_point(coast, out[-1][1:3], (lat_m, lon_m))
+            if cross is not None:
+                (c_lat, c_lon), frac = cross
+                out.append((out[-1][0] + frac * (hour - out[-1][0]), c_lat, c_lon, np.nan))
+                return out
+        out.append((hour, lat_m, lon_m, float(np.mean(hpa)) if hpa else np.nan))
     return out
 
 
@@ -628,30 +683,36 @@ def clip_to_map(geom):
     return None if clipped.is_empty else clipped
 
 
-def load_states():
-    with open(STATES_LAKES_FILE) as f:
-        data = json.load(f)
-    geoms = []
-    for feat in data["features"]:
-        props = feat["properties"]
-        if "Lake" in props.get("featurecla", "") or props.get("admin") not in TARGET_COUNTRIES:
-            continue
-        clipped = clip_to_map(shape(feat["geometry"]).boundary)
-        if clipped is not None:
-            geoms.append(clipped)
-    return geoms
-
-
-def load_boundary_lines(path):
+def load_land_boundary_lines(path, land):
+    """Border lines (admin0 = international, admin1 = state/province)
+    clipped to land. Both files carry maritime boundary segments too --
+    the US/Canada line runs out through the Strait of Juan de Fuca and
+    offshore, and state lines continue a way out to sea -- which drew as
+    stray straight lines across the water here."""
     with open(path) as f:
         data = json.load(f)
-    geoms = [shape(feat["geometry"]) for feat in data["features"]]
-    return [g for g in (clip_to_map(g) for g in geoms) if g is not None]
+    land_clip = land.intersection(MAP_CLIP_BOX)
+    out = []
+    for feat in data["features"]:
+        g = clip_to_map(shape(feat["geometry"]))
+        if g is None:
+            continue
+        g = g.intersection(land_clip)
+        if not g.is_empty:
+            out.append(g)
+    return out
 
 
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
+def contiguous_runs(values):
+    """Index lists of consecutive equal values in a 1-D array."""
+    values = np.asarray(values)
+    breaks = np.where(values[1:] != values[:-1])[0] + 1
+    return [list(r) for r in np.split(np.arange(len(values)), breaks)]
+
+
 def fmt_local(dt_utc, with_day=True):
     local = dt_utc.astimezone(LOCAL_TZ)
     h12 = local.hour % 12 or 12
@@ -687,6 +748,8 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
 
     tracks = [track_member(lat, lon, [mslp[s, k] for s in range(len(hours))], hours, seed, coast)
               for k in range(n_members)]
+    for t in tracks:
+        t["points"] = smooth_track(t["points"])
     n_landfall = sum(1 for t in tracks if t["landfall"])
     n_tracked = sum(1 for t in tracks if t["points"])
     print(f"Tracked {n_tracked}/{n_members} members; {n_landfall} make landfall.")
@@ -705,7 +768,7 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
             member_color[k] = CLUSTER_COLORS[g] if clustered else TRACK_COLOR
     # Non-landfalling members join no cluster; drawn in the single-track
     # color either way.
-    group_means = [mean_track(tracks, members, coast) for members in groups]
+    group_means = [mean_track(tracks, members, coast, hours) for members in groups]
 
     coast_xy = np.asarray(coast.coords)
     coast_lon, coast_lat = coast_xy[:, 0], coast_xy[:, 1]
@@ -715,20 +778,30 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
           f"at {coast_lat[peak]:.2f}N {coast_lon[peak]:.2f}")
 
     # ---- Figure ----
+    # NearsidePerspective -- the same "satellite view" projection as
+    # ../columbia-basin-lightning-map, centered on this domain. The frame
+    # is still a rectangle (set_extent fits the projected bounding box of
+    # the lon/lat extent), so the ocean is the axes background and the land
+    # fill is clipped to the generously padded MAP_CLIP_BOX to reach its
+    # corners.
     pc = ccrs.PlateCarree()
+    proj = ccrs.NearsidePerspective(central_longitude=(LON_MIN + LON_MAX) / 2,
+                                    central_latitude=(LAT_MIN + LAT_MAX) / 2,
+                                    satellite_height=SATELLITE_HEIGHT_M)
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
-    ax = fig.add_axes(AXES_RECT, projection=pc)
+    ax = fig.add_axes(AXES_RECT, projection=proj)
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
     ax.patch.set_facecolor(OCEAN_COLOR)
 
     fill_geoms = [g for g in (clip_to_map(g) for g in country_geoms) if g is not None]
     outline_geoms = [g for g in (clip_to_map(g.boundary) for g in country_geoms) if g is not None]
     ax.add_geometries(fill_geoms, crs=pc, facecolor=LAND_COLOR, edgecolor="none", zorder=0.5)
-    ax.add_geometries(outline_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
-    ax.add_geometries(load_states(), crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
-    ax.add_geometries(load_boundary_lines(ADMIN0_LINES_FILE), crs=pc, facecolor="none",
-                      edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+    ax.add_geometries(outline_geoms, crs=pc, facecolor="none", edgecolor="#7d8f99", linewidth=0.8, zorder=1.5)
+    ax.add_geometries(load_land_boundary_lines(ADMIN1_LINES_FILE, land), crs=pc, facecolor="none",
+                      edgecolor="#8a867a", linewidth=0.8, zorder=2)
+    ax.add_geometries(load_land_boundary_lines(ADMIN0_LINES_FILE, land), crs=pc, facecolor="none",
+                      edgecolor="#5f5b50", linewidth=1.1, zorder=2.5)
 
     # Member tracks -- thin, translucent, so where many overlap reads
     # darker (the ensemble's consensus corridor) without any extra
@@ -740,18 +813,28 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
         ax.plot(pts[:, 0], pts[:, 1], color=member_color.get(k, TRACK_COLOR), alpha=MEMBER_TRACK_ALPHA,
                 linewidth=0.75, solid_capstyle="round", transform=pc, zorder=3)
 
-    # Landfall-probability coast band -- dark underlay so the lightest
-    # bins still separate from the land/ocean fills.
-    prob_cmap = ListedColormap(PROB_COLORS)
-    prob_norm = BoundaryNorm(PROB_BOUNDS, prob_cmap.N)
-    segs = np.stack([coast_xy[:-1], coast_xy[1:]], axis=1)
-    seg_prob = 100 * (prob[:-1] + prob[1:]) / 2
-    ax.plot(coast_lon, coast_lat, color="#2b2a26", linewidth=8.2, solid_capstyle="round",
-            transform=pc, zorder=4)
-    band = LineCollection(segs, cmap=prob_cmap, norm=prob_norm, linewidths=6.4,
-                          capstyle="butt", transform=pc, zorder=4.1)
-    band.set_array(seg_prob)
-    ax.add_collection(band)
+    # Landfall-probability coast band, only where the chance clears
+    # PROB_MIN_SHOWN_PCT, over a dark underlay so the lightest bin still
+    # separates from the land/ocean fills. Drawn as one polyline per run of
+    # same-bin coast rather than one tiny segment per coast point: hundreds
+    # of ~2 km butt-capped segments left faint antialiasing seams between
+    # them that read as hatching across the band.
+    prob_pct = 100 * prob
+    bin_idx = np.digitize(prob_pct, PROB_BOUNDS) - 1  # -1 = below PROB_MIN_SHOWN_PCT
+    shown = prob_pct > PROB_MIN_SHOWN_PCT
+    for run in contiguous_runs(shown):
+        if shown[run[0]] and len(run) > 1:
+            ax.plot(coast_lon[run], coast_lat[run], color="#2b2a26", linewidth=8.2,
+                    solid_capstyle="round", solid_joinstyle="round", transform=pc, zorder=4)
+    for run in contiguous_runs(np.where(shown, bin_idx, -1)):
+        b = bin_idx[run[0]] if shown[run[0]] else -1
+        if b < 0:
+            continue
+        # Extend each run one point into its neighbor on both sides so
+        # adjacent color runs meet with no gap.
+        ext = list(range(max(run[0] - 1, 0), min(run[-1] + 2, len(coast_lat))))
+        ax.plot(coast_lon[ext], coast_lat[ext], color=PROB_COLORS[min(b, len(PROB_COLORS) - 1)],
+                linewidth=6.4, solid_capstyle="butt", solid_joinstyle="round", transform=pc, zorder=4.1)
 
     # Mean track(s) -- white-haloed, dotted every 6 h with a time label
     # every 12 h, ending in a ringed landfall marker.
@@ -776,7 +859,9 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
                 ax.text(lo, la + 0.32, fmt_local(valid), fontsize=7.5, fontproperties=poppins_med,
                         color="#2b2a26", ha="center", va="bottom", transform=pc, zorder=6,
                         path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
-        h_lf, la_lf, lo_lf, _ = mt[-1]
+        h_lf, la_lf, lo_lf, hpa_lf = mt[-1]
+        if not np.isnan(hpa_lf):  # mean track never reached the coast
+            continue
         ax.plot(lo_lf, la_lf, "o", color="white", markersize=11, markeredgecolor=color,
                 markeredgewidth=2.4, transform=pc, zorder=6)
         ax.text(lo_lf - 0.45, la_lf, f"Landfall\n~{fmt_local(hour_to_utc(h_lf))}",
@@ -786,7 +871,7 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
 
     # "L" at the low's starting position, with its ensemble-mean central
     # pressure.
-    start_mean = mean_track(tracks, [k for k, t in enumerate(tracks) if t["points"]], coast)
+    start_mean = mean_track(tracks, list(range(n_members)), coast, hours)
     if start_mean:
         _, la0, lo0, hpa0 = start_mean[0]
         ax.text(lo0, la0, "L", fontsize=26, fontproperties=baloo_bold, color="#c0392b",
@@ -801,6 +886,8 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
         if not (LAT_MIN < t_lat < LAT_MAX):
             continue
         i = int(np.argmin(haversine_km(t_lat, t_lon, coast_lat, coast_lon)))
+        if prob[i] * 100 <= PROB_MIN_SHOWN_PCT:
+            continue
         ax.plot(t_lon, t_lat, "o", color="#2b2a26", markersize=2.6, transform=pc, zorder=7)
         ax.text(coast_lon[i] + 0.42, t_lat, f"{name}  {prob[i] * 100:.0f}%", fontsize=8,
                 fontproperties=poppins_med, color="#2b2a26", ha="left", va="center", transform=pc,

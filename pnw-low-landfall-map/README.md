@@ -12,7 +12,17 @@ WindBorne's WeatherMesh-6 global ensemble:
 - **Colored coastline**: the chance the low's center makes landfall
   within 100 km of each point on the outer coast. This is the share of
   *all* 128 members, so members whose low fills offshore count as "no".
-  Ten coastal towns get a callout with their value.
+  Only coast above 2% is highlighted, and only towns above 2% get a
+  callout.
+
+The projection is the same `NearsidePerspective` satellite view
+(4,000 km height) as
+[`../columbia-basin-lightning-map/`](../columbia-basin-lightning-map/),
+centered on this domain. Land uses that map's soft warm gray (`#e3e1da`),
+so the coast band is the only warm color. Country and state borders come
+from `admin0`/`admin1_boundary_lines.json`, clipped to land. Unclipped,
+they draw maritime boundaries across the water, such as the US/Canada
+line down the Strait of Juan de Fuca.
 
 Defaults are set for the low that comes ashore Thursday night into Friday
 morning, 2026-09-25. Point it at another system with `--start`, `--end`,
@@ -93,9 +103,14 @@ landfalling members. Otherwise the map shows one mean track. For the
 single mean track. The spread is one broad mode, not two scenarios.
 
 **Mean track** (`mean_track()`). This is the mean member position at each
-step, while at least half the members are still offshore, then on to the
-members' mean landfall point (snapped to the coast) at their mean
-landfall time.
+step, until the mean position itself crosses the coast. After a member
+comes ashore, it keeps moving along its last step's motion. That stops
+the mean from stalling or lurching as the first members stop at the
+coast, which would put a kink in the mean track.
+
+**Smoothing.** Member tracks get 1-2-1 smoothing of their interior points,
+with the start and landfall points fixed. This removes the grid-cell
+zig-zags that come from finding centers on the 0.25 deg grid.
 
 ## Files
 
