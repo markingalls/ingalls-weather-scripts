@@ -524,7 +524,7 @@ def parse_opc_hsf(text):
         if re.match(r"\.\d+ HOUR FORECAST", entry):
             continue
         for m in re.finditer(
-                r"(?:LOW|CENTER)\s+(\d{1,2}(?:\.\d)?)N\s*(\d{1,3}(?:\.\d)?)([EW])\s+(\d{3,4})\s*MB", entry):
+                r"(?:LOW|CENTER)\s+(?:NEAR\s+)?(\d{1,2}(?:\.\d)?)N\s*(\d{1,3}(?:\.\d)?)([EW])\s+(\d{3,4})\s*MB", entry):
             lon = float(m.group(2)) * (-1 if m.group(3) == "W" else 1)
             lows.append((valid, float(m.group(1)), lon, float(m.group(4)), "OPC"))
     return lows
@@ -1130,9 +1130,14 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
     fig.text((frame_left + frame_right) / 2, cbar_bottom + cbar_height + 0.008,
              f"Chance the low's center makes landfall within {LANDFALL_RADIUS_KM:.0f} km",
              fontsize=9, fontproperties=poppins_med, color="#3a3835", ha="center", va="bottom")
+    if n_no_landfall == 0:
+        offshore_note = f"All {n_members} members' lows reach the coast."
+    elif n_no_landfall == 1:
+        offshore_note = "1 member's low fills or stays offshore before reaching the coast."
+    else:
+        offshore_note = f"{n_no_landfall} members' lows fill or stay offshore before reaching the coast."
     fig.text((frame_left + frame_right) / 2, cbar_bottom - 0.027,
-             f"Share of all {n_members} members. {n_no_landfall} members' lows fill or stay offshore "
-             f"before reaching the coast.", fontsize=7.5, fontproperties=poppins_reg,
+             f"Share of all {n_members} members. {offshore_note}", fontsize=7.5, fontproperties=poppins_reg,
              color="#5a584f", ha="center", va="top")
 
     # ---- Title ----
