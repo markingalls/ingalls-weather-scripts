@@ -238,10 +238,12 @@ MEMBER_TRACK_ALPHA = 0.30
 # margin also keeps it above the logo in the bottom-left corner.
 L_MARKER_MARGIN_LON_DEG = 1.0
 L_MARKER_MARGIN_LAT_DEG = 3.5
-# Central-pressure label under the "L": size, and how far below the L's
-# center its top sits (points).
+# "L" size, and the central-pressure label under it: its size, and how far
+# below the L's center its top sits (points) -- scale the offset with
+# L_MARKER_FONTSIZE, since the letter's bottom edge moves with it.
+L_MARKER_FONTSIZE = 52
 L_PRESSURE_FONTSIZE = 17
-L_PRESSURE_OFFSET_PT = 6
+L_PRESSURE_OFFSET_PT = 13.5
 
 # ---------------------------------------------------------------------------
 # NOAA analyzed low position for the "L" -- see fetch_noaa_lows(). The "L"
@@ -1056,7 +1058,7 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
 
     if l_point:
         la0, lo0, hpa0, valid0, source0 = l_point
-        ax.text(lo0, la0, "L", fontsize=26, fontproperties=baloo_bold, color="#c0392b",
+        ax.text(lo0, la0, "L", fontsize=L_MARKER_FONTSIZE, fontproperties=baloo_bold, color="#c0392b",
                 ha="center", va="center", transform=pc, zorder=7,
                 path_effects=[pe.withStroke(linewidth=2.0, foreground="white")])
         # Central pressure only, just below the letter, the way surface
