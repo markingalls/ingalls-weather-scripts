@@ -31,6 +31,8 @@ README first). This skill covers running it for a new low.
      Seas Forecast (`FZPN02 KWBC`) yourself: the low may be unnamed or
      outside the matching window, and a wrong seed also shows up here.
 5. Look at the PNG in `output/` for label collisions before sending it.
+   The view auto-zooms to the storm. Use `--full-domain` for the fixed
+   wide frame.
    For tweaks, iterate with `--file output/snapshot_<init>.npz` so you
    don't re-fetch.
 6. Give the user the PNG and the key numbers: median landfall time

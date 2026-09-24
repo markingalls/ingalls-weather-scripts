@@ -141,6 +141,17 @@ FETCH_PAD_DEG = 3.0
 FETCH_BOX = (LON_MIN - FETCH_PAD_DEG, LAT_MIN - FETCH_PAD_DEG,
              LON_MAX + FETCH_PAD_DEG, LAT_MAX + FETCH_PAD_DEG)
 
+# Zoomed view (see fit_view_extent()): padding around the tracks/coast/L,
+# a minimum height, room east of the coast band for town callouts, and
+# room around the "L" for its label and the bottom-left logo -- the
+# fractions are of the view's own width/height, since labels and logo are
+# fixed-size on the page whatever the zoom.
+VIEW_PAD_DEG = 1.0
+VIEW_MIN_LAT_SPAN_DEG = 8.0
+VIEW_LABEL_FRAC = 0.17
+VIEW_L_MARGIN_LON_FRAC = 0.08
+VIEW_L_MARGIN_LAT_FRAC = 0.20
+
 # Basemap geometries are clipped to a box padded well past the map: the
 # perspective view's rectangular frame reaches further in lon/lat at its
 # corners than LON_MIN/LON_MAX/LAT_MIN/LAT_MAX do along its edges, and the
@@ -863,6 +874,80 @@ def load_land_boundary_lines(path, land):
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
+def view_projection(view):
+    """The NearsidePerspective projection centered on a (lon0, lon1,
+    lat0, lat1) view."""
+    return ccrs.NearsidePerspective(central_longitude=(view[0] + view[1]) / 2,
+                                    central_latitude=(view[2] + view[3]) / 2,
+                                    satellite_height=SATELLITE_HEIGHT_M)
+
+
+def projected_aspect(view):
+    """Width/height of the view's projected bounding box -- what set_extent
+    fits into the axes (sampled along all four edges, since parallels bow
+    under the perspective projection)."""
+    lon0, lon1, lat0, lat1 = view
+    n = 40
+    edge_lon = np.concatenate([np.linspace(lon0, lon1, n), np.full(n, lon1),
+                               np.linspace(lon1, lon0, n), np.full(n, lon0)])
+    edge_lat = np.concatenate([np.full(n, lat0), np.linspace(lat0, lat1, n),
+                               np.full(n, lat1), np.linspace(lat1, lat0, n)])
+    xy = view_projection(view).transform_points(ccrs.PlateCarree(), edge_lon, edge_lat)
+    return np.ptp(xy[:, 0]) / np.ptp(xy[:, 1])
+
+
+def fit_view_extent(pts_lat, pts_lon, label_coast_lon, l_point):
+    """A (lon0, lon1, lat0, lat1) view zoomed to this storm, that still
+    fills the 4:5 frame edge to edge.
+
+    Starts from the bounding box of everything that has to show -- every
+    member track, the highlighted coast, and the "L" -- padded by
+    VIEW_PAD_DEG, then:
+      - leaves room east of the coast band for the town callouts
+        (VIEW_LABEL_FRAC of the view's width) and around the "L" for its
+        pressure label and the logo in the bottom-left corner
+        (VIEW_L_MARGIN_*_FRAC of the view);
+      - holds at least VIEW_MIN_LAT_SPAN_DEG tall, so a storm right at the
+        coast doesn't zoom in to street level;
+      - widens whichever dimension is short to match the axes' aspect
+        ratio, since cartopy otherwise leaves gutters.
+    Those depend on each other (label room is a fraction of the final
+    width), so it iterates to a fixed point."""
+    target = (AXES_RECT[2] * FIG_WIDTH_IN) / (AXES_RECT[3] * FIG_HEIGHT_IN)
+    lon0, lon1 = min(pts_lon) - VIEW_PAD_DEG, max(pts_lon) + VIEW_PAD_DEG
+    lat0, lat1 = min(pts_lat) - VIEW_PAD_DEG, max(pts_lat) + VIEW_PAD_DEG
+    if l_point:
+        lon0, lat0 = min(lon0, l_point[1] - VIEW_PAD_DEG), min(lat0, l_point[0] - VIEW_PAD_DEG)
+    if lat1 - lat0 < VIEW_MIN_LAT_SPAN_DEG:
+        mid = (lat0 + lat1) / 2
+        lat0, lat1 = mid - VIEW_MIN_LAT_SPAN_DEG / 2, mid + VIEW_MIN_LAT_SPAN_DEG / 2
+    for _ in range(50):
+        w, h = lon1 - lon0, lat1 - lat0
+        changed = False
+        if label_coast_lon is not None and lon1 < label_coast_lon + VIEW_LABEL_FRAC * w:
+            lon1 = label_coast_lon + VIEW_LABEL_FRAC * w + 1e-6
+            changed = True
+        if l_point:
+            if l_point[1] < lon0 + VIEW_L_MARGIN_LON_FRAC * w:
+                lon0 = l_point[1] - VIEW_L_MARGIN_LON_FRAC * w - 1e-6
+                changed = True
+            if l_point[0] < lat0 + VIEW_L_MARGIN_LAT_FRAC * h:
+                lat0 = l_point[0] - VIEW_L_MARGIN_LAT_FRAC * h - 1e-6
+                changed = True
+        aspect = projected_aspect((lon0, lon1, lat0, lat1))
+        if aspect < target * 0.995:
+            grow = (lon1 - lon0) * (target / aspect - 1) / 2
+            lon0, lon1 = lon0 - grow, lon1 + grow
+            changed = True
+        elif aspect > target * 1.005:
+            grow = (lat1 - lat0) * (aspect / target - 1) / 2
+            lat0, lat1 = lat0 - grow, lat1 + grow
+            changed = True
+        if not changed:
+            break
+    return (lon0, lon1, lat0, lat1)
+
+
 def contiguous_runs(values):
     """Index lists of consecutive equal values in a 1-D array."""
     values = np.asarray(values)
@@ -881,7 +966,8 @@ def fmt_local(dt_utc, with_day=True):
     return f"{local.strftime('%a')} {local:%H:%M}" if with_day else f"{local:%H:%M}"
 
 
-def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None, noaa_lows=None):
+def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None, noaa_lows=None,
+              full_domain=False):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_med = fm.FontProperties(fname=POPPINS_MED_PATH)
     baloo_bold = fm.FontProperties(fname=BALOO_BOLD_PATH)
@@ -938,6 +1024,43 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
     print(f"Peak landfall-within-{LANDFALL_RADIUS_KM:.0f}km chance: {prob[peak]:.0%} "
           f"at {coast_lat[peak]:.2f}N {coast_lon[peak]:.2f}")
 
+    # "L" -- where NOAA (OPC/WPC) currently analyzes the low, when one of
+    # their analyses has a low matching this system (match_noaa_low()).
+    # Otherwise, the ensemble mean track's first point far enough inside
+    # the frame (L_MARKER_MARGIN_*) to stay clear of the edge and logo,
+    # labeled as the WM-6 position.
+    def clear_of_edge(lat_, lon_):
+        return lon_ >= LON_MIN + L_MARKER_MARGIN_LON_DEG and lat_ >= LAT_MIN + L_MARKER_MARGIN_LAT_DEG
+
+    start_mean = [p for p in mean_track(tracks, list(range(n_members)), coast, hours) if not np.isnan(p[3])]
+    l_point = None  # (lat, lon, hpa, valid_utc, source label)
+    noaa = match_noaa_low(noaa_lows or [], [(p[0], p[1], p[2]) for p in start_mean], t0)
+    if noaa and clear_of_edge(noaa[1], noaa[2]):
+        l_point = (noaa[1], noaa[2], noaa[3], noaa[0], f"NOAA {noaa[4]} analysis")
+        print(f"L: {noaa[4]} analyzed low {noaa[1]:.1f}N {-noaa[2]:.1f}W {noaa[3]:.0f} mb, "
+              f"valid {noaa[0]:%Y-%m-%d %HZ}")
+    else:
+        if noaa:
+            print("NOTE: NOAA-analyzed low is too close to the frame edge/logo to label; using the mean track.")
+        else:
+            print("NOTE: no current NOAA-analyzed low matches this system; L is on the WM-6 mean track.")
+        for h, la, lo, hpa in start_mean:
+            if clear_of_edge(la, lo):
+                l_point = (la, lo, hpa, hour_to_utc(h), "WM-6 ens. mean")
+                break
+
+    # Map view -- zoomed to this storm (fit_view_extent()) unless
+    # --full-domain, in which case the fixed LON_MIN..LAT_MAX domain.
+    if full_domain:
+        view = (LON_MIN, LON_MAX, LAT_MIN, LAT_MAX)
+    else:
+        shown_coast = 100 * prob > PROB_MIN_SHOWN_PCT
+        pts_lat = [p[1] for t in tracks for p in t["points"]] + list(coast_lat[shown_coast])
+        pts_lon = [p[2] for t in tracks for p in t["points"]] + list(coast_lon[shown_coast])
+        view = fit_view_extent(pts_lat, pts_lon, coast_lon[shown_coast].max() if shown_coast.any() else None,
+                               l_point)
+    print(f"View: {view[0]:.1f} to {view[1]:.1f}E, {view[2]:.1f} to {view[3]:.1f}N")
+
     # ---- Figure ----
     # NearsidePerspective -- the same "satellite view" projection as
     # ../columbia-basin-lightning-map, centered on this domain. The frame
@@ -946,14 +1069,18 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
     # fill is clipped to the generously padded MAP_CLIP_BOX to reach its
     # corners.
     pc = ccrs.PlateCarree()
-    proj = ccrs.NearsidePerspective(central_longitude=(LON_MIN + LON_MAX) / 2,
-                                    central_latitude=(LAT_MIN + LAT_MAX) / 2,
-                                    satellite_height=SATELLITE_HEIGHT_M)
+    proj = view_projection(view)
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
     ax = fig.add_axes(AXES_RECT, projection=proj)
-    ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
+    ax.set_extent(list(view), crs=pc)
     ax.patch.set_facecolor(OCEAN_COLOR)
+
+    def pts_offset(dx, dy):
+        """lon/lat data transform shifted by (dx, dy) points -- label
+        offsets in points stay the same on the page whatever the zoom
+        (fit_view_extent()), where a degree offset wouldn't."""
+        return offset_copy(pc._as_mpl_transform(ax), fig=fig, x=dx, y=dy, units="points")
 
     fill_geoms = [g for g in (clip_to_map(g) for g in country_geoms) if g is not None]
     outline_geoms = [g for g in (clip_to_map(g.boundary) for g in country_geoms) if g is not None]
@@ -997,30 +1124,6 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
         ax.plot(coast_lon[ext], coast_lat[ext], color=PROB_COLORS[min(b, len(PROB_COLORS) - 1)],
                 linewidth=6.4, solid_capstyle="butt", solid_joinstyle="round", transform=pc, zorder=4.1)
 
-    # "L" -- where NOAA (OPC/WPC) currently analyzes the low, when one of
-    # their analyses has a low matching this system (match_noaa_low()).
-    # Otherwise, the ensemble mean track's first point far enough inside
-    # the frame (L_MARKER_MARGIN_*) to stay clear of the edge and logo,
-    # labeled as the WM-6 position.
-    def clear_of_edge(lat_, lon_):
-        return lon_ >= LON_MIN + L_MARKER_MARGIN_LON_DEG and lat_ >= LAT_MIN + L_MARKER_MARGIN_LAT_DEG
-
-    start_mean = [p for p in mean_track(tracks, list(range(n_members)), coast, hours) if not np.isnan(p[3])]
-    l_point = None  # (lat, lon, hpa, valid_utc, source label)
-    noaa = match_noaa_low(noaa_lows or [], [(p[0], p[1], p[2]) for p in start_mean], t0)
-    if noaa and clear_of_edge(noaa[1], noaa[2]):
-        l_point = (noaa[1], noaa[2], noaa[3], noaa[0], f"NOAA {noaa[4]} analysis")
-        print(f"L: {noaa[4]} analyzed low {noaa[1]:.1f}N {-noaa[2]:.1f}W {noaa[3]:.0f} mb, "
-              f"valid {noaa[0]:%Y-%m-%d %HZ}")
-    else:
-        if noaa:
-            print("NOTE: NOAA-analyzed low is too close to the frame edge/logo to label; using the mean track.")
-        else:
-            print("NOTE: no current NOAA-analyzed low matches this system; L is on the WM-6 mean track.")
-        for h, la, lo, hpa in start_mean:
-            if clear_of_edge(la, lo):
-                l_point = (la, lo, hpa, hour_to_utc(h), "WM-6 ens. mean")
-                break
 
     # Mean track(s) -- white-haloed, dotted every 6 h with a time label
     # every 12 h, ending in a ringed landfall marker.
@@ -1043,17 +1146,17 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
             near_landfall = haversine_km(la, lo, mt[-1][1], mt[-1][2]) < 200
             near_l = l_point is not None and haversine_km(la, lo, l_point[0], l_point[1]) < 150
             if valid.hour % 12 == 0 and i > 0 and not near_landfall and not near_l:
-                ax.text(lo, la + 0.32, fmt_local(valid), fontsize=7.5, fontproperties=poppins_med,
-                        color="#2b2a26", ha="center", va="bottom", transform=pc, zorder=6,
+                ax.text(lo, la, fmt_local(valid), fontsize=7.5, fontproperties=poppins_med,
+                        color="#2b2a26", ha="center", va="bottom", transform=pts_offset(0, 8), zorder=6,
                         path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
         h_lf, la_lf, lo_lf, hpa_lf = mt[-1]
         if not np.isnan(hpa_lf):  # mean track never reached the coast
             continue
         ax.plot(lo_lf, la_lf, "o", color="white", markersize=11, markeredgecolor=color,
                 markeredgewidth=2.4, transform=pc, zorder=6)
-        ax.text(lo_lf - 0.45, la_lf, f"Landfall\n~{fmt_local(round_to_hour(hour_to_utc(h_lf)))}",
+        ax.text(lo_lf, la_lf, f"Landfall\n~{fmt_local(round_to_hour(hour_to_utc(h_lf)))}",
                 fontsize=8, fontproperties=poppins_med, color=color, ha="right", va="center",
-                linespacing=1.1, transform=pc, zorder=6.5,
+                linespacing=1.1, transform=pts_offset(-12, 0), zorder=6.5,
                 path_effects=[pe.withStroke(linewidth=2.4, foreground="white")])
 
     if l_point:
@@ -1068,19 +1171,21 @@ def build_map(lat, lon, mslp, valid_times, meta, output_path, seed_override=None
         # the same whatever the map's scale.
         ax.text(lo0, la0, f"{hpa0:.0f}", fontsize=L_PRESSURE_FONTSIZE,
                 fontproperties=poppins_med, color="#c0392b", ha="center", va="top",
-                transform=offset_copy(pc._as_mpl_transform(ax), fig=fig, y=-L_PRESSURE_OFFSET_PT, units="points"),
+                transform=pts_offset(0, -L_PRESSURE_OFFSET_PT),
                 zorder=7, path_effects=[pe.withStroke(linewidth=2.6, foreground="white")])
 
     # Town callouts -- on the land side of the band.
     for name, t_lat, t_lon in COAST_TOWNS:
-        if not (LAT_MIN < t_lat < LAT_MAX):
+        if not (view[2] < t_lat < view[3] and view[0] < t_lon < view[1]):
             continue
         i = int(np.argmin(haversine_km(t_lat, t_lon, coast_lat, coast_lon)))
         if prob[i] * 100 <= PROB_MIN_SHOWN_PCT:
             continue
         ax.plot(t_lon, t_lat, "o", color="#2b2a26", markersize=2.6, transform=pc, zorder=7)
-        ax.text(coast_lon[i] + 0.42, t_lat, f"{name}  {prob[i] * 100:.0f}%", fontsize=8,
-                fontproperties=poppins_med, color="#2b2a26", ha="left", va="center", transform=pc,
+        # Anchored on whichever is further east, the coast band or the
+        # town itself (Astoria sits up the Columbia, east of the band).
+        ax.text(max(coast_lon[i], t_lon), t_lat, f"{name}  {prob[i] * 100:.0f}%", fontsize=8,
+                fontproperties=poppins_med, color="#2b2a26", ha="left", va="center", transform=pts_offset(9, 0),
                 zorder=7, path_effects=[pe.withStroke(linewidth=2.4, foreground=LAND_COLOR)])
 
     ax.spines["geo"].set_edgecolor("black")
@@ -1194,6 +1299,8 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=float, nargs=2, metavar=("LAT", "LON"), default=None,
                         help="Start the tracks from this position instead of the deepest "
                              "ensemble-mean low in SEED_BOX.")
+    parser.add_argument("--full-domain", action="store_true",
+                        help="Show the whole fixed LON_MIN..LAT_MAX domain instead of zooming to the storm.")
     parser.add_argument("--no-noaa", action="store_true",
                         help="Don't look up NOAA's (OPC/WPC) analyzed low position for the L marker.")
     parser.add_argument("--file", type=Path, default=None,
@@ -1232,4 +1339,5 @@ if __name__ == "__main__":
     if not args.no_noaa:
         print("Reading NOAA analyzed lows for the L marker...")
         noaa_lows = fetch_noaa_lows()
-    build_map(lat, lon, mslp, valid_times, meta, out_path, seed_override=args.seed, noaa_lows=noaa_lows)
+    build_map(lat, lon, mslp, valid_times, meta, out_path, seed_override=args.seed, noaa_lows=noaa_lows,
+              full_domain=args.full_domain)

@@ -18,6 +18,14 @@ WindBorne's WeatherMesh-6 global ensemble:
   Only coast above 2% is highlighted, and only towns above 2% get a
   callout.
 
+**Zoom.** The view zooms to each storm automatically (`fit_view_extent()`).
+It covers every member track, the highlighted coast, and the "L", plus
+room for the town callouts and the logo, then widens to fill the 4:5
+frame. It stays at least 8 deg of latitude tall. Pass `--full-domain` for
+the fixed Cape Mendocino to Vancouver Island frame (`LON_MIN`..`LAT_MAX`),
+which also bounds the data fetch. Label offsets are in points, not
+degrees, so they sit the same distance from their marks at any zoom.
+
 The projection is the same `NearsidePerspective` satellite view
 (4,000 km height) as
 [`../columbia-basin-lightning-map/`](../columbia-basin-lightning-map/),
