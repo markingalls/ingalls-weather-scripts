@@ -110,5 +110,5 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
 
 Esri World Imagery tiles at zoom 10, mosaicked once for the whole camera
 path, Lanczos-resampled to the frame's pixel grid, and darkened ~20% so
-the radar reads. Attribution (Esri, Maxar, Earthstar Geographics) is in
-the header.
+the radar reads. The credit line in the header reads "Ingalls Weather ·
+NEXRAD Level II · Imagery: Esri, Maxar, Earthstar Geographics".

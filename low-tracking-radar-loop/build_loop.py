@@ -164,7 +164,6 @@ TOWNS = [
     ("Seattle", 47.6062, -122.3321, "right"),
     ("Everett", 47.9790, -122.2021, "right"),
     ("Oak Harbor", 48.2932, -122.6432, "right"),
-    ("Victoria", 48.4284, -123.3656, "left"),
     ("Port Angeles", 48.1181, -123.4307, "right"),
     ("Shelton", 47.2151, -123.1007, "right"),
     ("Centralia", 46.7162, -122.9543, "right"),
@@ -778,7 +777,7 @@ def main():
     dbz = fig.text(left + 0.535, top - 0.090, "dBZ", fontproperties=f_med, fontsize=8,
                    color="white", va="center", zorder=11)
     credit = fig.text(left, top - 0.121,
-                      "NEXRAD Level II · HRRR MSLP · Imagery: Esri, Maxar, Earthstar Geographics",
+                      "Ingalls Weather · NEXRAD Level II · Imagery: Esri, Maxar, Earthstar Geographics",
                       fontproperties=f_reg, fontsize=6, color="#c4c9cf", va="top", zorder=11)
     header_artists += [cb_ax, dbz, credit]
 
@@ -802,7 +801,7 @@ def main():
     # ---- label fading ----
     # A town label fades out only where it would overlap part of the
     # header (title, time, legend, credits, logo, landfall badge), so
-    # labels can still show in the gaps -- Victoria, for one, sits behind
+    # labels can still show in the gaps -- some towns sit behind
     # the header band for the whole loop. Boxes are in figure pixels.
     t_text.set_text("Fri Sep 25 · 23:59 PDT")  # widest case, for measuring
     badge.set_text("LANDFALL ~23:59")
