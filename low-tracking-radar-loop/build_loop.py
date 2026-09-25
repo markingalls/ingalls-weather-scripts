@@ -95,9 +95,8 @@ CAMERA_NORTH_KM = 75
 # frame -- all text/overlays sit between them.
 SAFE_TOP = 0.14
 LOGO_WIDTH = 0.13  # fraction of frame width
-# Bottom of the title/legend block (fraction of frame height from the
-# bottom); town labels fade out as they scroll up into it.
-HEADER_BOTTOM = 0.69
+# Town labels fade out within this many px of any header element.
+LABEL_HEADER_GAP_PX = 6
 
 # ---------- radar ----------
 S3_RADAR = "https://unidata-nexrad-level2.s3.amazonaws.com"
@@ -165,7 +164,7 @@ TOWNS = [
     ("Seattle", 47.6062, -122.3321, "right"),
     ("Everett", 47.9790, -122.2021, "right"),
     ("Oak Harbor", 48.2932, -122.6432, "right"),
-    ("Victoria", 48.4284, -123.3656, "right"),
+    ("Victoria", 48.4284, -123.3656, "left"),
     ("Port Angeles", 48.1181, -123.4307, "right"),
     ("Shelton", 47.2151, -123.1007, "right"),
     ("Centralia", 46.7162, -122.9543, "right"),
@@ -646,7 +645,7 @@ def main():
             break
         t += timedelta(minutes=1)
     if landfall:
-        log(f"  landfall ~{landfall.astimezone(LOCAL_TZ):%-I:%M %p %Z}")
+        log(f"  landfall ~{landfall.astimezone(LOCAL_TZ):%H:%M %Z}")
 
     # ---- camera geometry (web mercator) ----
     mid_lat = np.mean([trk.at(t)[0] for t, _ in frames])
@@ -736,22 +735,14 @@ def main():
         txt = ax.text(x + sign * 7 * res, y, name, ha="left" if side == "right" else "right",
                       va="center", fontproperties=f_med, fontsize=10.5, color="white",
                       path_effects=halo, zorder=6, clip_on=True)
-        labels.append(([dot, txt], x + sign * (7 + 8 * len(name)) * res, y))
+        labels.append(([dot, txt], x, y))
     # Radar site
     x, y = to_merc.transform(rlon, rlat)
     dot, = ax.plot(x, y, "^", ms=6.5, mfc="#ffd84d", mec="#101418", mew=0.9, zorder=5)
     txt = ax.text(x + 8 * res, y - 16 * res, site, ha="left", va="center",
                   fontproperties=f_semi, fontsize=8.5, color="#ffd84d",
                   path_effects=halo, zorder=6, clip_on=True)
-    labels.append(([dot, txt], x + 30 * res, y - 8 * res))
-
-    def fade_labels(cy):
-        for artists, x, y in labels:
-            fy = (y - (cy - view_h / 2)) / view_h  # 0 bottom .. 1 top
-            a = float(np.clip((HEADER_BOTTOM - fy) / 0.02, 0, 1))
-            for art in artists:
-                art.set_alpha(a)
-                art.set_visible(a > 0)
+    labels.append(([dot, txt], x, y))
 
     # Top scrim (gradient) so the title reads over any imagery.
     scrim_ax = fig.add_axes([0, 0.62, 1, 0.38], zorder=10)
@@ -763,12 +754,13 @@ def main():
 
     left = 0.055
     top = 1 - SAFE_TOP
-    fig.text(left, top, args.title.upper(), fontproperties=f_bold, fontsize=19,
-             color="white", va="top", zorder=11)
+    title = fig.text(left, top, args.title.upper(), fontproperties=f_bold, fontsize=19,
+                     color="white", va="top", zorder=11)
     t_text = fig.text(left, top - 0.037, "", fontproperties=f_semi, fontsize=13,
                       color="white", va="top", zorder=11)
-    fig.text(left, top - 0.063, f"{site} radar · lowest tilt reflectivity",
-             fontproperties=f_reg, fontsize=9.5, color="#d9dde2", va="top", zorder=11)
+    subtitle = fig.text(left, top - 0.063, f"{site} radar · lowest tilt reflectivity",
+                        fontproperties=f_reg, fontsize=9.5, color="#d9dde2", va="top", zorder=11)
+    header_artists = [title, t_text, subtitle]  # what town labels must stay clear of
 
     # Color bar (dBZ)
     cb_ax = fig.add_axes([left, top - 0.094, 0.52, 0.008], zorder=11)
@@ -783,11 +775,12 @@ def main():
     for lab in cb_ax.get_xticklabels():
         lab.set_fontproperties(f_reg)
         lab.set_fontsize(7.5)
-    fig.text(left + 0.535, top - 0.090, "dBZ", fontproperties=f_med, fontsize=8,
-             color="white", va="center", zorder=11)
-    fig.text(left, top - 0.121,
-             "NEXRAD Level II · HRRR MSLP · Imagery: Esri, Maxar, Earthstar Geographics",
-             fontproperties=f_reg, fontsize=6, color="#c4c9cf", va="top", zorder=11)
+    dbz = fig.text(left + 0.535, top - 0.090, "dBZ", fontproperties=f_med, fontsize=8,
+                   color="white", va="center", zorder=11)
+    credit = fig.text(left, top - 0.121,
+                      "NEXRAD Level II · HRRR MSLP · Imagery: Esri, Maxar, Earthstar Geographics",
+                      fontproperties=f_reg, fontsize=6, color="#c4c9cf", va="top", zorder=11)
+    header_artists += [cb_ax, dbz, credit]
 
     # Shown once the center crosses the coast.
     badge = fig.text(left + 0.004, top - 0.150, "", fontproperties=f_bold, fontsize=10.5,
@@ -802,8 +795,47 @@ def main():
         lax.imshow(logo_badge(LOGO_PATH, size=int(round(lw * FRAME_W * 2))),
                    interpolation="antialiased")
         lax.set_axis_off()
+        header_artists.append(lax)
     else:
         log(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
+
+    # ---- label fading ----
+    # A town label fades out only where it would overlap part of the
+    # header (title, time, legend, credits, logo, landfall badge), so
+    # labels can still show in the gaps -- Victoria, for one, sits behind
+    # the header band for the whole loop. Boxes are in figure pixels.
+    t_text.set_text("Fri Sep 25 · 23:59 PDT")  # widest case, for measuring
+    badge.set_text("LANDFALL ~23:59")
+    badge.set_visible(True)
+    ax.set_xlim(gx0, gx0 + view_w)
+    ax.set_ylim(gy0, gy0 + view_h)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    header_boxes = [a.get_tightbbox(renderer) for a in header_artists]
+    badge_box = badge.get_window_extent(renderer)
+    badge.set_visible(False)
+    label_boxes = []  # per label: (x0, y0, x1, y1) offsets from its dot, px
+    for artists, x, y in labels:
+        px, py = ax.transData.transform((x, y))
+        boxes = [a.get_window_extent(renderer) for a in artists]
+        label_boxes.append((min(b.x0 for b in boxes) - px, min(b.y0 for b in boxes) - py,
+                            max(b.x1 for b in boxes) - px, max(b.y1 for b in boxes) - py))
+
+    def fade_labels(cx, cy, badge_on):
+        boxes = header_boxes + ([badge_box] if badge_on else [])
+        for (artists, x, y), (ox0, oy0, ox1, oy1) in zip(labels, label_boxes):
+            px = (x - (cx - view_w / 2)) / res
+            py = (y - (cy - view_h / 2)) / res
+            lx0, ly0, lx1, ly1 = px + ox0, py + oy0, px + ox1, py + oy1
+            gap = np.inf  # px between the label and the nearest header box
+            for b in boxes:
+                gx = max(b.x0 - lx1, lx0 - b.x1, 0)
+                gy = max(b.y0 - ly1, ly0 - b.y1, 0)
+                gap = min(gap, np.hypot(gx, gy))
+            a = float(np.clip((gap - LABEL_HEADER_GAP_PX) / 12, 0, 1))
+            for art in artists:
+                art.set_alpha(a)
+                art.set_visible(a > 0)
 
     # ---- render ----
     out_mp4 = os.path.join(OUTPUT_DIR, f"{site.lower()}_low_tracking_{frames[-1][0]:%Y%m%d_%H%M}.mp4")
@@ -842,13 +874,14 @@ def main():
         ax.set_xlim(cx - view_w / 2, cx + view_w / 2)
         ax.set_ylim(cy - view_h / 2, cy + view_h / 2)
 
-        fade_labels(cy)
+        badge_on = bool(landfall and t_cam >= landfall)
+        fade_labels(cx, cy, badge_on)
 
         lt = t_scan.astimezone(LOCAL_TZ)
-        t_text.set_text(f"{lt:%a %b %-d} · {lt:%-I:%M %p %Z}")
-        badge.set_visible(bool(landfall and t_cam >= landfall))
+        t_text.set_text(f"{lt:%a %b %-d} · {lt:%H:%M %Z}")
+        badge.set_visible(badge_on)
         if landfall:
-            badge.set_text(f"LANDFALL ~{landfall.astimezone(LOCAL_TZ):%-I:%M %p}")
+            badge.set_text(f"LANDFALL ~{landfall.astimezone(LOCAL_TZ):%H:%M}")
 
         fig.canvas.draw()
         buf = fig.canvas.buffer_rgba()

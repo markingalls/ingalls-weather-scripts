@@ -99,8 +99,10 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
   30 fps even though scans come every ~5 minutes; echoes stay fixed to the
   ground and update when the next scan arrives.
 - All text lives between the top 14% and bottom 35% of the frame, which
-  Facebook's reel UI covers. Town labels fade out as they scroll up
-  under the header.
+  Facebook's reel UI covers. A town label fades out only where it
+  would overlap a header element (title, time, legend, credits, logo,
+  landfall badge), so labels still show in the gaps between them.
+  Times are local, 24-hour.
 - Landfall is the first minute the smoothed track falls inside
   `land_slim.json`'s land polygons.
 
