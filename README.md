@@ -52,7 +52,6 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
-
 - [`low-tracking-radar-loop/`](low-tracking-radar-loop/) — a 9:16
   Facebook Reel radar loop (KLGX by default) on a satellite basemap where
   the camera follows a surface low, tracked in HRRR MSLP, as it makes
