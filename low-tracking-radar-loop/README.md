@@ -8,8 +8,10 @@ coast, from KLGX (Langley Hill, WA) by default. Output is a 1080x1920
 the final frame to use as the reel's cover.
 
 The low's center is tracked hour to hour in HRRR sea-level pressure
-analyses; the camera rides a smoothed version of that track, with a red
-**L**, its central pressure, and a dashed trail of where it has been. A
+analyses; the camera rides a smoothed version of that track, centered
+100 km north of the low (`CAMERA_NORTH_KM`) so the frame favors the
+Washington coast and Puget Sound over open ocean. There's no marker on
+the low itself -- the circulation in the radar is the point. A
 **LANDFALL** badge appears once the center crosses the coast.
 
 ## Files
@@ -24,7 +26,10 @@ analyses; the camera rides a smoothed version of that track, with a red
   ffmpeg) plus the Poppins font.
 
 Uses `../maps/land_slim.json` (landfall detection) and
-`../assets/ingalls_weather_logo.png` (top-right badge).
+`../assets/ingalls_weather_logo.png` (top-right badge -- the PNG's
+pale-green square background is keyed to the emblem's cream and placed
+on an anti-aliased cream disc with a white ring, since a plain circular
+crop of the square shows the emblem's flat edges).
 
 ## Usage
 
@@ -79,11 +84,10 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
   landfall -- then the minimum is found within 120 km of a persistence
   guess (last position + last hour's motion). The first hour searches
   within 600 km of the radar (or around `--seed`). The center is refined
-  to a weighted centroid of the lowest ~0.3 hPa, and central pressure is
-  the raw field's minimum within 25 km.
+  to a weighted centroid of the lowest ~0.3 hPa. Central pressure (the
+  raw field's minimum within 25 km) is logged, not drawn.
 - The camera follows cubic smoothing splines of lat/lon through the
-  hourly centers, so it never jitters hour to hour. Central pressure is
-  linearly interpolated.
+  hourly centers, so it never jitters hour to hour.
 
 ### The loop
 
@@ -93,10 +97,9 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
   gliding along the track between scan times, so the pan is smooth at
   30 fps even though scans come every ~5 minutes; echoes stay fixed to the
   ground and update when the next scan arrives.
-- The low sits slightly above center (46% down), and all text lives
-  between the top 14% and bottom 35% of the frame, which Facebook's reel
-  UI covers. Town labels fade out as they scroll under the header or
-  within ~60 px of the L.
+- All text lives between the top 14% and bottom 35% of the frame, which
+  Facebook's reel UI covers. Town labels fade out as they scroll up
+  under the header.
 - Landfall is the first minute the smoothed track falls inside
   `land_slim.json`'s land polygons.
 

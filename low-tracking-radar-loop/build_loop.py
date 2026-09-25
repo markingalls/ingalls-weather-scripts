@@ -46,7 +46,7 @@ import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
 import matplotlib.patches
 from matplotlib.colors import LinearSegmentedColormap, Normalize
-from PIL import Image
+from PIL import Image, ImageDraw
 from pyproj import Geod, Transformer
 from scipy.interpolate import UnivariateSpline
 from scipy.ndimage import gaussian_filter, uniform_filter
@@ -86,14 +86,15 @@ DPI = 200
 # is wide enough to show the low's whole comma head and the coast around
 # it, tight enough that the lowest tilt's super-res detail still reads.
 VIEW_KM = 300
-# Where the low sits vertically, as a fraction of the frame from the top.
-# A bit above center, since the bottom ~35% of a reel is covered by the
-# caption/username overlay.
-LOW_SCREEN_Y = 0.46
+# The camera centers this far due north of the low's center, so the
+# frame favors the Washington coast / Puget Sound side of the circulation
+# over open ocean to the south.
+CAMERA_NORTH_KM = 100
 
 # Facebook's reel UI covers roughly the top 14% and bottom 35% of the
 # frame -- all text/overlays sit between them.
 SAFE_TOP = 0.14
+LOGO_WIDTH = 0.13  # fraction of frame width
 # Bottom of the title/legend block (fraction of frame height from the
 # bottom); town labels fade out as they scroll up into it.
 HEADER_BOTTOM = 0.69
@@ -160,6 +161,8 @@ TOWNS = [
     ("Aberdeen", 46.9754, -123.8157, "right"),
     ("Westport", 46.8901, -124.1040, "left"),
     ("Olympia", 47.0379, -122.9007, "right"),
+    ("Tacoma", 47.2529, -122.4443, "right"),
+    ("Seattle", 47.6062, -122.3321, "right"),
     ("Raymond", 46.6865, -123.7329, "right"),
     ("Long Beach", 46.3523, -124.0543, "left"),
     ("Astoria", 46.1879, -123.8313, "right"),
@@ -491,6 +494,57 @@ def build_grid(x0, x1, y0, y1, res):
 
 
 # =====================================================================
+# Logo
+# =====================================================================
+
+LOGO_BG = np.array([224, 234, 223], dtype=np.float32)   # the PNG's pale-green square
+LOGO_CREAM = np.array([255, 246, 231], dtype=np.float32)  # the emblem's own fill
+
+
+def logo_badge(path, size=512, ring="#ffffff", ring_frac=0.035):
+    """The logo on an anti-aliased round cream badge with a white ring.
+    The source PNG is a pale-green square with a non-circular cream emblem,
+    so a plain circular crop shows flat emblem edges -- key the background
+    to the emblem's cream instead and put it all on a larger disc."""
+    src = np.asarray(Image.open(path).convert("RGB"), dtype=np.float32)
+    h, w = src.shape[:2]
+    # Recolor the background to the emblem's cream (soft keyed on color
+    # distance, so the anti-aliased edges of the artwork survive).
+    d = np.abs(src - LOGO_BG).sum(-1)
+    k = np.clip((d - 14) / 24, 0, 1)[..., None]
+    rgb = src * k + LOGO_CREAM * (1 - k)
+    # The PNG's outermost rows/columns are off-color (a visible seam once
+    # the square sits on a cream disc) -- blank them to cream.
+    b = 12
+    rgb[:b], rgb[-b:], rgb[:, :b], rgb[:, -b:] = LOGO_CREAM, LOGO_CREAM, LOGO_CREAM, LOGO_CREAM
+    # Disc: centered on the artwork, radius reaching its farthest point
+    # (the sun's rays) plus a margin.
+    cx, cy, r = 0.492 * w, 0.502 * h, 0.585 * w
+    ss = 4
+    D = int(2 * r) + 2
+    canvas = np.empty((D, D, 3), dtype=np.float32)
+    canvas[:] = LOGO_CREAM
+    ox, oy = int(round(r - cx)), int(round(r - cy))
+    canvas[oy:oy + h, ox:ox + w] = rgb
+    img = Image.fromarray(canvas.astype(np.uint8)).resize((size, size), Image.LANCZOS)
+    # Anti-aliased masks via supersampling.
+    big = size * ss
+    mask = Image.new("L", (big, big), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, big - 1, big - 1), fill=255)
+    ring_mask = Image.new("L", (big, big), 0)
+    rw = int(big * ring_frac)
+    dr = ImageDraw.Draw(ring_mask)
+    dr.ellipse((0, 0, big - 1, big - 1), fill=255)
+    dr.ellipse((rw, rw, big - 1 - rw, big - 1 - rw), fill=0)
+    mask = mask.resize((size, size), Image.LANCZOS)
+    ring_mask = ring_mask.resize((size, size), Image.LANCZOS)
+    ring_img = Image.new("RGB", (size, size), ring)
+    img = Image.composite(ring_img, img, ring_mask)
+    img.putalpha(mask)
+    return img
+
+
+# =====================================================================
 # Main
 # =====================================================================
 
@@ -595,10 +649,9 @@ def main():
     res = view_w / FRAME_W  # mercator m per output pixel
 
     def camera(t):
-        la, lo, p = trk.at(t)
-        x, y = to_merc.transform(lo, la)
-        cy = y - (0.5 - LOW_SCREEN_Y) * view_h  # low above center
-        return x, cy, x, y, p
+        la, lo, _ = trk.at(t)
+        lo, la, _ = geod.fwd(lo, la, 0, CAMERA_NORTH_KM * 1000)
+        return to_merc.transform(lo, la)
 
     cams = [camera(t) for t, _ in frames]
     pad = 20 * res
@@ -686,27 +739,13 @@ def main():
                   path_effects=halo, zorder=6, clip_on=True)
     labels.append(([dot, txt], x + 30 * res, y - 8 * res))
 
-    def fade_labels(cy, lx, ly):
+    def fade_labels(cy):
         for artists, x, y in labels:
             fy = (y - (cy - view_h / 2)) / view_h  # 0 bottom .. 1 top
-            a_head = np.clip((HEADER_BOTTOM - fy) / 0.02, 0, 1)
-            d_px = np.hypot((x - lx) / res, (y - ly) / res)
-            a_low = np.clip((d_px - 60) / 40, 0, 1)
-            a = float(min(a_head, a_low))
+            a = float(np.clip((HEADER_BOTTOM - fy) / 0.02, 0, 1))
             for art in artists:
                 art.set_alpha(a)
                 art.set_visible(a > 0)
-
-    # Past track + low center marker
-    trail, = ax.plot([], [], color="white", lw=1.6, alpha=0.8, ls=(0, (4, 3)),
-                     zorder=7, solid_capstyle="round")
-    trail.set_path_effects([pe.withStroke(linewidth=3.2, foreground="#101418", alpha=0.45)])
-    low_L = ax.text(0, 0, "L", ha="center", va="center", fontproperties=f_bold,
-                    fontsize=40, color="#e3262d", zorder=9,
-                    path_effects=[pe.withStroke(linewidth=4, foreground="white")])
-    low_p = ax.text(0, 0, "", ha="center", va="top", fontproperties=f_bold,
-                    fontsize=13, color="white", zorder=9,
-                    path_effects=[pe.withStroke(linewidth=3, foreground="#101418")])
 
     # Top scrim (gradient) so the title reads over any imagery.
     scrim_ax = fig.add_axes([0, 0.62, 1, 0.38], zorder=10)
@@ -749,19 +788,13 @@ def main():
                      color="white", va="top", zorder=11, visible=False,
                      bbox=dict(boxstyle="round,pad=0.4", fc="#e3262d", ec="none"))
 
-    # Logo (right of the title block), cropped to a round badge.
+    # Logo (right of the title block), as a round badge.
     if os.path.exists(LOGO_PATH):
-        logo = plt.imread(LOGO_PATH)
-        lw = 0.17
+        lw = LOGO_WIDTH
         lh = lw * FRAME_W / FRAME_H
-        lax = fig.add_axes([1 - left - lw, top - 0.034 - lh, lw, lh], zorder=11)
-        im = lax.imshow(logo)
-        h, w = logo.shape[:2]
-        circ = matplotlib.patches.Circle((w / 2, h / 2), min(w, h) / 2 - 2,
-                                         transform=lax.transData)
-        im.set_clip_path(circ)
-        lax.add_patch(matplotlib.patches.Circle((w / 2, h / 2), min(w, h) / 2 - 2,
-                                                fill=False, ec="white", lw=1.5))
+        lax = fig.add_axes([1 - left - lw, top - 0.030 - lh, lw, lh], zorder=11)
+        lax.imshow(logo_badge(LOGO_PATH, size=int(round(lw * FRAME_W * 2))),
+                   interpolation="antialiased")
         lax.set_axis_off()
     else:
         log(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
@@ -777,13 +810,6 @@ def main():
          "-c:v", "libx264", "-preset", "slow", "-crf", "20", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart", out_mp4],
         stdin=subprocess.PIPE)
-
-    track_pts = []  # mercator trail, sampled every 10 min from loop start
-    tt = frames[0][0]
-    while tt <= frames[-1][0] + timedelta(minutes=10):
-        la, lo, _ = trk.at(tt)
-        track_pts.append((tt, *to_merc.transform(lo, la)))
-        tt += timedelta(minutes=10)
 
     n = len(frames)
     fps_scan = args.frames_per_scan
@@ -806,16 +832,11 @@ def main():
             cur_img = composite(load_sweep(frames[i][1]))
             cur_i = i
             img.set_data(cur_img)
-        cx, cy, lx, ly, p = camera(t_cam)
+        cx, cy = camera(t_cam)
         ax.set_xlim(cx - view_w / 2, cx + view_w / 2)
         ax.set_ylim(cy - view_h / 2, cy + view_h / 2)
 
-        fade_labels(cy, lx, ly)
-        low_L.set_position((lx, ly))
-        low_p.set_position((lx, ly - 30 * res))
-        low_p.set_text(f"{p:.0f} mb")
-        pts = [(x, y) for tt, x, y in track_pts if tt <= t_cam] + [(lx, ly)]
-        trail.set_data([q[0] for q in pts], [q[1] for q in pts])
+        fade_labels(cy)
 
         lt = t_scan.astimezone(LOCAL_TZ)
         t_text.set_text(f"{lt:%a %b %-d} · {lt:%-I:%M %p %Z}")
