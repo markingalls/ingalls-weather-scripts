@@ -105,3 +105,8 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+# --- low-tracking-radar-loop ---
+# build_loop.py fetches radar volumes, HRRR MSLP, and basemap tiles live;
+# output/cache/ holds the processed sweeps/fields/tiles so re-renders skip
+# re-fetching, and the rendered MP4/PNG are outputs -- neither is source.
+low-tracking-radar-loop/output/

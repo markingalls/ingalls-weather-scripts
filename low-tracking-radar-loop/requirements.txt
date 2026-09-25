@@ -1,0 +1,10 @@
+matplotlib
+numpy
+scipy
+requests
+Pillow
+shapely
+pyproj
+metpy
+pygrib
+imageio-ffmpeg
