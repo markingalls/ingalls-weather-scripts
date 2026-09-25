@@ -27,7 +27,6 @@ filtering) and usage.
 
 import argparse
 import io
-import json
 import logging
 import os
 import subprocess
@@ -50,9 +49,6 @@ from PIL import Image, ImageDraw
 from pyproj import Geod, Transformer
 from scipy.interpolate import UnivariateSpline
 from scipy.ndimage import gaussian_filter, uniform_filter
-from shapely.geometry import Point, shape
-from shapely.ops import unary_union
-from shapely.prepared import prep
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -74,7 +70,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(HERE, "output")
 CACHE_DIR = os.path.join(OUTPUT_DIR, "cache")
 LOGO_PATH = os.path.join(HERE, "..", "assets", "ingalls_weather_logo.png")
-MAPS_DIR = os.path.join(HERE, "..", "maps")
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -82,14 +77,14 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # Facebook Reel: 1080x1920, 9:16, full-bleed.
 FRAME_W, FRAME_H = 1080, 1920
 DPI = 200
-# Width of the view in true (ground) km. Height follows from 9:16. 240 km
+# Width of the view in true (ground) km. Height follows from 9:16. 265 km
 # is wide enough to show the low's whole comma head and the coast around
 # it, tight enough that the lowest tilt's super-res detail still reads.
-VIEW_KM = 240
+VIEW_KM = 265
 # The camera centers this far due north of the low's center, so the
 # frame favors the Washington coast / Puget Sound side of the circulation
 # over open ocean to the south.
-CAMERA_NORTH_KM = 75
+CAMERA_NORTH_KM = 50
 
 # Facebook's reel UI covers roughly the top 14% and bottom 35% of the
 # frame -- all text/overlays sit between them.
@@ -631,21 +626,6 @@ def main():
     frames = [(t, p) for (t, _), p in zip(keep, paths) if p]
     log(f"  {len(frames)} sweeps ready")
 
-    # ---- landfall ----
-    land = json.load(open(os.path.join(MAPS_DIR, "land_slim.json")))
-    land_geom = prep(unary_union([shape(f["geometry"]) for f in land["features"]]))
-    landfall = None
-    t = frames[0][0]
-    was_land = land_geom.contains(Point(trk.at(t)[1], trk.at(t)[0]))
-    while t <= frames[-1][0] and not was_land:
-        la, lo, _ = trk.at(t)
-        if land_geom.contains(Point(lo, la)):
-            landfall = t
-            break
-        t += timedelta(minutes=1)
-    if landfall:
-        log(f"  landfall ~{landfall.astimezone(LOCAL_TZ):%H:%M %Z}")
-
     # ---- camera geometry (web mercator) ----
     mid_lat = np.mean([trk.at(t)[0] for t, _ in frames])
     view_w = args.view_km * 1000 / np.cos(np.radians(mid_lat))  # mercator m
@@ -781,11 +761,6 @@ def main():
                       fontproperties=f_reg, fontsize=6, color="#c4c9cf", va="top", zorder=11)
     header_artists += [cb_ax, dbz, credit]
 
-    # Shown once the center crosses the coast.
-    badge = fig.text(left + 0.004, top - 0.150, "", fontproperties=f_bold, fontsize=10.5,
-                     color="white", va="top", zorder=11, visible=False,
-                     bbox=dict(boxstyle="round,pad=0.4", fc="#e3262d", ec="none"))
-
     # Logo (right of the title block), as a round badge.
     if os.path.exists(LOGO_PATH):
         lw = LOGO_WIDTH
@@ -800,19 +775,15 @@ def main():
 
     # ---- label fading ----
     # A town label fades out only where it would overlap part of the
-    # header (title, time, legend, credits, logo, landfall badge), so
+    # header (title, time, legend, credits, logo), so
     # labels can still show in the gaps -- some towns sit behind
     # the header band for the whole loop. Boxes are in figure pixels.
     t_text.set_text("Fri Sep 25 · 23:59 PDT")  # widest case, for measuring
-    badge.set_text("LANDFALL ~23:59")
-    badge.set_visible(True)
     ax.set_xlim(gx0, gx0 + view_w)
     ax.set_ylim(gy0, gy0 + view_h)
     fig.canvas.draw()
     renderer = fig.canvas.get_renderer()
     header_boxes = [a.get_tightbbox(renderer) for a in header_artists]
-    badge_box = badge.get_window_extent(renderer)
-    badge.set_visible(False)
     label_boxes = []  # per label: (x0, y0, x1, y1) offsets from its dot, px
     for artists, x, y in labels:
         px, py = ax.transData.transform((x, y))
@@ -820,14 +791,13 @@ def main():
         label_boxes.append((min(b.x0 for b in boxes) - px, min(b.y0 for b in boxes) - py,
                             max(b.x1 for b in boxes) - px, max(b.y1 for b in boxes) - py))
 
-    def fade_labels(cx, cy, badge_on):
-        boxes = header_boxes + ([badge_box] if badge_on else [])
+    def fade_labels(cx, cy):
         for (artists, x, y), (ox0, oy0, ox1, oy1) in zip(labels, label_boxes):
             px = (x - (cx - view_w / 2)) / res
             py = (y - (cy - view_h / 2)) / res
             lx0, ly0, lx1, ly1 = px + ox0, py + oy0, px + ox1, py + oy1
             gap = np.inf  # px between the label and the nearest header box
-            for b in boxes:
+            for b in header_boxes:
                 gx = max(b.x0 - lx1, lx0 - b.x1, 0)
                 gy = max(b.y0 - ly1, ly0 - b.y1, 0)
                 gap = min(gap, np.hypot(gx, gy))
@@ -873,14 +843,10 @@ def main():
         ax.set_xlim(cx - view_w / 2, cx + view_w / 2)
         ax.set_ylim(cy - view_h / 2, cy + view_h / 2)
 
-        badge_on = bool(landfall and t_cam >= landfall)
-        fade_labels(cx, cy, badge_on)
+        fade_labels(cx, cy)
 
         lt = t_scan.astimezone(LOCAL_TZ)
         t_text.set_text(f"{lt:%a %b %-d} · {lt:%H:%M %Z}")
-        badge.set_visible(badge_on)
-        if landfall:
-            badge.set_text(f"LANDFALL ~{landfall.astimezone(LOCAL_TZ):%H:%M}")
 
         fig.canvas.draw()
         buf = fig.canvas.buffer_rgba()

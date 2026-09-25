@@ -9,10 +9,9 @@ the final frame to use as the reel's cover.
 
 The low's center is tracked hour to hour in HRRR sea-level pressure
 analyses; the camera rides a smoothed version of that track, centered
-75 km north of the low (`CAMERA_NORTH_KM`) so the frame favors the
+50 km north of the low (`CAMERA_NORTH_KM`) so the frame favors the
 Washington coast and Puget Sound over open ocean. There's no marker on
-the low itself -- the circulation in the radar is the point. A
-**LANDFALL** badge appears once the center crosses the coast.
+the low itself -- the circulation in the radar is the point.
 
 ## Files
 
@@ -25,8 +24,7 @@ the low itself -- the circulation in the radar is the point. A
   apt: pygrib's wheels bundle eccodes, and imageio-ffmpeg ships its own
   ffmpeg) plus the Poppins font.
 
-Uses `../maps/land_slim.json` (landfall detection) and
-`../assets/ingalls_weather_logo.png` (top-right badge -- the PNG's
+Uses `../assets/ingalls_weather_logo.png` (top-right badge -- the PNG's
 pale-green square background is keyed to the emblem's cream and placed
 on an anti-aliased cream disc with a white ring, since a plain circular
 crop of the square shows the emblem's flat edges).
@@ -42,7 +40,7 @@ python3 build_loop.py --seed 45.0,-126.1   # first-guess low position, if the
                                            # default pick grabs the wrong low
 ```
 
-Other knobs: `--view-km` (frame width in ground km, default 240),
+Other knobs: `--view-km` (frame width in ground km, default 265),
 `--fps` (30), `--frames-per-scan` (4 -- how many output frames each radar
 scan is on screen), `--hold` (seconds to hold the final frame, 2),
 `--max-frames N` (debug: only the last N scans).
@@ -100,11 +98,9 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
   ground and update when the next scan arrives.
 - All text lives between the top 14% and bottom 35% of the frame, which
   Facebook's reel UI covers. A town label fades out only where it
-  would overlap a header element (title, time, legend, credits, logo,
-  landfall badge), so labels still show in the gaps between them.
+  would overlap a header element (title, time, legend, credits, logo),
+  so labels still show in the gaps between them.
   Times are local, 24-hour.
-- Landfall is the first minute the smoothed track falls inside
-  `land_slim.json`'s land polygons.
 
 ### Basemap
 
