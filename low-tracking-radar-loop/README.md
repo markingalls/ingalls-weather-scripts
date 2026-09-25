@@ -9,7 +9,7 @@ the final frame to use as the reel's cover.
 
 The low's center is tracked hour to hour in HRRR sea-level pressure
 analyses; the camera rides a smoothed version of that track, centered
-100 km north of the low (`CAMERA_NORTH_KM`) so the frame favors the
+75 km north of the low (`CAMERA_NORTH_KM`) so the frame favors the
 Washington coast and Puget Sound over open ocean. There's no marker on
 the low itself -- the circulation in the radar is the point. A
 **LANDFALL** badge appears once the center crosses the coast.
@@ -42,7 +42,7 @@ python3 build_loop.py --seed 45.0,-126.1   # first-guess low position, if the
                                            # default pick grabs the wrong low
 ```
 
-Other knobs: `--view-km` (frame width in ground km, default 300),
+Other knobs: `--view-km` (frame width in ground km, default 240),
 `--fps` (30), `--frames-per-scan` (4 -- how many output frames each radar
 scan is on screen), `--hold` (seconds to hold the final frame, 2),
 `--max-frames N` (debug: only the last N scans).
@@ -66,7 +66,8 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
   Gates past CC's shorter recorded range are kept.
 - A **speckle filter** then drops any gate with fewer than 4 of its 8
   neighbors carrying echo, and everything under 12 dBZ is hidden.
-- The palette is a TV-style continuous ramp; weak echoes fade in
+- The palette is a TV-style continuous ramp (greens to 26 dBZ, yellow
+  from 30); weak echoes fade in
   semi-transparent so they don't wall off the imagery underneath.
 - Radar is resampled (nearest gate) onto the frame's pixel grid. Ground
   range is treated as slant range -- at the lowest tilt the difference is

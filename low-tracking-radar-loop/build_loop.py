@@ -82,14 +82,14 @@ LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 # Facebook Reel: 1080x1920, 9:16, full-bleed.
 FRAME_W, FRAME_H = 1080, 1920
 DPI = 200
-# Width of the view in true (ground) km. Height follows from 9:16. 300 km
+# Width of the view in true (ground) km. Height follows from 9:16. 240 km
 # is wide enough to show the low's whole comma head and the coast around
 # it, tight enough that the lowest tilt's super-res detail still reads.
-VIEW_KM = 300
+VIEW_KM = 240
 # The camera centers this far due north of the low's center, so the
 # frame favors the Washington coast / Puget Sound side of the circulation
 # over open ocean to the south.
-CAMERA_NORTH_KM = 100
+CAMERA_NORTH_KM = 75
 
 # Facebook's reel UI covers roughly the top 14% and bottom 35% of the
 # frame -- all text/overlays sit between them.
@@ -117,14 +117,14 @@ MAX_LOW_RANGE_KM = 330
 # fade in semi-transparent so they don't wall off the satellite imagery.
 REF_STOPS = [
     (12, "#7be08a", 0.35),
-    (18, "#3ccb4a", 0.70),
-    (25, "#17a534", 0.82),
-    (31, "#0c7a26", 0.86),
-    (35, "#f4e21a", 0.90),
-    (40, "#f7a41d", 0.92),
-    (45, "#ef5a1b", 0.94),
-    (50, "#c8101e", 0.95),
-    (56, "#8e0a3a", 0.95),
+    (17, "#3ccb4a", 0.70),
+    (22, "#17a534", 0.82),
+    (26, "#0c7a26", 0.86),
+    (30, "#f4e21a", 0.90),
+    (36, "#f7a41d", 0.92),
+    (42, "#ef5a1b", 0.94),
+    (48, "#c8101e", 0.95),
+    (54, "#8e0a3a", 0.95),
     (60, "#e02ad8", 0.95),
     (70, "#ffffff", 0.95),
 ]
@@ -772,7 +772,7 @@ def main():
     cb_ax.set_yticks([])
     for sp in cb_ax.spines.values():
         sp.set_visible(False)
-    cb_ax.set_xticks([15, 25, 35, 45, 55, 65])
+    cb_ax.set_xticks([20, 30, 40, 50, 60])
     cb_ax.tick_params(axis="x", length=0, pad=2, colors="white")
     for lab in cb_ax.get_xticklabels():
         lab.set_fontproperties(f_reg)
