@@ -564,7 +564,11 @@ def main():
     ap.add_argument("--end", help="ISO time. Default: now (newest scan).")
     ap.add_argument("--seed", help="LAT,LON first guess for the low center "
                     "(default: deepest MSLP within 600 km of the radar)")
-    ap.add_argument("--view-km", type=float, default=VIEW_KM)
+    ap.add_argument("--view-km", type=float, default=VIEW_KM,
+                    help="frame width in ground km (default %(default)s)")
+    ap.add_argument("--north-km", type=float, default=CAMERA_NORTH_KM,
+                    help="center the camera this far north of the low; "
+                    "negative is south (default %(default)s)")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--frames-per-scan", type=int, default=4,
                     help="output frames each radar scan is on screen; the "
@@ -634,7 +638,7 @@ def main():
 
     def camera(t):
         la, lo, _ = trk.at(t)
-        lo, la, _ = geod.fwd(lo, la, 0, CAMERA_NORTH_KM * 1000)
+        lo, la, _ = geod.fwd(lo, la, 0, args.north_km * 1000)
         return to_merc.transform(lo, la)
 
     cams = [camera(t) for t, _ in frames]

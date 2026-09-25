@@ -56,7 +56,8 @@ workflows. Each project lives in its own directory with its own README.
 - [`low-tracking-radar-loop/`](low-tracking-radar-loop/) — a 9:16
   Facebook Reel radar loop (KLGX by default) on a satellite basemap where
   the camera follows a surface low, tracked in HRRR MSLP, as it makes
-  landfall.
+  landfall. The workflow and house style for making new ones are in
+  [`.claude/skills/radar-loop/SKILL.md`](.claude/skills/radar-loop/SKILL.md).
 
 ## Shared resources
 

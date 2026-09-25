@@ -41,6 +41,8 @@ python3 build_loop.py --seed 45.0,-126.1   # first-guess low position, if the
 ```
 
 Other knobs: `--view-km` (frame width in ground km, default 265),
+`--north-km` (camera offset north of the low, default 50; negative is
+south),
 `--fps` (30), `--frames-per-scan` (4 -- how many output frames each radar
 scan is on screen), `--hold` (seconds to hold the final frame, 2),
 `--max-frames N` (debug: only the last N scans).
