@@ -67,7 +67,11 @@ minor-highway tier.
     Oregon data) elsewhere -- so fetch_roads() matches "SR" or the
     queried --state code, not a fixed "^SR" (which would silently drop
     every Oregon route, as it originally did before the Hagen Fire map
-    surfaced the gap).
+    surfaced the gap). With --local-roads, every secondary/secondary_link
+    way not matching that ref pattern (Webber Canyon Road, near the
+    Second Street Fire, among them) becomes a separate narrow-gray "Local
+    roads" tier instead of being dropped -- opt-in since it's dense
+    enough at a wide zoom to be clutter rather than signal.
   - Towns: every OSM place=city/town/village node inside the extent,
     ranked by place tier then population, capped at --max-towns (default
     10). This is a good default but, being automatic, won't always match
@@ -110,6 +114,7 @@ Logo is read from ../assets/ingalls_weather_logo.png at repo root.
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -192,6 +197,7 @@ FIRE_EDGE = "#7a0e0a"
 MOTORWAY_COLOR = "#8FB8E0"
 TRUNK_COLOR = "#F2B880"
 MINOR_HWY_COLOR = "#E2707A"
+LOCAL_ROAD_COLOR = "#9a9890"
 
 
 def fetch_perimeter(fire_name, state):
@@ -262,12 +268,14 @@ def query_overpass(query, label):
     return []
 
 
-def fetch_roads(lon_min, lon_max, lat_min, lat_max, state):
-    """OSM ways within the given bbox, categorized into this map's three
-    road tiers -- see module docstring for the tier/ref rules. Returns
-    {"motorway": [...], "trunk": [...], "minor": [...]} of shapely
-    LineStrings; a tier with no hits (including every tier, if Overpass
-    is unreachable) is just an empty list, not an error.
+def fetch_roads(lon_min, lon_max, lat_min, lat_max, state, include_local=False):
+    """OSM ways within the given bbox, categorized into this map's road
+    tiers -- see module docstring for the tier/ref rules. Returns
+    {"motorway": [...], "trunk": [...], "minor": [...], "local": [...]}
+    of shapely LineStrings; a tier with no hits (including every tier, if
+    Overpass is unreachable) is just an empty list, not an error. "local"
+    is only populated when include_local is set -- see --local-roads'
+    --help text for why this is opt-in, not automatic.
 
     The secondary-tier ref filter is state-aware: OSM tags a state route's
     ref with that state's own convention -- "SR ###" in Washington, but
@@ -277,30 +285,51 @@ def fetch_roads(lon_min, lon_max, lat_min, lat_max, state):
     every Oregon state route. Matching "SR" or the queried --state's own
     postal code covers both known conventions; a state with some other
     convention would need this revisited, the same caveat as the
-    WA/OR/ID-only counties layer below."""
+    WA/OR/ID-only counties layer below.
+
+    include_local pulls in every secondary/secondary_link way regardless
+    of ref (Webber Canyon Road, near the Second Street Fire, is a real
+    numbered-looking local road with no ref at all -- OSM's secondary tier
+    isn't only state routes), then splits them by ref match in Python
+    rather than a second bbox query: one that matches ref_pattern is
+    still "minor" (a state highway), everything else (no ref, or some
+    other agency's ref like a county road) is "local". Deliberately stops
+    at secondary, not tertiary: tertiary inside a town (checked against
+    Richland/West Richland, both inside the Second Street Fire's zoomed-in
+    extent) is dense residential streets, not the rural through-roads this
+    tier is for."""
     ref_pattern = f"^(SR|{state.upper()})\\s?\\d"
+    secondary_clause = (f'way["highway"~"^(secondary|secondary_link)$"]["ref"~"{ref_pattern}"]'
+                         f'({lat_min},{lon_min},{lat_max},{lon_max});')
+    if include_local:
+        secondary_clause = (f'way["highway"~"^(secondary|secondary_link)$"]'
+                             f'({lat_min},{lon_min},{lat_max},{lon_max});')
     query = f"""
     [out:json][timeout:45];
     (
       way["highway"~"^(motorway|motorway_link)$"]({lat_min},{lon_min},{lat_max},{lon_max});
       way["highway"~"^(trunk|trunk_link)$"]({lat_min},{lon_min},{lat_max},{lon_max});
       way["highway"~"^(primary|primary_link)$"]({lat_min},{lon_min},{lat_max},{lon_max});
-      way["highway"~"^(secondary|secondary_link)$"]["ref"~"{ref_pattern}"]({lat_min},{lon_min},{lat_max},{lon_max});
+      {secondary_clause}
     );
     out geom;
     """
     elements = query_overpass(query, "road")
-    roads = {"motorway": [], "trunk": [], "minor": []}
+    roads = {"motorway": [], "trunk": [], "minor": [], "local": []}
+    ref_re = re.compile(ref_pattern)
     for el in elements:
         geom = el.get("geometry")
         if not geom:
             continue
-        hwy = el.get("tags", {}).get("highway", "")
+        tags = el.get("tags", {})
+        hwy = tags.get("highway", "")
         line = LineString([(pt["lon"], pt["lat"]) for pt in geom])
         if hwy.startswith("motorway"):
             roads["motorway"].append(line)
         elif hwy.startswith("trunk"):
             roads["trunk"].append(line)
+        elif hwy.startswith("secondary") and include_local and not ref_re.match(tags.get("ref") or ""):
+            roads["local"].append(line)
         else:
             roads["minor"].append(line)
     return roads
@@ -391,6 +420,9 @@ def build_map(fire, roads, towns, extent, generated_at, output_path):
     ax.add_geometries(county_geoms, crs=pc, facecolor="none", edgecolor="#b9b6ac",
                        linewidth=0.8, zorder=2)
 
+    if roads.get("local"):
+        ax.add_geometries(roads["local"], crs=pc, facecolor="none", edgecolor=LOCAL_ROAD_COLOR,
+                           linewidth=0.6, zorder=2.2)
     if roads["minor"]:
         ax.add_geometries(roads["minor"], crs=pc, facecolor="none", edgecolor=MINOR_HWY_COLOR,
                            linewidth=1.0, zorder=2.5)
@@ -445,6 +477,8 @@ def build_map(fire, roads, towns, extent, generated_at, output_path):
         handles.append(Line2D([0], [0], color=TRUNK_COLOR, linewidth=2.0, label="Main highways"))
     if roads["minor"]:
         handles.append(Line2D([0], [0], color=MINOR_HWY_COLOR, linewidth=1.6, label="Minor highways"))
+    if roads.get("local"):
+        handles.append(Line2D([0], [0], color=LOCAL_ROAD_COLOR, linewidth=1.0, label="Local roads"))
     leg = fig.legend(handles=handles, loc="center", frameon=False, fontsize=9,
                       prop=poppins_reg, ncol=len(handles), handletextpad=0.6,
                       columnspacing=1.5, bbox_to_anchor=(frame_center, layout["legend_y"]))
@@ -529,6 +563,12 @@ if __name__ == "__main__":
     parser.add_argument("--add-town", action="append", default=[],
                          help="Add a specific town not auto-fetched (e.g. a hamlet OSM doesn't "
                               "tag as a village): 'Name,lon,lat'. Repeatable.")
+    parser.add_argument("--local-roads", action="store_true",
+                         help="Also fetch unnumbered secondary roads (e.g. Webber Canyon Road) "
+                              "as a narrow gray 'Local roads' tier. Off by default -- only "
+                              "worth it at a tight zoom; at a wide one (e.g. the Hagen Fire's) "
+                              "this tier gets dense fast, including every secondary street "
+                              "inside any town the extent happens to cover.")
     parser.add_argument("--out", type=Path, default=None,
                          help="Output PNG path (default: output/<fire-name>_fire_<date>.png).")
     args = parser.parse_args()
@@ -545,7 +585,7 @@ if __name__ == "__main__":
     lon_min, lon_max, lat_min, lat_max = extent
 
     print("Fetching roads (OSM Overpass)...")
-    roads = fetch_roads(lon_min, lon_max, lat_min, lat_max, args.state)
+    roads = fetch_roads(lon_min, lon_max, lat_min, lat_max, args.state, args.local_roads)
 
     print("Fetching towns (OSM Overpass)...")
     towns = fetch_towns(lon_min, lon_max, lat_min, lat_max, args.max_towns, args.exclude_town)
