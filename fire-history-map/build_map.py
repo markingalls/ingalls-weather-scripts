@@ -38,13 +38,18 @@ fetch/render code below is a near-duplicate of that script's, kept
 separate rather than imported since this repo's convention is
 self-contained project directories, not cross-project imports.
 
-River (--river-name, default "Yakima River") -- also OSM via Overpass,
-matched by name against waterway=river ways (this stretch of the Yakima
-has no natural=water riverbank polygon in OSM, confirmed by querying
-both, so only the centerline is drawn). Best-effort like every other
-Overpass layer: an empty/unmatched name, or every mirror failing, just
-means no river line, not an error. Pass --river-name '' to skip it
-outright.
+River (--river-name, default "Yakima River") -- its true outline, not
+just a centerline: reconstructed from an OSM natural=water/water=river
+multipolygon relation (found by spatial+tag search, not by name -- the
+Yakima's relation carries no name tag at all), fetched in stages so a
+relation with a huge member count (171, for the Yakima's whole mapped
+course) doesn't time out every mirror at once. Falls back to a plain
+waterway=river centerline, matched by --river-name, if no such relation
+is found. See fetch_river_polygon()'s docstring for the full staging
+and the river-island (inner-ring) detail it deliberately skips. Best-
+effort like every other Overpass layer either way: pass --river-name ''
+to skip the layer outright, or it degrades to nothing drawn rather than
+failing the map.
 
 Counties (counties_wa_or_id.geojson) are the shared ../maps/ file, same
 WA/OR/ID-only caveat as ../fire-perimeter-map/.
@@ -81,7 +86,8 @@ import numpy as np
 import requests
 
 import cartopy.crs as ccrs
-from shapely.geometry import shape, LineString
+from shapely.geometry import shape, LineString, box
+from shapely.ops import polygonize
 from PIL import Image
 
 # ---------------------------------------------------------------------------
@@ -156,6 +162,7 @@ TRUNK_COLOR = "#F2B880"
 MINOR_HWY_COLOR = "#E2707A"
 LOCAL_ROAD_COLOR = "#9a9890"
 RIVER_COLOR = "#4A90D2"
+RIVER_FILL = "#bfe1ef"
 
 # Muted, mutually-distinguishable per-fire colors -- cycles if a domain
 # ever holds more fires than this.
@@ -265,22 +272,81 @@ def fetch_roads(lon_min, lon_max, lat_min, lat_max, state, include_local=False):
     return roads
 
 
-def fetch_river(lon_min, lon_max, lat_min, lat_max, name):
+def fetch_river_centerline(lon_min, lon_max, lat_min, lat_max, name):
     """OSM waterway=river ways matching `name` within the bbox, as a list
-    of shapely LineStrings. The Yakima River here is mapped as a plain
-    centerline (no natural=water riverbank polygon in this stretch,
-    confirmed by querying both), so this only looks for ways, not
-    polygons -- a river that does carry a riverbank polygon elsewhere
-    would need that added. Best-effort like every other Overpass layer:
-    [] (map renders without the river) if every mirror fails."""
+    of shapely LineStrings -- the fallback fetch_river() uses when
+    fetch_river_polygon() finds no reconstructable outline. Best-effort
+    like every other Overpass layer: [] if every mirror fails."""
     query = f"""
     [out:json][timeout:45];
     way["waterway"="river"]["name"~"{name}",i]({lat_min},{lon_min},{lat_max},{lon_max});
     out geom;
     """
-    elements = query_overpass(query, "river")
+    elements = query_overpass(query, "river centerline")
     return [LineString([(pt["lon"], pt["lat"]) for pt in el["geometry"]])
             for el in elements if el.get("geometry")]
+
+
+def fetch_river_polygon(lon_min, lon_max, lat_min, lat_max):
+    """Best-effort: the river's true outline (its width, not just a
+    centerline), reconstructed from an OSM natural=water/water=river
+    multipolygon relation. Not matched by name: the Yakima's relation
+    (910862) turned out to carry no name tag at all -- found only by a
+    spatial+tag search -- so this doesn't try to filter by name either,
+    on the assumption a local domain has at most one major river relation
+    worth drawing. These relations can be huge (910862 has 171 members
+    across the Yakima's whole mapped course), so this fetches in stages,
+    each retried independently across OVERPASS_URLS via query_overpass:
+    candidate relation IDs in the bbox (cheap), each one's member way IDs
+    with no geometry yet (still cheap), then outer-ring way geometry by
+    ID, polygonized and clipped to the bbox. Inner rings (river islands)
+    are skipped -- fetching them added a fourth expensive round-trip that
+    timed out against every mirror repeatedly during testing, for a
+    level of detail not worth that reliability cost. Returns a list of
+    shapely Polygons, or [] if no relation is found or any stage fails
+    -- fetch_river() falls back to the centerline in that case."""
+    rel_query = f"""
+    [out:json][timeout:45];
+    relation["natural"="water"]["water"="river"]({lat_min},{lon_min},{lat_max},{lon_max});
+    out ids;
+    """
+    rel_elements = query_overpass(rel_query, "river-relation")
+    if not rel_elements:
+        return []
+
+    bbox_poly = box(lon_min, lat_min, lon_max, lat_max)
+    polygons = []
+    for rel in rel_elements:
+        rel_id = rel["id"]
+        members_query = f"[out:json][timeout:45];relation({rel_id});out;"
+        mem_elements = query_overpass(members_query, f"river-relation-{rel_id}-members")
+        if not mem_elements:
+            continue
+        outer_ids = [m["ref"] for m in mem_elements[0].get("members", []) if m["role"] == "outer"]
+        if not outer_ids:
+            continue
+        ids_csv = ",".join(str(i) for i in outer_ids)
+        geom_query = f"[out:json][timeout:60];way(id:{ids_csv});out geom;"
+        way_elements = query_overpass(geom_query, f"river-relation-{rel_id}-outer")
+        lines = [LineString([(pt["lon"], pt["lat"]) for pt in w["geometry"]])
+                 for w in way_elements if w.get("geometry")]
+        if not lines:
+            continue
+        for poly in polygonize(lines):
+            clipped = poly.intersection(bbox_poly)
+            if not clipped.is_empty:
+                polygons.append(clipped)
+    return polygons
+
+
+def fetch_river(lon_min, lon_max, lat_min, lat_max, name):
+    """The river's outline where reconstructable, else its centerline.
+    Returns (geoms, is_polygon)."""
+    polygons = fetch_river_polygon(lon_min, lon_max, lat_min, lat_max)
+    if polygons:
+        return polygons, True
+    print(f"NOTE: no reconstructable river polygon, falling back to {name!r} centerline.")
+    return fetch_river_centerline(lon_min, lon_max, lat_min, lat_max, name), False
 
 
 PLACE_TIER = {"city": 0, "town": 1, "village": 2}
@@ -336,7 +402,8 @@ def compute_layout(lon_span, lat_span):
     }
 
 
-def build_map(fires, roads, towns, river_geoms, river_name, extent, year, label, generated_at, output_path):
+def build_map(fires, roads, towns, river_geoms, river_is_polygon, river_name,
+               extent, year, label, generated_at, output_path):
     lon_min, lon_max, lat_min, lat_max = extent
     layout = compute_layout(lon_max - lon_min, lat_max - lat_min)
 
@@ -356,7 +423,10 @@ def build_map(fires, roads, towns, river_geoms, river_name, extent, year, label,
     ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=pc)
     ax.patch.set_facecolor("#e9e6dc")
 
-    if river_geoms:
+    if river_geoms and river_is_polygon:
+        ax.add_geometries(river_geoms, crs=pc, facecolor=RIVER_FILL, edgecolor=RIVER_COLOR,
+                           linewidth=1.2, zorder=1.8)
+    elif river_geoms:
         ax.add_geometries(river_geoms, crs=pc, facecolor="none", edgecolor=RIVER_COLOR,
                            linewidth=2.2, zorder=1.8)
 
@@ -437,7 +507,10 @@ def build_map(fires, roads, towns, river_geoms, river_name, extent, year, label,
         road_handles.append(Line2D([0], [0], color=MINOR_HWY_COLOR, linewidth=1.6, label="Minor highways"))
     if roads.get("local"):
         road_handles.append(Line2D([0], [0], color=LOCAL_ROAD_COLOR, linewidth=1.0, label="Local roads"))
-    if river_geoms:
+    if river_geoms and river_is_polygon:
+        road_handles.append(Patch(facecolor=RIVER_FILL, edgecolor=RIVER_COLOR, linewidth=1.2,
+                                   label=river_name))
+    elif river_geoms:
         road_handles.append(Line2D([0], [0], color=RIVER_COLOR, linewidth=2.2, label=river_name))
     if road_handles:
         road_leg = fig.legend(handles=road_handles, loc="center", frameon=False, fontsize=9,
@@ -467,7 +540,10 @@ def build_map(fires, roads, towns, river_geoms, river_name, extent, year, label,
     plt.close(fig)
     print(f"Saved base map to {output_path}")
 
-    # ---- Composite logo, bottom-left, snug inside the frame ----
+    # ---- Composite logo, top-left, snug inside the frame ----
+    # (bottom-left, the convention elsewhere in this repo, put it right
+    # on top of Colwash's perimeter once the domain shifted west to
+    # include Prosser -- see the commit that widened DEFAULT_CENTER_LON.)
     if LOGO_FILE.exists():
         base = Image.open(output_path).convert("RGB")
         bw, bh = base.size
@@ -477,7 +553,7 @@ def build_map(fires, roads, towns, river_geoms, river_name, extent, year, label,
         x = bw // 2
         black_rows = [yy for yy in range(bh) if arr[yy, x][0] < 40 and arr[yy, x][1] < 40 and arr[yy, x][2] < 40]
         frame_left = min(black_cols) if black_cols else 20
-        frame_bottom = max(black_rows) if black_rows else bh - 20
+        frame_top = min(black_rows) if black_rows else 20
 
         logo = Image.open(LOGO_FILE).convert("RGB")
         target_w = int(bw * 0.08)
@@ -485,7 +561,7 @@ def build_map(fires, roads, towns, river_geoms, river_name, extent, year, label,
         target_h = int(logo.height * scale)
         logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
 
-        pos = (frame_left + MAP_FRAME_INSET_PX, frame_bottom - MAP_FRAME_INSET_PX - target_h)
+        pos = (frame_left + MAP_FRAME_INSET_PX, frame_top + MAP_FRAME_INSET_PX)
         base.paste(logo_resized, pos)
         base.save(output_path)
         print(f"Composited logo at {pos}")
@@ -542,12 +618,13 @@ if __name__ == "__main__":
     print("Fetching towns (OSM Overpass)...")
     towns = fetch_towns(lon_min, lon_max, lat_min, lat_max, args.max_towns, args.exclude_town)
 
-    river_geoms = []
+    river_geoms, river_is_polygon = [], False
     if args.river_name:
         print(f"Fetching {args.river_name!r} (OSM Overpass)...")
-        river_geoms = fetch_river(lon_min, lon_max, lat_min, lat_max, args.river_name)
+        river_geoms, river_is_polygon = fetch_river(lon_min, lon_max, lat_min, lat_max, args.river_name)
 
     now = datetime.now(tz=timezone.utc)
     out_path = args.out or (OUTPUT_DIR / f"{args.label.lower().replace(' ', '_')}"
                                           f"_fires_{args.year}.png")
-    build_map(fires, roads, towns, river_geoms, args.river_name, extent, args.year, args.label, now, out_path)
+    build_map(fires, roads, towns, river_geoms, river_is_polygon, args.river_name,
+              extent, args.year, args.label, now, out_path)
