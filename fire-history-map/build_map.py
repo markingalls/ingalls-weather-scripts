@@ -7,9 +7,12 @@ map domain -- unlike ../fire-perimeter-map/ (one incident, map centered
 and zoomed on it), this holds the domain fixed and shows every fire that
 falls inside it, each a different color, clipped to the frame wherever a
 perimeter extends past it (cartopy's set_extent does this automatically --
-no explicit clipping needed). Defaults to the same domain as the Second
-Street Fire's zoomed-in fire-perimeter-map render (Benton City, WA,
-2026), reusing that exact center/zoom rather than re-deriving it.
+no explicit clipping needed). Defaults to a Benton City, WA / 2026
+domain -- originally the Second Street Fire's own fire-perimeter-map
+extent, then shifted/widened west once the full fire list showed Prosser
+just outside it and the Tri-Cities corner holding nothing worth keeping
+in frame (see the DEFAULT_CENTER_LON/etc. comment below for the exact
+reasoning).
 
 DATA SOURCES
 ------------
@@ -34,6 +37,14 @@ logic and the state-aware minor-highway ref filter); the road/town
 fetch/render code below is a near-duplicate of that script's, kept
 separate rather than imported since this repo's convention is
 self-contained project directories, not cross-project imports.
+
+River (--river-name, default "Yakima River") -- also OSM via Overpass,
+matched by name against waterway=river ways (this stretch of the Yakima
+has no natural=water riverbank polygon in OSM, confirmed by querying
+both, so only the centerline is drawn). Best-effort like every other
+Overpass layer: an empty/unmatched name, or every mirror failing, just
+means no river line, not an error. Pass --river-name '' to skip it
+outright.
 
 Counties (counties_wa_or_id.geojson) are the shared ../maps/ file, same
 WA/OR/ID-only caveat as ../fire-perimeter-map/.
@@ -102,17 +113,25 @@ OVERPASS_URLS = [
     "https://overpass.kumi.systems/api/interpreter",
 ]
 
-# Defaults reproduce fire-perimeter-map's Second Street Fire render
-# exactly: its own bbox center, at the same 0.35 x 0.175 deg zoom the
-# user asked for that map to be tightened to.
-DEFAULT_CENTER_LON = -119.4310004185
+# Defaults for the "Benton City" domain -- originally set to reproduce
+# fire-perimeter-map's Second Street Fire render exactly (its own bbox
+# center at a 0.35 x 0.175 deg zoom), then shifted/widened west to bring
+# Prosser into view once the full 2026 fire list was visible: the Tri-
+# Cities corner (east) turned out to hold only a sliver of Country
+# Meadow and nothing else, while Oie/Prosser sit well west of the
+# original window. New window: -119.85 to -119.35 lon (still comfortably
+# includes every fire except Country Meadow, whose bulk sits at
+# -119.33/-119.27 -- east of Tri-Cities, deliberately now out of frame),
+# 46.137 to 46.387 lat.
+DEFAULT_CENTER_LON = -119.60
 DEFAULT_CENTER_LAT = 46.26172845850005
-DEFAULT_ZOOM_LON_DEG = 0.35
-DEFAULT_ZOOM_LAT_DEG = 0.175
+DEFAULT_ZOOM_LON_DEG = 0.50
+DEFAULT_ZOOM_LAT_DEG = 0.25
 DEFAULT_LABEL = "Benton City"
 DEFAULT_YEAR = 2026
 DEFAULT_MAX_TOWNS = 10
 DEFAULT_STATE_FOR_ROADS = "WA"
+DEFAULT_RIVER_NAME = "Yakima River"
 
 # ---------------------------------------------------------------------------
 # Figure layout constants -- see fire-perimeter-map/build_map.py's
@@ -136,6 +155,7 @@ MOTORWAY_COLOR = "#8FB8E0"
 TRUNK_COLOR = "#F2B880"
 MINOR_HWY_COLOR = "#E2707A"
 LOCAL_ROAD_COLOR = "#9a9890"
+RIVER_COLOR = "#4A90D2"
 
 # Muted, mutually-distinguishable per-fire colors -- cycles if a domain
 # ever holds more fires than this.
@@ -245,6 +265,24 @@ def fetch_roads(lon_min, lon_max, lat_min, lat_max, state, include_local=False):
     return roads
 
 
+def fetch_river(lon_min, lon_max, lat_min, lat_max, name):
+    """OSM waterway=river ways matching `name` within the bbox, as a list
+    of shapely LineStrings. The Yakima River here is mapped as a plain
+    centerline (no natural=water riverbank polygon in this stretch,
+    confirmed by querying both), so this only looks for ways, not
+    polygons -- a river that does carry a riverbank polygon elsewhere
+    would need that added. Best-effort like every other Overpass layer:
+    [] (map renders without the river) if every mirror fails."""
+    query = f"""
+    [out:json][timeout:45];
+    way["waterway"="river"]["name"~"{name}",i]({lat_min},{lon_min},{lat_max},{lon_max});
+    out geom;
+    """
+    elements = query_overpass(query, "river")
+    return [LineString([(pt["lon"], pt["lat"]) for pt in el["geometry"]])
+            for el in elements if el.get("geometry")]
+
+
 PLACE_TIER = {"city": 0, "town": 1, "village": 2}
 
 
@@ -298,7 +336,7 @@ def compute_layout(lon_span, lat_span):
     }
 
 
-def build_map(fires, roads, towns, extent, year, label, generated_at, output_path):
+def build_map(fires, roads, towns, river_geoms, river_name, extent, year, label, generated_at, output_path):
     lon_min, lon_max, lat_min, lat_max = extent
     layout = compute_layout(lon_max - lon_min, lat_max - lat_min)
 
@@ -317,6 +355,10 @@ def build_map(fires, roads, towns, extent, year, label, generated_at, output_pat
     ax = fig.add_axes(layout["axes_rect"], projection=pc)
     ax.set_extent([lon_min, lon_max, lat_min, lat_max], crs=pc)
     ax.patch.set_facecolor("#e9e6dc")
+
+    if river_geoms:
+        ax.add_geometries(river_geoms, crs=pc, facecolor="none", edgecolor=RIVER_COLOR,
+                           linewidth=2.2, zorder=1.8)
 
     ax.add_geometries(county_geoms, crs=pc, facecolor="none", edgecolor="#b9b6ac",
                        linewidth=0.8, zorder=2)
@@ -395,6 +437,8 @@ def build_map(fires, roads, towns, extent, year, label, generated_at, output_pat
         road_handles.append(Line2D([0], [0], color=MINOR_HWY_COLOR, linewidth=1.6, label="Minor highways"))
     if roads.get("local"):
         road_handles.append(Line2D([0], [0], color=LOCAL_ROAD_COLOR, linewidth=1.0, label="Local roads"))
+    if river_geoms:
+        road_handles.append(Line2D([0], [0], color=RIVER_COLOR, linewidth=2.2, label=river_name))
     if road_handles:
         road_leg = fig.legend(handles=road_handles, loc="center", frameon=False, fontsize=9,
                                prop=poppins_reg, ncol=len(road_handles), handletextpad=0.6,
@@ -475,6 +519,9 @@ if __name__ == "__main__":
     parser.add_argument("--local-roads", action="store_true",
                          help="Also fetch unnumbered secondary roads as a narrow gray tier "
                               "(see fire-perimeter-map's --local-roads for the clutter trade-off).")
+    parser.add_argument("--river-name", default=DEFAULT_RIVER_NAME,
+                         help=f"OSM waterway=river name to draw, or '' to skip the river layer "
+                              f"entirely (default: {DEFAULT_RIVER_NAME!r}).")
     parser.add_argument("--out", type=Path, default=None,
                          help="Output PNG path (default: output/<label>_fires_<year>.png).")
     args = parser.parse_args()
@@ -495,7 +542,12 @@ if __name__ == "__main__":
     print("Fetching towns (OSM Overpass)...")
     towns = fetch_towns(lon_min, lon_max, lat_min, lat_max, args.max_towns, args.exclude_town)
 
+    river_geoms = []
+    if args.river_name:
+        print(f"Fetching {args.river_name!r} (OSM Overpass)...")
+        river_geoms = fetch_river(lon_min, lon_max, lat_min, lat_max, args.river_name)
+
     now = datetime.now(tz=timezone.utc)
     out_path = args.out or (OUTPUT_DIR / f"{args.label.lower().replace(' ', '_')}"
                                           f"_fires_{args.year}.png")
-    build_map(fires, roads, towns, extent, args.year, args.label, now, out_path)
+    build_map(fires, roads, towns, river_geoms, args.river_name, extent, args.year, args.label, now, out_path)
