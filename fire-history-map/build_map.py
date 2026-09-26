@@ -36,7 +36,18 @@ Roads and towns -- same live OpenStreetMap Overpass approach as
 logic and the state-aware minor-highway ref filter); the road/town
 fetch/render code below is a near-duplicate of that script's, kept
 separate rather than imported since this repo's convention is
-self-contained project directories, not cross-project imports.
+self-contained project directories, not cross-project imports. On top of
+that per-fetch mirror cycling, every top-level fetch in main() (roads,
+towns, the river) is further wrapped in retry_fetch(), which repeats the
+*whole* fetch (all three mirrors again) up to 5 times -- added after
+watching, under sustained heavy Overpass load while this feature was
+built, a fetch fail every mirror on one cycle and then succeed clean on
+the very next attempt with no code change at all. See retry_fetch()'s
+own docstring for a real bug this surfaced: fetch_roads() always returns
+a non-empty dict (one key per tier) even when every tier inside it is
+empty, so a plain truthiness check silently accepted that as "success"
+and skipped every retry -- caught by testing this exact failure mode
+live, not by inspection.
 
 River (--river-name, default "Yakima River") -- its true outline, not
 just a centerline: reconstructed from an OSM natural=water/water=river
@@ -229,6 +240,31 @@ def query_overpass(query, label):
             print(f"NOTE: Overpass mirror {url} failed ({e}), trying next...")
     print(f"NOTE: all Overpass mirrors failed, skipping {label}.")
     return []
+
+
+def retry_fetch(fn, tries=5, ok=bool):
+    """Retries a full fetch -- which already cycles every OVERPASS_URLS
+    mirror once internally via query_overpass -- up to `tries` times.
+    Needed on top of that: under heavy load (confirmed directly while
+    building this feature) a transient overload can fail every mirror in
+    one cycle but clear by the next, so the same fetch that returned
+    nothing on attempt 1 can succeed on attempt 2 or 3 with no code
+    change at all. `ok` decides what counts as success -- plain
+    truthiness works for a bare list, but fetch_roads() returns a dict
+    with one key per tier that's always a non-empty *dict* even when
+    every tier's list inside it is empty, so its caller must pass
+    ok=lambda r: any(r.values()) instead of relying on the default (a
+    real bug hit once during testing: the default silently accepted an
+    all-empty roads dict as "success" on the first attempt, skipping
+    every retry)."""
+    result = None
+    for i in range(tries):
+        result = fn()
+        if ok(result):
+            return result
+        if i < tries - 1:
+            print(f"  (retrying fetch, attempt {i + 2}/{tries})")
+    return result
 
 
 def fetch_roads(lon_min, lon_max, lat_min, lat_max, state, include_local=False):
@@ -613,15 +649,18 @@ if __name__ == "__main__":
         print(f"  {f['name']}: {f['acres']:,.1f} ac")
 
     print("Fetching roads (OSM Overpass)...")
-    roads = fetch_roads(lon_min, lon_max, lat_min, lat_max, args.state, args.local_roads)
+    roads = retry_fetch(lambda: fetch_roads(lon_min, lon_max, lat_min, lat_max, args.state, args.local_roads),
+                         ok=lambda r: any(r.values()))
 
     print("Fetching towns (OSM Overpass)...")
-    towns = fetch_towns(lon_min, lon_max, lat_min, lat_max, args.max_towns, args.exclude_town)
+    towns = retry_fetch(lambda: fetch_towns(lon_min, lon_max, lat_min, lat_max, args.max_towns, args.exclude_town))
 
     river_geoms, river_is_polygon = [], False
     if args.river_name:
         print(f"Fetching {args.river_name!r} (OSM Overpass)...")
-        river_geoms, river_is_polygon = fetch_river(lon_min, lon_max, lat_min, lat_max, args.river_name)
+        river_geoms, river_is_polygon = retry_fetch(
+            lambda: fetch_river(lon_min, lon_max, lat_min, lat_max, args.river_name),
+            ok=lambda r: bool(r[0]))
 
     now = datetime.now(tz=timezone.utc)
     out_path = args.out or (OUTPUT_DIR / f"{args.label.lower().replace(' ', '_')}"
