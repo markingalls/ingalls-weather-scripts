@@ -40,6 +40,10 @@ workflows. Each project lives in its own directory with its own README.
   single wildfire's current NIFC-mapped perimeter (defaults to the
   Colwash Fire, WA), against county lines, a highway hierarchy, and
   nearby towns, all fetched live for whichever fire it's pointed at.
+- [`fire-history-map/`](fire-history-map/) — every wildfire perimeter
+  from a given year (default 2026) that falls inside a fixed map domain
+  (default: Benton City, WA), each fire a different color, same
+  road/town styling as `fire-perimeter-map`.
 - [`hrrr-smoke-chart/`](hrrr-smoke-chart/) — generates styled meteograms of
   NOAA HRRR smoke (near-surface as AQI or raw µg/m³, or vertically
   integrated) for one or more points over a full 48-hour HRRR cycle
