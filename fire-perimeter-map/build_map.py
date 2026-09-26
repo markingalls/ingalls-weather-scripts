@@ -219,9 +219,17 @@ def fetch_perimeter(fire_name, state):
     def epoch_ms(v):
         return datetime.fromtimestamp(v / 1000, tz=timezone.utc) if v else None
 
+    def display_name(name):
+        """WFIGS stores most incident names in normal case ("Colwash",
+        "Hagen"), but some (e.g. "SECOND STREET") are all-caps -- title()
+        those for display so the map title doesn't shout. Left alone if
+        it isn't fully uppercase, so a name with intentional caps isn't
+        mangled."""
+        return name.title() if name.isupper() else name
+
     return {
         "geom": shape(f["geometry"]),
-        "name": p.get("poly_IncidentName") or fire_name,
+        "name": display_name(p.get("poly_IncidentName") or fire_name),
         "acres": p.get("poly_GISAcres"),
         "pct_contained": p.get("attr_PercentContained"),
         "county": p.get("attr_POOCounty"),
