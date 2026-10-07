@@ -23,7 +23,8 @@ wherever it's pointed.
   windSpeed/windGust/windDirection from the same point's `forecastGridData`
   (the wind indicator's source — see below). No API key needed.
 - `fetch_metamesh_forecast.py` — pulls the MetaMesh point temperature
-  forecast for a station from WindBorne and writes `metamesh_forecast.json`.
+  forecast for a station (or, with `--lat`/`--lon`, an arbitrary coordinate
+  — see below) from WindBorne and writes `metamesh_forecast.json`.
   Requires `WB_API_KEY` in the environment (get one at
   https://app.windbornesystems.com/api_tokens).
 - `fetch_openmeteo_forecast.py` — pulls Open-Meteo's daily weather-code
@@ -96,8 +97,20 @@ python3 build_graphic.py
   bias-corrected against the target METAR station's observations) rather
   than an ensemble, so there's a single forecast value per timestep, not a
   distribution/median to pick from. `fetch_metamesh_forecast.py` queries it
-  by station ID (`kpsc`) rather than lat/lon, since MetaMesh's per-station
-  bias correction only covers its 349 supported METAR stations.
+  by station ID (`kpsc`) by default, since MetaMesh's per-station bias
+  correction only covers its 349 supported METAR stations — but also
+  supports `--lat`/`--lon` instead, which hits the same endpoint with a
+  `coordinates=lat,lon` param (also undocumented — found by triggering the
+  endpoint's own 400 error message, `"At least one of 'coordinates' or
+  'stations' is required"`) for the gridded model interpolated straight to
+  that point, no station bias-correction. **Use coordinates instead of the
+  nearest station for any point without a nearby, elevation-representative
+  METAR station** — confirmed directly: for a ~3000ft Cascades point with no
+  close station, the nearest one (Yakima, ~1000ft, valley floor) overshot a
+  46°F NWS-forecast high by 14 degrees and made an otherwise-correct 95%
+  snow chance look nonsensical next to a 60°F high; querying by coordinate
+  instead landed within a few degrees of NWS's own number and made the snow
+  call internally consistent (cold enough to actually make sense).
   `daily_columns()` in `build_graphic.py` keeps each NWS period's start/end
   time (rather than its temperature) and pairs each daytime period with the
   night immediately following it, same as TV weathercasts (the paired
