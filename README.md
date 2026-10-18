@@ -53,8 +53,13 @@ workflows. Each project lives in its own directory with its own README.
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
 
+- [`pnw-mslp-precip-map/`](pnw-mslp-precip-map/) — one-off map of MSLP
+  isobars + 3-hour precip over the Pacific Northwest for a single valid
+  time, from WindBorne WM-6, with snow colors wherever ~3 km terrain sits
+  above the model's freezing level.
+
 ## Shared resources
 
 - [`maps/`](maps/) — reusable basemap data (coastlines, borders, counties,
-  roads) shared across mapping scripts.
+  roads, ~3 km Pacific Northwest terrain) shared across mapping scripts.
 - [`assets/`](assets/) — shared brand assets (logo, etc.).
