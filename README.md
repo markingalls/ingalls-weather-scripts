@@ -52,6 +52,10 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`wm6-850mb-map/`](wm6-850mb-map/) — one-off map of 850 mb temperature
+  and geopotential heights over the Pacific Northwest, with closed lows
+  marked, from the WindBorne WeatherMesh-6 global ensemble mean, using the
+  standard Ingalls temperature color table.
 
 ## Shared resources
 
