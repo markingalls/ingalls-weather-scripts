@@ -59,6 +59,13 @@ python3 prepare_basemap.py    # only to refresh ../maps/ tz/land layers
   `America/Winnipeg` includes Kenora and Rainy River.
 - Zone fills are clipped to Natural Earth land, minus the large lakes, so
   coastlines and the Great Lakes stay crisp.
+- Time zone lines are the shared edges between offset groups, taken from
+  the same polygons as the fills. National and state border segments
+  within `TZ_LINE_SNAP_DEG` (0.2°) of a time zone line are dropped. Natural
+  Earth's version of the same border (e.g. the 49th parallel) runs
+  slightly off, and would draw as a second line. All geometry is also
+  densified before projecting, so straight lon/lat segments follow Lambert
+  Conformal's curved parallels.
 - The legend only lists offsets that actually show up in the frame.
 - The projection is Lambert Conformal, framed as a projected rectangle
   from `FRAME_POINTS`. The figure height is derived from that rectangle

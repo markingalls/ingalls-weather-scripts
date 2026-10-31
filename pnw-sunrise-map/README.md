@@ -33,6 +33,11 @@ python3 build_map.py --date 2026-12-21   # any other date
 - **15-minute isochrones** are contoured separately inside each offset
   region, so they end at time zone lines instead of stacking up where the
   clock jumps.
+- National and state border segments within `TZ_LINE_SNAP_DEG` (0.1°) of
+  a time zone line are dropped, so the dashed tz line is the only line
+  there. Same-offset zones are merged with a tiny closing buffer, so
+  hairline gaps (e.g. Boise vs. Denver zones on the ID/MT line) don't draw
+  as stray dashes.
 - Borders are densified (`densify()`) before plotting so straight lon/lat
   segments follow LambertConformal's curved parallels. Otherwise the
   49th parallel draws as two separate lines (the tz data and Natural

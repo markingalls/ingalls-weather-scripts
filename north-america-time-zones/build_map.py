@@ -51,6 +51,7 @@ import matplotlib.patheffects as pe
 from matplotlib.patches import Rectangle
 from matplotlib.transforms import offset_copy
 import numpy as np
+import shapely
 from PIL import Image
 from shapely.geometry import Point, Polygon, shape
 from shapely.ops import unary_union
@@ -138,6 +139,7 @@ OFFSET_COLORS = {
     0.0:   "#c9c4b8",
 }
 OCEAN_COLOR = "#e6edf0"
+TZ_LINE_SNAP_DEG = 0.2
 
 # ---------------------------------------------------------------------------
 # Figure geometry / domain (Lambert Conformal, the standard NOAA/NWS
@@ -240,6 +242,15 @@ def frame_extent():
     return min(xs), max(xs), min(ys), max(ys)
 
 
+def densify(geom, max_seg_deg=0.1):
+    """Add vertices so long straight lon/lat segments (the 49th parallel
+    is only a handful of vertices in the tz data) follow Lambert
+    Conformal's curved parallels. Without this, two datasets' versions of
+    the same border -- one sparse, one detailed -- project as visibly
+    separate lines."""
+    return shapely.segmentize(geom, max_seg_deg)
+
+
 def frame_polygon_lonlat(x0, x1, y0, y1, n=200):
     """The projected frame rectangle as a lon/lat polygon (edges sampled
     densely, since they're curves in lon/lat)."""
@@ -272,8 +283,23 @@ def build_map(output_path):
         by_offset.setdefault(off, []).append(geom)
         if yr:
             year_round.append(geom)
-    by_offset = {off: unary_union(g).intersection(land_minus_lakes) for off, g in by_offset.items()}
-    year_round_geom = unary_union(year_round).intersection(land_minus_lakes)
+    by_offset = {off: densify(unary_union(g).intersection(land_minus_lakes)) for off, g in by_offset.items()}
+    year_round_geom = densify(unary_union(year_round).intersection(land_minus_lakes))
+
+    # Time zone lines = shared edges between offset groups (not coastlines).
+    # These come from the same polygons as the fills, so they always sit
+    # exactly on the color change. National/state border segments running
+    # within TZ_LINE_SNAP_DEG of one are dropped -- otherwise Natural
+    # Earth's version of e.g. the 49th parallel or the ID/OR line draws as
+    # a second, slightly offset line beside the tz line.
+    groups = list(by_offset.values())
+    tz_lines = unary_union([groups[i].boundary.intersection(groups[j].boundary.buffer(0.02))
+                            for i in range(len(groups)) for j in range(i + 1, len(groups))
+                            if groups[i].buffer(0.02).intersects(groups[j])])
+    tz_snap = tz_lines.buffer(TZ_LINE_SNAP_DEG)
+    admin1_lines = [densify(g.difference(tz_snap)) for g in admin1_lines]
+    admin0_lines = [densify(g.difference(tz_snap)) for g in admin0_lines]
+    land_outline = densify(land_minus_lakes)
 
     x0, x1, y0, y1 = frame_extent()
     axes_h_in = FIG_WIDTH_IN * AXES_WIDTH * (y1 - y0) / (x1 - x0)
@@ -300,15 +326,13 @@ def build_map(output_path):
 
     ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#7d6e5c", linewidth=0.35,
                       alpha=0.8, zorder=1.4)
-    ax.add_geometries([land_minus_lakes], crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.5,
+    ax.add_geometries([land_outline], crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.5,
                       zorder=1.5)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=0.8,
                       zorder=1.6)
-    # Time zone boundaries (between offset groups) -- the edges of each
-    # offset group's land area, drawn darker than state/province lines.
-    for off in offsets_present:
-        ax.add_geometries([by_offset[off]], crs=pc, facecolor="none", edgecolor="#2b2a26",
-                          linewidth=0.9, zorder=1.8)
+    # Time zone boundaries, drawn darker than state/province lines.
+    ax.add_geometries([tz_lines], crs=pc, facecolor="none", edgecolor="#2b2a26",
+                      linewidth=0.9, zorder=1.8)
 
     # Cities, labelled with their clock time at the reference moment.
     tz_shapes = load_tz()

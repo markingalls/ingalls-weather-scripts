@@ -120,6 +120,7 @@ GRID_STEP_DEG = 0.01
 GRID_PAD_DEG = 1.5
 
 CONTOUR_INTERVAL_MIN = 15
+TZ_LINE_SNAP_DEG = 0.1
 
 CITIES = [
     # (name, lon, lat, label side: right/left/above/below)
@@ -231,7 +232,10 @@ def load_tz_regions(target_date):
                       f"using the pinned 2026 value {CANADA_2026[tzid]:+.1f}.")
             off = CANADA_2026[tzid]
         groups.setdefault(off, []).append(geom.intersection(dom))
-    return {off: unary_union(g) for off, g in groups.items()}
+    # The small buffer-out/buffer-in closes hairline gaps between adjacent
+    # same-offset zones (e.g. America/Boise vs America/Denver along the
+    # ID/MT line), which would otherwise draw as stray time zone dashes.
+    return {off: unary_union(g).buffer(0.01).buffer(-0.01) for off, g in groups.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -334,15 +338,22 @@ def build_map(target_date, output_path):
             lbl.set_fontsize(7)
             lbl.set_color((1, 1, 1, 0.9))
 
-    land_geoms, state_geoms, admin0_lines = densify(land_geoms), densify(state_geoms), densify(admin0_lines)
-    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.7, zorder=1.5)
-    ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.7, zorder=2)
-    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.0, zorder=2.5)
     # Time zone lines -- edges of each offset region, clipped to land,
     # white halo under a dark dashed line so they read on light and dark
-    # shading alike.
+    # shading alike. They come from the same polygons as the shading, so
+    # they sit exactly on the color jump; national/state border segments
+    # running within TZ_LINE_SNAP_DEG of one are dropped, since Natural
+    # Earth's version of the same border (49th parallel, Snake River) runs
+    # slightly off the tz data's and would draw as a second line beside it.
     tz_edges = densify([g.intersection(land).boundary.difference(land.boundary.buffer(0.02))
                         for g in tz_regions.values()])
+    tz_snap = unary_union(tz_edges).buffer(TZ_LINE_SNAP_DEG)
+    state_lines = densify([g.boundary.difference(tz_snap) for g in state_geoms])
+    admin0_lines = densify([g.difference(tz_snap) for g in admin0_lines])
+    land_geoms = densify(land_geoms)
+    ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.7, zorder=1.5)
+    ax.add_geometries(state_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.7, zorder=2)
+    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.0, zorder=2.5)
     tz_dashes = (0, (4, 2.5))
     ax.add_geometries(tz_edges, crs=pc, facecolor="none", edgecolor="white", linewidth=2.6,
                       linestyle=tz_dashes, zorder=3)
