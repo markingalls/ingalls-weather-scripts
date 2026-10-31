@@ -114,7 +114,7 @@ FRAME_POINTS = [(-127.9, 52.75), (-110.6, 52.75), (-126.0, 41.7), (-111.6, 41.7)
 FIG_DPI = 200
 FIG_WIDTH_IN = 9.0
 AXES_LEFT, AXES_BOTTOM, AXES_WIDTH = 0.03, 0.135, 0.94
-TOP_MARGIN_FRAC = 0.125
+TOP_MARGIN_FRAC = 0.095
 MAP_FRAME_INSET_PX = 22
 
 GRID_STEP_DEG = 0.01
@@ -458,11 +458,8 @@ def build_map(target_date, output_path):
     top = 1 - 0.022 * s
     fig.text(0.03, top, f"Sunrise Times • {target_date.strftime('%A, %B')} {target_date.day}, {target_date.year}",
              fontsize=19, fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, top - 0.040 * s, "B.C. & Alberta don't fall back — sunrise comes an hour later",
-             fontsize=12.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
-    fig.text(0.03, top - 0.068 * s,
-             "U.S. on PST/MST  •  B.C. on year-round UTC−7  •  Alberta, East Kootenay & Golden on year-round UTC−6",
-             fontsize=9.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
+    fig.text(0.03, top - 0.042 * s, "B.C. & Alberta stay on daylight time  •  U.S. on standard time",
+             fontsize=11, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
     fig.text(0.5, 0.008, "NOAA solar equations • IANA tz 2026e / timezone-boundary-builder — Ingalls Weather",
              fontsize=8.5, fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
