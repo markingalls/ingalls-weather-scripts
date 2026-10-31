@@ -8,10 +8,10 @@ single date -- by default Sunday, November 1, 2026, the first fall-back
 where British Columbia and Alberta *don't* turn their clocks back:
 
   - BC (most of it) stays on UTC-7 year-round ("Pacific Time"), so its
-    sunrise jumps an hour later than Washington's -- Vancouver ~8:00 AM vs.
-    Seattle ~7:00 AM.
+    sunrise jumps an hour later than Washington's -- Vancouver ~08:00 vs.
+    Seattle ~07:00.
   - Alberta, and BC's East Kootenay (Cranbrook, Fernie, Invermere) and
-    Golden, stay on UTC-6 year-round -- sunrise near 8:30 AM.
+    Golden, stay on UTC-6 year-round -- sunrise near 08:30.
   - Creston stays on UTC-7 as always.
   - US states fall back at 2 AM Nov 1 as usual (PST / MST).
 
@@ -120,6 +120,7 @@ GRID_STEP_DEG = 0.01
 GRID_PAD_DEG = 1.5
 
 CONTOUR_INTERVAL_MIN = 15
+CITY_LABEL_FONTSIZE = 10.5
 TZ_LINE_SNAP_DEG = 0.1
 
 CITIES = [
@@ -204,9 +205,10 @@ def sunrise_utc_hours(target_date, lon, lat):
 
 
 def fmt_clock(h):
+    """24-hour clock time, e.g. 07:59."""
     total = int(round(h * 60))
     hh, mm = divmod(total, 60)
-    return f"{hh % 12 or 12}:{mm:02d}"
+    return f"{hh % 24:02d}:{mm:02d}"
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +364,7 @@ def build_map(target_date, output_path):
 
     # Cities with sunrise clock time
     geodetic_transform = pc._as_mpl_transform(ax)
-    stroke = [pe.withStroke(linewidth=1.6, foreground=(0, 0, 0, 0.8))]
+    stroke = [pe.withStroke(linewidth=1.9, foreground=(0, 0, 0, 0.8))]
     for name, lon_c, lat_c, side in CITIES:
         j = int(round((lon_c - lons[0]) / GRID_STEP_DEG))
         i = int(round((lat_c - lats[0]) / GRID_STEP_DEG))
@@ -377,11 +379,13 @@ def build_map(target_date, output_path):
                                 "above": (0, 5, "center", "bottom"),
                                 "below": (0, -5, "center", "top")}[side]
         t = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=dy_pt, units="points")
-        label = f"{fmt_clock(sr)} {name}" if side == "left" else f"{name} {fmt_clock(sr)}"
-        txt = ax.text(lon_c, lat_c, label, fontsize=8.6, fontproperties=poppins_semibold, color="white",
-                      ha=ha, va=va, zorder=101, transform=t)
+        # Two lines: city name, sunrise time underneath.
+        txt = ax.text(lon_c, lat_c, f"{name}\n{fmt_clock(sr)}", color="white", ha=ha, va=va,
+                      multialignment=ha, linespacing=1.05, zorder=101, transform=t)
+        txt.set_fontproperties(poppins_semibold)
+        txt.set_fontsize(CITY_LABEL_FONTSIZE)
         txt.set_path_effects(stroke)
-        print(f"  {name:15s} {fmt_clock(sr)} AM (UTC{off:+.0f})")
+        print(f"  {name:15s} {fmt_clock(sr)} (UTC{off:+.0f})")
 
     ax.spines["geo"].set_edgecolor("black")
     ax.spines["geo"].set_linewidth(1.6)
@@ -402,7 +406,7 @@ def build_map(target_date, output_path):
         spine.set_linewidth(0.6)
     ticks = np.arange(6.5, SR_MAX + 1e-6, 0.5)
     cax.set_xticks(ticks)
-    cax.set_xticklabels([f"{fmt_clock(h)} AM" for h in ticks])
+    cax.set_xticklabels([fmt_clock(h) for h in ticks])
     cax.tick_params(labelsize=8.5, color="#8a887e", labelcolor="#2b2a26")
     for label in cax.get_xticklabels():
         label.set_fontproperties(poppins_reg)

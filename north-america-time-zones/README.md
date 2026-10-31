@@ -5,7 +5,7 @@ fall-back, the first winter in which much of Western and Central Canada
 stops changing clocks. Fill color is each area's UTC offset this winter.
 Hatching marks places that keep the same time year-round. Hawaii is left
 out. Cities are
-labelled with their clock time when it's noon in Seattle, which makes the
+labelled with their clock time when it's 12:00 in Seattle (24-hour times), which makes the
 new oddities easy to read: Vancouver is an hour ahead of Seattle, Calgary
 matches Chicago, and Winnipeg matches Toronto.
 

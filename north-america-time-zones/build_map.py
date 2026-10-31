@@ -20,7 +20,7 @@ and Central Canada stops changing clocks:
 
 Fill color = clock offset from UTC this winter. Hatching = places that
 don't change clocks at all. Hawaii is left out. City labels give each city's clock time at the
-moment it's noon in Seattle, which is the quickest way to read the new
+moment it's 12:00 in Seattle, which is the quickest way to read the new
 oddities (Vancouver an hour ahead of Seattle; Winnipeg matching Toronto).
 
 USAGE
@@ -120,7 +120,8 @@ SUMMER_INSTANT = datetime(2027, 7, 1, 12, tzinfo=timezone.utc)
 # Reference moment for the city clock labels: noon in Seattle (PST) =
 # 20:00 UTC.
 REFERENCE_UTC_HOUR = 20.0
-REFERENCE_LABEL = "noon in Seattle"
+REFERENCE_LABEL = "12:00 in Seattle"
+CITY_LABEL_FONTSIZE = 10
 
 # Fill color per winter offset -- soft, adjacent offsets deliberately on
 # different hues so neighbouring zones never blur together.
@@ -164,12 +165,12 @@ TOP_MARGIN_IN, BOTTOM_MARGIN_IN = 1.3, 1.75
 MAP_FRAME_INSET_PX = 22
 
 CITIES = [
-    # (name, lon, lat, label side: right/left/above/below)
+    # (name, lon, lat, label side: right/left/above/below/upper-left/lower-left)
     ("Anchorage", -149.90, 61.22, "right"),
     ("Whitehorse", -135.06, 60.72, "right"),
     ("Yellowknife", -114.37, 62.45, "right"),
-    ("Vancouver", -123.12, 49.28, "left"),
-    ("Seattle", -122.33, 47.61, "left"),
+    ("Vancouver", -123.12, 49.28, "upper-left"),
+    ("Seattle", -122.33, 47.61, "lower-left"),
     ("Calgary", -114.07, 51.04, "right"),
     ("Regina", -104.61, 50.45, "below"),
     ("Winnipeg", -97.14, 49.90, "above"),
@@ -209,13 +210,10 @@ def fmt_offset(h):
 
 
 def fmt_clock(offset):
-    local = (REFERENCE_UTC_HOUR + offset) % 24
-    hh, mm = int(local), int(round((local % 1) * 60))
-    suffix = "AM" if hh < 12 else "PM"
-    hh12 = hh % 12 or 12
-    if hh == 12 and mm == 0:
-        return "Noon"
-    return f"{hh12}:{mm:02d} {suffix}" if mm else f"{hh12} {suffix}"
+    """24-hour local clock time at the reference moment, e.g. 13:00."""
+    total = int(round(((REFERENCE_UTC_HOUR + offset) % 24) * 60))
+    hh, mm = divmod(total, 60)
+    return f"{hh:02d}:{mm:02d}"
 
 
 # ---------------------------------------------------------------------------
@@ -337,7 +335,7 @@ def build_map(output_path):
     # Cities, labelled with their clock time at the reference moment.
     tz_shapes = load_tz()
     geodetic_transform = pc._as_mpl_transform(ax)
-    stroke = [pe.withStroke(linewidth=1.6, foreground=(0, 0, 0, 0.75))]
+    stroke = [pe.withStroke(linewidth=1.9, foreground=(0, 0, 0, 0.75))]
     for name, lon_c, lat_c, side in CITIES:
         pt = Point(lon_c, lat_c)
         tzid = next((t for t, g in tz_shapes if g.contains(pt)), None)
@@ -349,11 +347,15 @@ def build_map(output_path):
                 mec="black", mew=0.7, transform=pc)
         dx_pt, dy_pt, ha, va = {"right": (5, 0, "left", "center"), "left": (-5, 0, "right", "center"),
                                 "above": (0, 5, "center", "bottom"),
-                                "below": (0, -5, "center", "top")}[side]
+                                "below": (0, -5, "center", "top"),
+                                "upper-left": (-4, 2, "right", "bottom"),
+                                "lower-left": (-4, -2, "right", "top")}[side]
         t = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=dy_pt, units="points")
-        txt = ax.text(lon_c, lat_c, f"{clock} {name}" if side == "left" else f"{name} {clock}",
-                      fontsize=7.6, fontproperties=poppins_semibold, color="white", ha=ha,
-                      va=va, zorder=101, transform=t)
+        # Two lines: city name, clock time underneath.
+        txt = ax.text(lon_c, lat_c, f"{name}\n{clock}", color="white", ha=ha, va=va,
+                      multialignment=ha, linespacing=1.05, zorder=101, transform=t)
+        txt.set_fontproperties(poppins_semibold)
+        txt.set_fontsize(CITY_LABEL_FONTSIZE)
         txt.set_path_effects(stroke)
 
     ax.spines["geo"].set_edgecolor("black")
