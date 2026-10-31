@@ -184,6 +184,13 @@ CITIES = [
     ("Chicago", -87.63, 41.88, "right"),
     ("New York", -74.01, 40.71, "right"),
     ("Mexico City", -99.13, 19.43, "right"),
+    ("Dallas", -96.80, 32.78, "right"),
+    ("Atlanta", -84.39, 33.75, "right"),
+    ("Havana", -82.37, 23.11, "right"),
+    ("Cancún", -86.85, 21.16, "left"),
+    ("Cabo San Lucas", -109.92, 22.89, "right"),
+    ("Iqaluit", -68.52, 63.75, "right"),
+    ("Nuuk", -51.72, 64.18, "left"),
 ]
 
 
