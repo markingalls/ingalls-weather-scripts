@@ -188,7 +188,7 @@ CITIES = [
     ("Atlanta", -84.39, 33.75, "right"),
     ("Havana", -82.37, 23.11, "right"),
     ("Cancún", -86.85, 21.16, "left"),
-    ("Cabo San Lucas", -109.92, 22.89, "right"),
+    ("Cabo San Lucas", -109.92, 22.89, "left"),
     ("Iqaluit", -68.52, 63.75, "right"),
     ("Nuuk", -51.72, 64.18, "left"),
 ]
