@@ -19,8 +19,7 @@ and Central Canada stops changing clocks:
   - Rest of Ontario, Quebec, Atlantic Canada, Nunavut: still fall back.
 
 Fill color = clock offset from UTC this winter. Hatching = places that
-don't change clocks at all. A dashed outline marks the area that stopped
-changing clocks in 2026. City labels give each city's clock time at the
+don't change clocks at all. Hawaii is left out. City labels give each city's clock time at the
 moment it's noon in Seattle, which is the quickest way to read the new
 oddities (Vancouver an hour ahead of Seattle; Winnipeg matching Toronto).
 
@@ -53,7 +52,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.transforms import offset_copy
 import numpy as np
 from PIL import Image
-from shapely.geometry import Point, shape
+from shapely.geometry import Point, Polygon, shape
 from shapely.ops import unary_union
 
 import cartopy.crs as ccrs
@@ -139,7 +138,6 @@ OFFSET_COLORS = {
     0.0:   "#c9c4b8",
 }
 OCEAN_COLOR = "#e6edf0"
-NEW_2026_COLOR = "#c8231e"
 
 # ---------------------------------------------------------------------------
 # Figure geometry / domain (Lambert Conformal, the standard NOAA/NWS
@@ -151,12 +149,16 @@ NEW_2026_COLOR = "#c8231e"
 CENTER_LON = -100.0
 PROJ = ccrs.LambertConformal(central_longitude=CENTER_LON, central_latitude=45.0,
                              standard_parallels=(33.0, 60.0))
-FRAME_POINTS = [(-168.0, 52.0), (-52.0, 47.0), (-80.0, 7.5), (-158.0, 18.5),
+FRAME_POINTS = [(-168.0, 54.0), (-52.0, 47.0), (-80.0, 7.5), (-120.0, 20.0),
                 (-100.0, 76.0), (-60.0, 70.0), (-145.0, 70.0)]
+# Not drawn (off-frame, and left out of the legend / city labels).
+EXCLUDED_TZIDS = {"Pacific/Honolulu"}
 FIG_DPI = 200
 FIG_WIDTH_IN = 10.0
-AXES_LEFT, AXES_BOTTOM, AXES_WIDTH = 0.03, 0.155, 0.94
-TOP_MARGIN_FRAC = 0.125  # title block above the map
+AXES_LEFT, AXES_WIDTH = 0.03, 0.94
+# Title block above / legend below the map, in inches (not figure
+# fractions) so they stay snug whatever height the frame works out to.
+TOP_MARGIN_IN, BOTTOM_MARGIN_IN = 1.3, 1.75
 MAP_FRAME_INSET_PX = 22
 
 CITIES = [
@@ -166,25 +168,18 @@ CITIES = [
     ("Yellowknife", -114.37, 62.45, "right"),
     ("Vancouver", -123.12, 49.28, "left"),
     ("Seattle", -122.33, 47.61, "left"),
-    ("Cranbrook", -115.77, 49.51, "below"),
     ("Calgary", -114.07, 51.04, "right"),
     ("Regina", -104.61, 50.45, "below"),
     ("Winnipeg", -97.14, 49.90, "above"),
-    ("Kenora", -94.49, 49.77, "below"),
-    ("Thunder Bay", -89.25, 48.38, "right"),
     ("Toronto", -79.38, 43.65, "right"),
-    ("Montréal", -73.57, 45.50, "right"),
     ("Halifax", -63.57, 44.65, "right"),
     ("St. John's", -52.71, 47.56, "left"),
-    ("Iqaluit", -68.52, 63.75, "right"),
     ("Los Angeles", -118.24, 34.05, "left"),
     ("Phoenix", -112.07, 33.45, "right"),
     ("Denver", -104.99, 39.74, "right"),
     ("Chicago", -87.63, 41.88, "right"),
     ("New York", -74.01, 40.71, "right"),
-    ("Miami", -80.19, 25.76, "right"),
     ("Mexico City", -99.13, 19.43, "right"),
-    ("Honolulu", -157.86, 21.31, "right"),
 ]
 
 
@@ -245,6 +240,15 @@ def frame_extent():
     return min(xs), max(xs), min(ys), max(ys)
 
 
+def frame_polygon_lonlat(x0, x1, y0, y1, n=200):
+    """The projected frame rectangle as a lon/lat polygon (edges sampled
+    densely, since they're curves in lon/lat)."""
+    xs = np.concatenate([np.linspace(x0, x1, n), np.full(n, x1), np.linspace(x1, x0, n), np.full(n, x0)])
+    ys = np.concatenate([np.full(n, y0), np.linspace(y0, y1, n), np.full(n, y1), np.linspace(y1, y0, n)])
+    ll = ccrs.PlateCarree().transform_points(PROJ, xs, ys)
+    return Polygon(ll[:, :2]).buffer(0)
+
+
 def build_map(output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
@@ -258,28 +262,24 @@ def build_map(output_path):
     admin0_lines = load_geoms(ADMIN0_LINES_FILE)
 
     print("Grouping time zones by winter 2026-27 offset...")
-    by_offset, year_round, new_2026 = {}, [], []
+    by_offset, year_round = {}, []
     tz_info = {}
     for tzid, geom in load_tz():
-        off, yr, new = tz_offsets(tzid)
+        if tzid in EXCLUDED_TZIDS:
+            continue
+        off, yr, _ = tz_offsets(tzid)
         tz_info[tzid] = off
         by_offset.setdefault(off, []).append(geom)
         if yr:
             year_round.append(geom)
-        if new:
-            new_2026.append(geom)
     by_offset = {off: unary_union(g).intersection(land_minus_lakes) for off, g in by_offset.items()}
     year_round_geom = unary_union(year_round).intersection(land_minus_lakes)
-    new_2026_geom = unary_union(new_2026).intersection(land_minus_lakes)
-    # Cleans up the slivers where tz polygons and Natural Earth's coastline
-    # don't quite agree, so the dashed outline is just the region, not
-    # every offshore islet's edge.
-    new_2026_outline = new_2026_geom.buffer(0.35).buffer(-0.35).simplify(0.05)
 
     x0, x1, y0, y1 = frame_extent()
     axes_h_in = FIG_WIDTH_IN * AXES_WIDTH * (y1 - y0) / (x1 - x0)
-    fig_h_in = axes_h_in / (1 - AXES_BOTTOM - TOP_MARGIN_FRAC)
-    axes_rect = [AXES_LEFT, AXES_BOTTOM, AXES_WIDTH, axes_h_in / fig_h_in]
+    fig_h_in = axes_h_in + TOP_MARGIN_IN + BOTTOM_MARGIN_IN
+    axes_bottom = BOTTOM_MARGIN_IN / fig_h_in
+    axes_rect = [AXES_LEFT, axes_bottom, AXES_WIDTH, axes_h_in / fig_h_in]
 
     fig = plt.figure(figsize=(FIG_WIDTH_IN, fig_h_in), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
@@ -310,14 +310,6 @@ def build_map(output_path):
         ax.add_geometries([by_offset[off]], crs=pc, facecolor="none", edgecolor="#2b2a26",
                           linewidth=0.9, zorder=1.8)
 
-    # 2026 outline, white halo under red dashes (dash pattern shared so the
-    # two passes stay in phase -- same treatment as dew-point-storm-map).
-    dashes = (0, (5, 3))
-    ax.add_geometries([new_2026_outline], crs=pc, facecolor="none", edgecolor="white",
-                      linewidth=3.4, linestyle=dashes, zorder=2.5)
-    ax.add_geometries([new_2026_outline], crs=pc, facecolor="none", edgecolor=NEW_2026_COLOR,
-                      linewidth=1.7, linestyle=dashes, zorder=2.6)
-
     # Cities, labelled with their clock time at the reference moment.
     tz_shapes = load_tz()
     geodetic_transform = pc._as_mpl_transform(ax)
@@ -344,12 +336,14 @@ def build_map(output_path):
     ax.spines["geo"].set_linewidth(1.6)
 
     # ---- Legend: one swatch per offset, with its clock time at the
-    # reference moment, plus the hatch and outline keys ----
-    lax = fig.add_axes([0.03, 0.02, 0.94, AXES_BOTTOM - 0.035])
+    # reference moment (only offsets actually visible in the frame), plus
+    # the hatch key ----
+    lax = fig.add_axes([0.03, 0.3 / fig_h_in, 0.94, (BOTTOM_MARGIN_IN - 0.45) / fig_h_in])
     lax.set_xlim(0, 1)
     lax.set_ylim(0, 1)
     lax.axis("off")
-    legend_offsets = [o for o in offsets_present if o >= -10]
+    frame_ll = frame_polygon_lonlat(x0, x1, y0, y1)
+    legend_offsets = [o for o in offsets_present if by_offset[o].intersection(frame_ll).area > 0.5]
     n = len(legend_offsets)
     sw_w = 0.94 / n
     for i, off in enumerate(legend_offsets):
@@ -365,16 +359,11 @@ def build_map(output_path):
              ha="center", va="center", fontsize=9, fontproperties=poppins_reg, color="#2b2a26")
 
     # Hatch key
-    lax.add_patch(Rectangle((0.17, 0.10), 0.045, 0.17, facecolor="#f1de8c", edgecolor="#8a887e",
+    lax.add_patch(Rectangle((0.335, 0.10), 0.045, 0.17, facecolor="#f1de8c", edgecolor="#8a887e",
                             linewidth=0.6))
-    lax.add_patch(Rectangle((0.17, 0.10), 0.045, 0.17, facecolor="none",
+    lax.add_patch(Rectangle((0.335, 0.10), 0.045, 0.17, facecolor="none",
                             edgecolor=(0.2, 0.17, 0.13, 0.38), hatch="//////", linewidth=0))
-    lax.text(0.222, 0.185, "No clock changes (same time year-round)", ha="left", va="center",
-             fontsize=8.6, fontproperties=poppins_reg, color="#2b2a26")
-    # Outline key
-    lax.plot([0.56, 0.61], [0.185, 0.185], color="white", linewidth=3.4, linestyle=dashes)
-    lax.plot([0.56, 0.61], [0.185, 0.185], color=NEW_2026_COLOR, linewidth=1.7, linestyle=dashes)
-    lax.text(0.618, 0.185, "Stopped changing clocks in 2026", ha="left", va="center",
+    lax.text(0.387, 0.185, "No clock changes (same time year-round)", ha="left", va="center",
              fontsize=8.6, fontproperties=poppins_reg, color="#2b2a26")
 
     # Title block

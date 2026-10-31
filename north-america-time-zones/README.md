@@ -3,8 +3,8 @@
 A styled map of North America's time zones after the **November 1, 2026**
 fall-back, the first winter in which much of Western and Central Canada
 stops changing clocks. Fill color is each area's UTC offset this winter.
-Hatching marks places that keep the same time year-round. A dashed red
-outline marks the area that stopped changing clocks in 2026. Cities are
+Hatching marks places that keep the same time year-round. Hawaii is left
+out. Cities are
 labelled with their clock time when it's noon in Seattle, which makes the
 new oddities easy to read: Vancouver is an hour ahead of Seattle, Calgary
 matches Chicago, and Winnipeg matches Toronto.
@@ -59,8 +59,8 @@ python3 prepare_basemap.py    # only to refresh ../maps/ tz/land layers
   `America/Winnipeg` includes Kenora and Rainy River.
 - Zone fills are clipped to Natural Earth land, minus the large lakes, so
   coastlines and the Great Lakes stay crisp.
-- The 2026 outline is lightly smoothed (a 0.35° closing buffer) so it
-  traces the region, not every offshore islet.
+- The legend only lists offsets that actually show up in the frame.
 - The projection is Lambert Conformal, framed as a projected rectangle
-  from `FRAME_POINTS`. The figure height is derived from that rectangle,
-  so the frame never gets gutters.
+  from `FRAME_POINTS`. The figure height is derived from that rectangle
+  plus fixed title/legend margins in inches, so the frame never gets
+  gutters.
