@@ -67,7 +67,9 @@ PLACE = "Kennewick, WA"
 LAT, LON = 46.2112, -119.1372
 TZ = ZoneInfo("America/Los_Angeles")
 
-BAR_HEIGHT = 0.52
+BAR_HEIGHT = 0.66
+ROW_STEP = 1.9           # vertical distance between bars, data units
+FIG_W_IN, FIG_H_IN = 8.0, 10.0
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +177,6 @@ def draw_day_bar(ax, y, d, accent_ticks=()):
     ax.text((r + s) / 2, y, f"{fmt_duration(s - r)} of daylight", ha="center", va="center",
             fontproperties=f_med, fontsize=10.5, color=INK, zorder=5)
 
-    # Length, right of the bar end.
-    ax.text(n + 0.25, y, f"{n:.0f} hours", ha="left", va="center", fontproperties=f_bold, fontsize=15,
-            color=INK, zorder=5)
     return n, labels
 
 
@@ -186,36 +185,43 @@ def build_chart(fall_year, output_path):
     solstice = june_solstice(fall_year + 1)
     spring = nth_sunday(fall_year + 1, 3, 2)
 
-    fig = plt.figure(figsize=(12, 6.6), dpi=200)
+    # 4:5 portrait -- Instagram's tallest feed format (1080x1350 at 135
+    # dpi; saved at 200 dpi = 1600x2000, same aspect). Row headers sit above
+    # each bar so the bars get the full width.
+    fig = plt.figure(figsize=(FIG_W_IN, FIG_H_IN), dpi=200)
     fig.patch.set_facecolor(BG)
-    ax = fig.add_axes([0.215, 0.05, 0.68, 0.78])
-    ax.set_xlim(-0.1, 25.1)
-    ax.set_ylim(-0.85, 2.5)
+    ax = fig.add_axes([0.05, 0.085, 0.90, 0.725])
+    ax.set_xlim(-0.3, 25.3)
+    ax.set_ylim(-0.8, 2 * ROW_STEP + 1.08)
     ax.axis("off")
 
     # accent_ticks: hour-boundary indices whose clock label gets the accent
     # color -- the two "01"s on the fall-back day, and the "03" that comes
     # straight after "01" on the spring-forward day.
     rows = [
-        (2, fall, "Fall back", "Clocks repeat 01:00", (1, 2)),
-        (1, solstice, "Summer solstice", "Most daylight of the year", ()),
+        (2 * ROW_STEP, fall, "Fall back", "Clocks repeat 01:00", (1, 2)),
+        (ROW_STEP, solstice, "Summer solstice", "Most daylight of the year", ()),
         (0, spring, "Spring forward", "Clocks skip 02:00", (2,)),
     ]
     for y, d, head, sub, accent_ticks in rows:
         n, _ = draw_day_bar(ax, y, d, accent_ticks)
         print(f"{d}  {n:.0f} h  sunrise {clock(sun_times_utc(d)[0])}  sunset {clock(sun_times_utc(d)[1])}")
-        fig_y = ax.transData.transform((0, y))[1] / fig.bbox.height
-        fig.text(0.03, fig_y + 0.022, f"{d.strftime('%a, %b')} {d.day}, {d.year}", fontproperties=f_bold,
-                 fontsize=13, color=INK, ha="left", va="center")
-        fig.text(0.03, fig_y - 0.012, head, fontproperties=f_med, fontsize=10.5, color=ACCENT,
-                 ha="left", va="center")
-        fig.text(0.03, fig_y - 0.040, sub, fontproperties=f_reg, fontsize=9.5, color=INK_SECONDARY,
-                 ha="left", va="center")
+        # Row header above the bar: date (left) and length (right) on one
+        # line, what's special about the day underneath.
+        ax.text(0, y + 1.0, f"{d.strftime('%a, %b')} {d.day}, {d.year}", fontproperties=f_bold,
+                fontsize=14, color=INK, ha="left", va="center")
+        ax.text(25.3, y + 1.0, f"{n:.0f} hours", fontproperties=f_bold, fontsize=17, color=INK,
+                ha="right", va="center")
+        ax.text(0, y + 0.75, head, fontproperties=f_med, fontsize=11, color=ACCENT, ha="left", va="center")
+        head_w = ax.texts[-1].get_window_extent(fig.canvas.get_renderer())
+        sub_x = ax.transData.inverted().transform((head_w.x1, 0))[0]
+        ax.text(sub_x, y + 0.75, f"  •  {sub}", fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY,
+                ha="left", va="center")
 
     h = BAR_HEIGHT
     # Fall back: the repeated hour -- 01:00 PDT (elapsed 1-2) then 01:00
     # PST (elapsed 2-3). Outline both, label the pair.
-    y = 2
+    y = 2 * ROW_STEP
     ax.add_patch(Rectangle((1, y - h / 2), 2, h, facecolor="none", edgecolor=ACCENT, linewidth=2.4, zorder=6))
     ax.plot([2, 2], [y - h / 2, y + h / 2], color=ACCENT, linewidth=1.2, linestyle=(0, (2, 2)), zorder=6)
     ax.text(1.5, y, "01", ha="center", va="center", fontproperties=f_bold, fontsize=10, color="white", zorder=7)
@@ -231,18 +237,18 @@ def build_chart(fall_year, output_path):
             ha="center", va="top", zorder=7)
 
     # Title block
-    fig.text(0.03, 0.955, "Tomorrow Is the Longest Day of the Year", fontproperties=f_bold, fontsize=22,
-             color=INK, ha="left", va="top")
-    fig.text(0.03, 0.895,
+    fig.text(0.05, 0.962, "Tomorrow Is the Longest\nDay of the Year", fontproperties=f_bold, fontsize=25,
+             color=INK, ha="left", va="top", linespacing=0.98)
+    fig.text(0.05, 0.868,
              f"{fall.strftime('%A')} has 25 hours as clocks fall back  •  {PLACE}",
-             fontproperties=f_reg, fontsize=12, color=INK_SECONDARY, ha="left", va="top")
+             fontproperties=f_reg, fontsize=12.5, color=INK_SECONDARY, ha="left", va="top")
 
     # Logo, bottom-right (matching ../tri-cities-temp-chart/)
     if LOGO_FILE.exists():
         img = plt.imread(LOGO_FILE)
-        w_fig = 0.07
-        h_fig = w_fig * 12 / 6.6 * img.shape[0] / img.shape[1]
-        lax = fig.add_axes([0.97 - w_fig, 0.025, w_fig, h_fig], zorder=20)
+        w_fig = 0.095
+        h_fig = w_fig * FIG_W_IN / FIG_H_IN * img.shape[0] / img.shape[1]
+        lax = fig.add_axes([0.95 - w_fig, 0.025, w_fig, h_fig], zorder=20)
         lax.imshow(img)
         lax.axis("off")
     else:

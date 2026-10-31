@@ -1,6 +1,7 @@
 # "Longest Day of the Year" DST Chart (Kennewick, WA)
 
-A styled chart for the fall-back weekend. It shows three days in
+A styled 4:5 portrait chart (1600×2000, Instagram feed size) for the
+fall-back weekend. It shows three days in
 Kennewick as horizontal bars, each drawn to its true length and shaded
 night/day by actual sunrise and sunset:
 
