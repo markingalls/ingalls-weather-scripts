@@ -47,6 +47,9 @@ workflows. Each project lives in its own directory with its own README.
 - [`pnw-sunrise-map/`](pnw-sunrise-map/) — map of local sunrise clock time
   across the Pacific Northwest and southern B.C./Alberta for a given date
   (defaults to Nov 1, 2026, when B.C. and Alberta don't fall back).
+- [`kennewick-longest-day-chart/`](kennewick-longest-day-chart/) — chart
+  comparing the 25-hour fall-back day, the 24-hour summer solstice, and the
+  23-hour spring-forward day in Kennewick, with sunrise/sunset shading.
 - [`tri-cities-7day-forecast/`](tri-cities-7day-forecast/) — generates a
   TV-style 7-day forecast graphic for the Tri-Cities: day-of-week, high/low
   temps, and a daytime-condition icon per day, from the NWS forecast.

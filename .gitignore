@@ -110,3 +110,4 @@ tpw-wm6-ensemble-map/output/*.png
 # rendered PNGs are outputs, not source.
 north-america-time-zones/output/*.png
 pnw-sunrise-map/output/*.png
+kennewick-longest-day-chart/output/*.png
