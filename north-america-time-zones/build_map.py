@@ -162,7 +162,7 @@ FIG_WIDTH_IN = 10.0
 AXES_LEFT, AXES_WIDTH = 0.03, 0.94
 # Title block above / legend below the map, in inches (not figure
 # fractions) so they stay snug whatever height the frame works out to.
-TOP_MARGIN_IN, BOTTOM_MARGIN_IN = 1.12, 1.75
+TOP_MARGIN_IN, BOTTOM_MARGIN_IN = 1.12, 1.6
 MAP_FRAME_INSET_PX = 22
 
 CITIES = [
@@ -398,7 +398,7 @@ def build_map(output_path):
     # ---- Legend: one swatch per offset, with its clock time at the
     # reference moment (only offsets actually visible in the frame), plus
     # the hatch key ----
-    lax = fig.add_axes([0.03, 0.3 / fig_h_in, 0.94, (BOTTOM_MARGIN_IN - 0.45) / fig_h_in])
+    lax = fig.add_axes([0.03, 0.15 / fig_h_in, 0.94, (BOTTOM_MARGIN_IN - 0.3) / fig_h_in])
     lax.set_xlim(0, 1)
     lax.set_ylim(0, 1)
     lax.axis("off")
@@ -433,8 +433,6 @@ def build_map(output_path):
     fig.text(0.03, top - 0.045 * 11.0 / fig_h_in,
              f"2026–27  •  Clock times when it's {REFERENCE_LABEL}",
              fontsize=11, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
-    fig.text(0.5, 0.006, "IANA tz database 2026e / timezone-boundary-builder / provincial announcements — Ingalls Weather",
-             fontsize=8, fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=FIG_DPI)
