@@ -51,8 +51,10 @@ days out, so render within ~3 days of the target date.
   `WB_API_KEY` is set and MetaMesh covers the station; otherwise NWS's
   own hourly temperature. The attribution line reads `NWS/ECMWF/WM-6` only
   when all three cards came from MetaMesh.
-- **Feels like** — NWS gridpoints `apparentTemperature` (wind chill/heat
-  index), since that's what decides whether a coat goes over the costume.
+- **Feels like** — from the same source as the temperature: MetaMesh's
+  `apparent_temperature` alongside a MetaMesh temp, otherwise NWS gridpoints
+  `apparentTemperature`. Mixing the two put "feels like" above the actual
+  temperature on a cool evening.
 - **Chance of precip** — the share of the 50 ECMWF IFS ensemble members
   (Open-Meteo) with more than 0.25 mm (~0.01") in the 2 hours centered on
   the card's time, rain vs. snow by the median member's snowfall. It is

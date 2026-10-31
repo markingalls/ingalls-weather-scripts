@@ -236,8 +236,9 @@ def grid_value_at(values, frame_time):
     return None
 
 
-def metamesh_temp_at(data, frame_time):
-    """MetaMesh temperature_2m (°C) at exactly frame_time, or None. Handles
+def metamesh_value_at(data, frame_time, key):
+    """A MetaMesh field (temperature_2m / apparent_temperature, °C) at
+    exactly frame_time, or None. Handles
     both a flat and a WM-6-style nested record list, same as the 7-day's
     metamesh_temp_series()."""
     if not data:
@@ -247,7 +248,7 @@ def metamesh_temp_at(data, frame_time):
         records = records[0]
     for rec in records:
         if datetime.fromisoformat(rec["time"].replace("Z", "+00:00")) == frame_time:
-            return rec["temperature_2m"]
+            return rec.get(key)
     return None
 
 
@@ -325,9 +326,15 @@ def build_frame(data, frame_time, sunset):
         raise SystemExit(f"NWS hourly feed doesn't cover {frame_time.isoformat()} -- re-run fetch_forecast.py.")
 
     glyph, color = glyph_for(period["icon"], period["isDaytime"])
-    mm_c = metamesh_temp_at(data.get("metamesh"), frame_time)
+    mm_c = metamesh_value_at(data.get("metamesh"), frame_time, "temperature_2m")
     temp = round(mm_c * 9 / 5 + 32) if mm_c is not None else period["temperature"]
-    feels = grid_value_at(data["apparent_temperature_f"], frame_time)
+    # feels-like from the same source as the temperature it sits under --
+    # mixing MetaMesh temps with NWS's apparentTemperature can put "feels
+    # like" above the actual temp on a breezy, cool evening, which reads as
+    # a bug rather than a forecast.
+    mm_feels_c = metamesh_value_at(data.get("metamesh"), frame_time, "apparent_temperature") if mm_c is not None else None
+    feels = (mm_feels_c * 9 / 5 + 32 if mm_feels_c is not None
+             else grid_value_at(data["apparent_temperature_f"], frame_time))
     gust = grid_value_at(data["wind_gust_mph"], frame_time)
     precip = precip_chance(data["ensemble"], frame_time)
 
