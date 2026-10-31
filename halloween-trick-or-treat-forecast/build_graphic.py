@@ -303,7 +303,7 @@ def costume_tips(frame):
     elif feels is not None:
         if feels < 32:
             tips.append("Bundle up: winter coats")
-        elif feels < 42:
+        elif feels < 40:
             tips.append("Coat over the costume")
         elif feels < 52:
             tips.append("Bring a jacket")
