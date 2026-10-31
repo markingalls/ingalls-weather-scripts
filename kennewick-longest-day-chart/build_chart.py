@@ -249,10 +249,10 @@ def build_chart(fall_year, output_path):
             ha="center", va="top", zorder=7)
 
     # Title block
-    fig.text(0.05, 0.962, "Tomorrow Is the Longest\nDay of the Year", fontproperties=f_bold, fontsize=25,
+    fig.text(0.05, 0.962, "Today Is the Longest\nDay of the Year", fontproperties=f_bold, fontsize=25,
              color=INK, ha="left", va="top", linespacing=0.98)
     fig.text(0.05, 0.868,
-             f"{fall.strftime('%A')} has 25 hours as clocks fall back  •  {PLACE}",
+             f"Clocks fall back, giving us 25 hours  •  {PLACE}",
              fontproperties=f_reg, fontsize=12.5, color=INK_SECONDARY, ha="left", va="top")
 
     # Logo, bottom-right (matching ../tri-cities-temp-chart/)
