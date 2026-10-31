@@ -1,0 +1,422 @@
+"""
+North America Time Zone Map -- Winter 2026-27
+Ingalls Weather
+
+Styled map of North America's time zones as they stand after the
+November 1, 2026 fall-back -- the first winter in which much of Western
+and Central Canada stops changing clocks:
+
+  - British Columbia: final spring-forward was March 8, 2026; stays on
+    UTC-7 ("Pacific Time") year-round. The Peace region (Dawson Creek, Fort
+    St. John, Fort Nelson) and Creston were already UTC-7 year-round.
+  - East Kootenay (RDEK, incl. Cranbrook/Fernie/Invermere) and Golden:
+    year-round Mountain Daylight Time, UTC-6 -- still matching Alberta.
+  - Alberta (incl. Lloydminster): year-round "Alberta Time", UTC-6.
+  - Northwest Territories: year-round UTC-6.
+  - Manitoba and the Central-time part of northwestern Ontario (Kenora,
+    Rainy River): year-round Central Daylight Time, UTC-5.
+  - Saskatchewan (UTC-6) and Yukon (UTC-7): unchanged, already year-round.
+  - Rest of Ontario, Quebec, Atlantic Canada, Nunavut: still fall back.
+
+Fill color = clock offset from UTC this winter. Hatching = places that
+don't change clocks at all. A dashed outline marks the area that stopped
+changing clocks in 2026. City labels give each city's clock time at the
+moment it's noon in Seattle, which is the quickest way to read the new
+oddities (Vancouver an hour ahead of Seattle; Winnipeg matching Toronto).
+
+USAGE
+-----
+    python build_map.py
+    python build_map.py --out output/custom.png
+
+REQUIRES (checked into /maps at repo root; regenerate with
+prepare_basemap.py):
+    tz_boundaries_north_america.json, na_land_50m.json, na_lakes_50m.json,
+    na_admin1_lines_50m.json, admin0_boundary_lines.json
+
+Logo is read from /assets/ingalls_weather_logo.png at repo root.
+"""
+
+import argparse
+import json
+import warnings
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import matplotlib.patheffects as pe
+from matplotlib.patches import Rectangle
+from matplotlib.transforms import offset_copy
+import numpy as np
+from PIL import Image
+from shapely.geometry import Point, shape
+from shapely.ops import unary_union
+
+import cartopy.crs as ccrs
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parent.parent
+MAPS_DIR = REPO_ROOT / "maps"
+ASSETS_DIR = REPO_ROOT / "assets"
+THIS_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = THIS_DIR / "output"
+
+TZ_FILE = MAPS_DIR / "tz_boundaries_north_america.json"
+LAND_FILE = MAPS_DIR / "na_land_50m.json"
+LAKES_FILE = MAPS_DIR / "na_lakes_50m.json"
+ADMIN1_LINES_FILE = MAPS_DIR / "na_admin1_lines_50m.json"
+ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
+LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
+
+POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
+POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+
+# ---------------------------------------------------------------------------
+# Offsets. Everything outside Canada comes from the system tz database
+# (checked at a winter and a summer instant). Canada's 2026 changes are
+# pinned explicitly here so the map is right even on a machine with tzdata
+# older than 2026e (which is where these changes landed) -- the script
+# prints a note if the local tz database disagrees with this table.
+#   tzid: (winter 2026-27 UTC offset, year-round?, stopped changing in 2026?)
+# The tzid polygons cover more than their namesake city: America/Edmonton
+# includes East Kootenay/Golden, Lloydminster, and most of NWT;
+# America/Winnipeg includes Kenora/Rainy River in northwestern Ontario.
+# ---------------------------------------------------------------------------
+CANADA_2026 = {
+    "America/Vancouver":     (-7.0, True,  True),
+    "America/Edmonton":      (-6.0, True,  True),
+    "America/Inuvik":        (-6.0, True,  True),
+    "America/Winnipeg":      (-5.0, True,  True),
+    "America/Whitehorse":    (-7.0, True,  False),
+    "America/Dawson":        (-7.0, True,  False),
+    "America/Dawson_Creek":  (-7.0, True,  False),
+    "America/Fort_Nelson":   (-7.0, True,  False),
+    "America/Creston":       (-7.0, True,  False),
+    "America/Regina":        (-6.0, True,  False),
+    "America/Swift_Current": (-6.0, True,  False),
+    "America/Atikokan":      (-5.0, True,  False),
+    "America/Toronto":       (-5.0, False, False),
+    "America/Cambridge_Bay": (-7.0, False, False),
+    "America/Rankin_Inlet":  (-6.0, False, False),
+    "America/Resolute":      (-6.0, False, False),
+    "America/Iqaluit":       (-5.0, False, False),
+    "America/Blanc-Sablon":  (-4.0, True,  False),
+    "America/Halifax":       (-4.0, False, False),
+    "America/Glace_Bay":     (-4.0, False, False),
+    "America/Moncton":       (-4.0, False, False),
+    "America/Goose_Bay":     (-4.0, False, False),
+    "America/St_Johns":      (-3.5, False, False),
+}
+
+WINTER_INSTANT = datetime(2026, 11, 15, 12, tzinfo=timezone.utc)
+SUMMER_INSTANT = datetime(2027, 7, 1, 12, tzinfo=timezone.utc)
+
+# Reference moment for the city clock labels: noon in Seattle (PST) =
+# 20:00 UTC.
+REFERENCE_UTC_HOUR = 20.0
+REFERENCE_LABEL = "noon in Seattle"
+
+# Fill color per winter offset -- soft, adjacent offsets deliberately on
+# different hues so neighbouring zones never blur together.
+OFFSET_COLORS = {
+    -10.0: "#c8b9dc",
+    -9.0:  "#a9c6e4",
+    -8.0:  "#f2c39a",
+    -7.0:  "#b4d5a4",
+    -6.0:  "#f1de8c",
+    -5.0:  "#e9a8a2",
+    -4.0:  "#9ccfca",
+    -3.5:  "#d3b1d0",
+    -3.0:  "#cfc59f",
+    -2.0:  "#b8cce0",
+    -1.0:  "#d8d3c6",
+    0.0:   "#c9c4b8",
+}
+OCEAN_COLOR = "#e6edf0"
+NEW_2026_COLOR = "#c8231e"
+
+# ---------------------------------------------------------------------------
+# Figure geometry / domain (Lambert Conformal, the standard NOAA/NWS
+# continental projection). The frame is set in *projected* coordinates
+# from the corner points below so it's a clean rectangle around North
+# America (Aleutians to Newfoundland, Panama to the Arctic islands);
+# FIG_WIDTH_IN is chosen so AXES_RECT's aspect matches that rectangle.
+# ---------------------------------------------------------------------------
+CENTER_LON = -100.0
+PROJ = ccrs.LambertConformal(central_longitude=CENTER_LON, central_latitude=45.0,
+                             standard_parallels=(33.0, 60.0))
+FRAME_POINTS = [(-168.0, 52.0), (-52.0, 47.0), (-80.0, 7.5), (-158.0, 18.5),
+                (-100.0, 76.0), (-60.0, 70.0), (-145.0, 70.0)]
+FIG_DPI = 200
+FIG_WIDTH_IN = 10.0
+AXES_LEFT, AXES_BOTTOM, AXES_WIDTH = 0.03, 0.155, 0.94
+TOP_MARGIN_FRAC = 0.125  # title block above the map
+MAP_FRAME_INSET_PX = 22
+
+CITIES = [
+    # (name, lon, lat, label side: right/left/above/below)
+    ("Anchorage", -149.90, 61.22, "right"),
+    ("Whitehorse", -135.06, 60.72, "right"),
+    ("Yellowknife", -114.37, 62.45, "right"),
+    ("Vancouver", -123.12, 49.28, "left"),
+    ("Seattle", -122.33, 47.61, "left"),
+    ("Cranbrook", -115.77, 49.51, "below"),
+    ("Calgary", -114.07, 51.04, "right"),
+    ("Regina", -104.61, 50.45, "below"),
+    ("Winnipeg", -97.14, 49.90, "above"),
+    ("Kenora", -94.49, 49.77, "below"),
+    ("Thunder Bay", -89.25, 48.38, "right"),
+    ("Toronto", -79.38, 43.65, "right"),
+    ("Montréal", -73.57, 45.50, "right"),
+    ("Halifax", -63.57, 44.65, "right"),
+    ("St. John's", -52.71, 47.56, "left"),
+    ("Iqaluit", -68.52, 63.75, "right"),
+    ("Los Angeles", -118.24, 34.05, "left"),
+    ("Phoenix", -112.07, 33.45, "right"),
+    ("Denver", -104.99, 39.74, "right"),
+    ("Chicago", -87.63, 41.88, "right"),
+    ("New York", -74.01, 40.71, "right"),
+    ("Miami", -80.19, 25.76, "right"),
+    ("Mexico City", -99.13, 19.43, "right"),
+    ("Honolulu", -157.86, 21.31, "right"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Offsets
+# ---------------------------------------------------------------------------
+def tz_offsets(tzid):
+    """(winter offset hours, year_round, new_in_2026) for a tzid."""
+    zi = ZoneInfo(tzid)
+    w = WINTER_INSTANT.astimezone(zi).utcoffset().total_seconds() / 3600
+    s = SUMMER_INSTANT.astimezone(zi).utcoffset().total_seconds() / 3600
+    if tzid in CANADA_2026:
+        pinned = CANADA_2026[tzid]
+        if (w, w == s) != pinned[:2]:
+            print(f"NOTE: local tz database disagrees for {tzid} (winter {w:+.1f}, "
+                  f"year-round={w == s}); using the pinned 2026 value {pinned[0]:+.1f}.")
+        return pinned
+    return w, w == s, False
+
+
+def fmt_offset(h):
+    sign = "−" if h < 0 else "+"
+    h = abs(h)
+    return f"UTC{sign}{int(h)}" + (":30" if h % 1 else "")
+
+
+def fmt_clock(offset):
+    local = (REFERENCE_UTC_HOUR + offset) % 24
+    hh, mm = int(local), int(round((local % 1) * 60))
+    suffix = "AM" if hh < 12 else "PM"
+    hh12 = hh % 12 or 12
+    if hh == 12 and mm == 0:
+        return "Noon"
+    return f"{hh12}:{mm:02d} {suffix}" if mm else f"{hh12} {suffix}"
+
+
+# ---------------------------------------------------------------------------
+# Basemap layers
+# ---------------------------------------------------------------------------
+def load_geoms(path):
+    with open(path) as f:
+        data = json.load(f)
+    return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
+
+
+def load_tz():
+    with open(TZ_FILE) as f:
+        data = json.load(f)
+    return [(feat["properties"]["tzid"], shape(feat["geometry"])) for feat in data["features"]]
+
+
+def frame_extent():
+    xs, ys = [], []
+    for lon, lat in FRAME_POINTS:
+        x, y = PROJ.transform_point(lon, lat, ccrs.PlateCarree())
+        xs.append(x)
+        ys.append(y)
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def build_map(output_path):
+    poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
+    poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
+    pc = ccrs.PlateCarree()
+
+    print("Loading basemap layers...")
+    land = unary_union(load_geoms(LAND_FILE))
+    lakes = unary_union(load_geoms(LAKES_FILE))
+    land_minus_lakes = land.difference(lakes)
+    admin1_lines = load_geoms(ADMIN1_LINES_FILE)
+    admin0_lines = load_geoms(ADMIN0_LINES_FILE)
+
+    print("Grouping time zones by winter 2026-27 offset...")
+    by_offset, year_round, new_2026 = {}, [], []
+    tz_info = {}
+    for tzid, geom in load_tz():
+        off, yr, new = tz_offsets(tzid)
+        tz_info[tzid] = off
+        by_offset.setdefault(off, []).append(geom)
+        if yr:
+            year_round.append(geom)
+        if new:
+            new_2026.append(geom)
+    by_offset = {off: unary_union(g).intersection(land_minus_lakes) for off, g in by_offset.items()}
+    year_round_geom = unary_union(year_round).intersection(land_minus_lakes)
+    new_2026_geom = unary_union(new_2026).intersection(land_minus_lakes)
+    # Cleans up the slivers where tz polygons and Natural Earth's coastline
+    # don't quite agree, so the dashed outline is just the region, not
+    # every offshore islet's edge.
+    new_2026_outline = new_2026_geom.buffer(0.35).buffer(-0.35).simplify(0.05)
+
+    x0, x1, y0, y1 = frame_extent()
+    axes_h_in = FIG_WIDTH_IN * AXES_WIDTH * (y1 - y0) / (x1 - x0)
+    fig_h_in = axes_h_in / (1 - AXES_BOTTOM - TOP_MARGIN_FRAC)
+    axes_rect = [AXES_LEFT, AXES_BOTTOM, AXES_WIDTH, axes_h_in / fig_h_in]
+
+    fig = plt.figure(figsize=(FIG_WIDTH_IN, fig_h_in), dpi=FIG_DPI)
+    fig.patch.set_facecolor("#f7f6f2")
+    ax = fig.add_axes(axes_rect, projection=PROJ)
+    ax.set_extent([x0, x1, y0, y1], crs=PROJ)
+    ax.patch.set_facecolor(OCEAN_COLOR)
+
+    offsets_present = sorted(by_offset)
+    for off in offsets_present:
+        ax.add_geometries([by_offset[off]], crs=pc, facecolor=OFFSET_COLORS.get(off, "#dddddd"),
+                          edgecolor="none", zorder=1)
+
+    # Year-round (no clock change) hatch. Hatch color comes from edgecolor;
+    # linewidth=0 keeps the polygon edge itself invisible.
+    plt.rcParams["hatch.linewidth"] = 0.45
+    ax.add_geometries([year_round_geom], crs=pc, facecolor="none", edgecolor=(0.2, 0.17, 0.13, 0.38),
+                      hatch="//////", linewidth=0, zorder=1.2)
+
+    ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#7d6e5c", linewidth=0.35,
+                      alpha=0.8, zorder=1.4)
+    ax.add_geometries([land_minus_lakes], crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.5,
+                      zorder=1.5)
+    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=0.8,
+                      zorder=1.6)
+    # Time zone boundaries (between offset groups) -- the edges of each
+    # offset group's land area, drawn darker than state/province lines.
+    for off in offsets_present:
+        ax.add_geometries([by_offset[off]], crs=pc, facecolor="none", edgecolor="#2b2a26",
+                          linewidth=0.9, zorder=1.8)
+
+    # 2026 outline, white halo under red dashes (dash pattern shared so the
+    # two passes stay in phase -- same treatment as dew-point-storm-map).
+    dashes = (0, (5, 3))
+    ax.add_geometries([new_2026_outline], crs=pc, facecolor="none", edgecolor="white",
+                      linewidth=3.4, linestyle=dashes, zorder=2.5)
+    ax.add_geometries([new_2026_outline], crs=pc, facecolor="none", edgecolor=NEW_2026_COLOR,
+                      linewidth=1.7, linestyle=dashes, zorder=2.6)
+
+    # Cities, labelled with their clock time at the reference moment.
+    tz_shapes = load_tz()
+    geodetic_transform = pc._as_mpl_transform(ax)
+    stroke = [pe.withStroke(linewidth=1.6, foreground=(0, 0, 0, 0.75))]
+    for name, lon_c, lat_c, side in CITIES:
+        pt = Point(lon_c, lat_c)
+        tzid = next((t for t, g in tz_shapes if g.contains(pt)), None)
+        if tzid is None:
+            print(f"NOTE: no tz polygon for {name}, skipping.")
+            continue
+        clock = fmt_clock(tz_info[tzid])
+        ax.plot(lon_c, lat_c, marker="o", markersize=4.2, color="white", zorder=100,
+                mec="black", mew=0.7, transform=pc)
+        dx_pt, dy_pt, ha, va = {"right": (5, 0, "left", "center"), "left": (-5, 0, "right", "center"),
+                                "above": (0, 5, "center", "bottom"),
+                                "below": (0, -5, "center", "top")}[side]
+        t = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=dy_pt, units="points")
+        txt = ax.text(lon_c, lat_c, f"{clock} {name}" if side == "left" else f"{name} {clock}",
+                      fontsize=7.6, fontproperties=poppins_semibold, color="white", ha=ha,
+                      va=va, zorder=101, transform=t)
+        txt.set_path_effects(stroke)
+
+    ax.spines["geo"].set_edgecolor("black")
+    ax.spines["geo"].set_linewidth(1.6)
+
+    # ---- Legend: one swatch per offset, with its clock time at the
+    # reference moment, plus the hatch and outline keys ----
+    lax = fig.add_axes([0.03, 0.02, 0.94, AXES_BOTTOM - 0.035])
+    lax.set_xlim(0, 1)
+    lax.set_ylim(0, 1)
+    lax.axis("off")
+    legend_offsets = [o for o in offsets_present if o >= -10]
+    n = len(legend_offsets)
+    sw_w = 0.94 / n
+    for i, off in enumerate(legend_offsets):
+        x = 0.03 + i * sw_w
+        lax.add_patch(Rectangle((x + 0.004, 0.56), sw_w - 0.008, 0.22,
+                                facecolor=OFFSET_COLORS.get(off, "#dddddd"), edgecolor="#8a887e",
+                                linewidth=0.6))
+        lax.text(x + sw_w / 2, 0.67, fmt_clock(off), ha="center", va="center", fontsize=8.6,
+                 fontproperties=poppins_semibold, color="#2b2a26")
+        lax.text(x + sw_w / 2, 0.47, fmt_offset(off), ha="center", va="center", fontsize=7.4,
+                 fontproperties=poppins_reg, color="#5a584f")
+    lax.text(0.5, 0.93, f"Clock time when it's {REFERENCE_LABEL}  ·  UTC offset this winter",
+             ha="center", va="center", fontsize=9, fontproperties=poppins_reg, color="#2b2a26")
+
+    # Hatch key
+    lax.add_patch(Rectangle((0.17, 0.10), 0.045, 0.17, facecolor="#f1de8c", edgecolor="#8a887e",
+                            linewidth=0.6))
+    lax.add_patch(Rectangle((0.17, 0.10), 0.045, 0.17, facecolor="none",
+                            edgecolor=(0.2, 0.17, 0.13, 0.38), hatch="//////", linewidth=0))
+    lax.text(0.222, 0.185, "No clock changes (same time year-round)", ha="left", va="center",
+             fontsize=8.6, fontproperties=poppins_reg, color="#2b2a26")
+    # Outline key
+    lax.plot([0.56, 0.61], [0.185, 0.185], color="white", linewidth=3.4, linestyle=dashes)
+    lax.plot([0.56, 0.61], [0.185, 0.185], color=NEW_2026_COLOR, linewidth=1.7, linestyle=dashes)
+    lax.text(0.618, 0.185, "Stopped changing clocks in 2026", ha="left", va="center",
+             fontsize=8.6, fontproperties=poppins_reg, color="#2b2a26")
+
+    # Title block
+    top = 1 - 0.022 * 11.0 / fig_h_in
+    fig.text(0.03, top, "North America Time Zones", fontsize=21, fontproperties=poppins_reg,
+             color="#2b2a26", ha="left", va="top")
+    fig.text(0.03, top - 0.042 * 11.0 / fig_h_in,
+             "Winter 2026–27: B.C., Alberta, Manitoba & N.W.T. stop changing clocks",
+             fontsize=12.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
+    fig.text(0.03, top - 0.072 * 11.0 / fig_h_in,
+             "After the Nov 1, 2026 fall-back  •  Cities labelled with their clock time when it's "
+             f"{REFERENCE_LABEL}",
+             fontsize=10, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
+    fig.text(0.5, 0.006, "IANA tz database 2026e / timezone-boundary-builder / provincial announcements — Ingalls Weather",
+             fontsize=8, fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=FIG_DPI)
+    plt.close(fig)
+    print(f"Saved base map to {output_path}")
+
+    # ---- Composite logo, bottom-left, snug inside the frame ----
+    if LOGO_FILE.exists():
+        base = Image.open(output_path).convert("RGB")
+        bw, bh = base.size
+        frame_left = int(axes_rect[0] * bw)
+        frame_bottom = int((1 - axes_rect[1]) * bh)
+        logo = Image.open(LOGO_FILE).convert("RGB")
+        target_w = int(bw * 0.075)
+        target_h = int(logo.height * target_w / logo.width)
+        logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
+        pos = (frame_left + MAP_FRAME_INSET_PX, frame_bottom - MAP_FRAME_INSET_PX - target_h)
+        base.paste(logo_resized, pos)
+        base.save(output_path)
+        print(f"Composited logo at {pos}")
+    else:
+        print(f"NOTE: logo not found at {LOGO_FILE}, skipping (map saved without logo).")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Build an Ingalls Weather North America time zone map.")
+    parser.add_argument("--out", type=Path, default=None,
+                        help="Output PNG path (default: output/north_america_time_zones_2026.png).")
+    args = parser.parse_args()
+    build_map(args.out or (OUTPUT_DIR / "north_america_time_zones_2026.png"))

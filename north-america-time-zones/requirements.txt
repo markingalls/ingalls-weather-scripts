@@ -1,0 +1,7 @@
+matplotlib
+cartopy
+shapely>=2.0
+Pillow
+numpy
+# only for prepare_basemap.py (regenerating ../maps/tz_boundaries_north_america.json)
+timezonefinder

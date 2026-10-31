@@ -40,6 +40,13 @@ workflows. Each project lives in its own directory with its own README.
   NOAA HRRR smoke (near-surface as AQI or raw µg/m³, or vertically
   integrated) for one or more points over a full 48-hour HRRR cycle
   (defaults to Kennewick, WA and Hermiston, OR).
+- [`north-america-time-zones/`](north-america-time-zones/) — map of
+  North America's time zones for winter 2026–27, reflecting the Canadian
+  provinces/territories that stopped changing clocks in 2026 (B.C.,
+  Alberta, Manitoba, N.W.T., parts of northwestern Ontario).
+- [`pnw-sunrise-map/`](pnw-sunrise-map/) — map of local sunrise clock time
+  across the Pacific Northwest and southern B.C./Alberta for a given date
+  (defaults to Nov 1, 2026, when B.C. and Alberta don't fall back).
 - [`tri-cities-7day-forecast/`](tri-cities-7day-forecast/) — generates a
   TV-style 7-day forecast graphic for the Tri-Cities: day-of-week, high/low
   temps, and a daytime-condition icon per day, from the NWS forecast.
