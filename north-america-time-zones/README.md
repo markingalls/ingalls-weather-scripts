@@ -1,4 +1,4 @@
-# North America Time Zone Map (Winter 2026–27)
+# North America Winter Time Zone Map (2026–27)
 
 A styled map of North America's time zones after the **November 1, 2026**
 fall-back, the first winter in which much of Western and Central Canada
