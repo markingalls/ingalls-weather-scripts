@@ -76,6 +76,7 @@ TARGET_COUNTRIES = {"United States of America", "Canada"}
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+POPPINS_BOLD_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf"
 
 DEFAULT_DATE = date_cls(2026, 11, 1)
 
@@ -124,7 +125,7 @@ CITY_LABEL_FONTSIZE = 10.5
 TZ_LINE_SNAP_DEG = 0.1
 
 CITIES = [
-    # (name, lon, lat, label side: right/left/above/below)
+    # (name, lon, lat, label side -- see LABEL_NAME_OFFSETS)
     ("100 Mile House", -121.2930, 51.6418, "right"),
     ("Bella Coola", -126.7659, 52.3728, "right"),
     ("Tofino", -125.9066, 49.1530, "left"),
@@ -135,7 +136,7 @@ CITIES = [
     ("Kelowna", -119.4960, 49.8880, "right"),
     ("Golden", -116.9631, 51.2985, "right"),
     ("Cranbrook", -115.7697, 49.5097, "right"),
-    ("Creston", -116.5135, 49.0955, "below"),
+    ("Creston", -116.5135, 49.0955, "left"),
     ("Calgary", -114.0719, 51.0447, "right"),
     ("Lethbridge", -112.8418, 49.6935, "right"),
     ("Seattle", -122.3321, 47.6062, "left"),
@@ -171,6 +172,41 @@ def build_sunrise_colormap():
     span = SR_MAX - SR_MIN
     stops = [((h - SR_MIN) / span, [c / 255 for c in rgb]) for h, rgb in SUNRISE_COLOR_TABLE]
     return LinearSegmentedColormap.from_list("ingalls_sunrise", stops, N=256)
+
+
+# City labels: name on the dot's line (vertically centered on the dot),
+# bold time centered underneath the name. Only "upper-left"/"lower-left"
+# (for city pairs too close together to share a line) move the name off
+# the dot's line.
+LABEL_NAME_OFFSETS = {
+    "right": (5, 0, "left", "center"),
+    "left": (-5, 0, "right", "center"),
+    "upper-left": (-4, None, "right", "bottom"),  # None: computed so the time clears the dot
+    "lower-left": (-4, -2, "right", "top"),
+}
+# Pulls the time line up toward the name (points); the name's bbox includes
+# descender space and the time's includes ascender space, so a small
+# positive nudge reads as tight-but-not-touching.
+TIME_LINE_NUDGE_PT = 2.5
+
+
+def draw_city_label(ax, base_transform, fig, lon, lat, name, time_str, side,
+                    name_font, time_font, fontsize, stroke, zorder=101):
+    dx, dy, ha, va = LABEL_NAME_OFFSETS[side]
+    if dy is None:
+        dy = 2 + fontsize * 1.05 - TIME_LINE_NUDGE_PT
+    t = offset_copy(base_transform, fig=fig, x=dx, y=dy, units="points")
+    name_txt = ax.text(lon, lat, name, color="white", ha=ha, va=va, zorder=zorder, transform=t)
+    name_txt.set_fontproperties(name_font)
+    name_txt.set_fontsize(fontsize)
+    name_txt.set_path_effects(stroke)
+    # Anchored to the name's own bounding box: centered under it.
+    time_txt = ax.annotate(time_str, xy=(0.5, 0), xycoords=name_txt, xytext=(0, TIME_LINE_NUDGE_PT),
+                           textcoords="offset points", ha="center", va="top", color="white",
+                           zorder=zorder, annotation_clip=False)
+    time_txt.set_fontproperties(time_font)
+    time_txt.set_fontsize(fontsize)
+    time_txt.set_path_effects(stroke)
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +321,7 @@ def frame_extent():
 def build_map(target_date, output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
+    poppins_bold = fm.FontProperties(fname=POPPINS_BOLD_PATH)
     pc = ccrs.PlateCarree()
 
     print("Loading time zones and basemap...")
@@ -375,16 +412,8 @@ def build_map(target_date, output_path):
         sr = float(sunrise_utc_hours(target_date, lon_c, lat_c)) + off
         ax.plot(lon_c, lat_c, marker="o", markersize=4.4, color="white", zorder=100,
                 mec="black", mew=0.7, transform=pc)
-        dx_pt, dy_pt, ha, va = {"right": (5, 0, "left", "center"), "left": (-5, 0, "right", "center"),
-                                "above": (0, 5, "center", "bottom"),
-                                "below": (0, -5, "center", "top")}[side]
-        t = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=dy_pt, units="points")
-        # Two lines: city name, sunrise time underneath.
-        txt = ax.text(lon_c, lat_c, f"{name}\n{fmt_clock(sr)}", color="white", ha=ha, va=va,
-                      multialignment=ha, linespacing=1.05, zorder=101, transform=t)
-        txt.set_fontproperties(poppins_semibold)
-        txt.set_fontsize(CITY_LABEL_FONTSIZE)
-        txt.set_path_effects(stroke)
+        draw_city_label(ax, geodetic_transform, fig, lon_c, lat_c, name, fmt_clock(sr), side,
+                        poppins_semibold, poppins_bold, CITY_LABEL_FONTSIZE, stroke)
         print(f"  {name:15s} {fmt_clock(sr)} (UTC{off:+.0f})")
 
     ax.spines["geo"].set_edgecolor("black")

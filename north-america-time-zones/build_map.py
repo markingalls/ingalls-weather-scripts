@@ -76,6 +76,7 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+POPPINS_BOLD_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf"
 
 # ---------------------------------------------------------------------------
 # Offsets. Everything outside Canada comes from the system tz database
@@ -165,15 +166,15 @@ TOP_MARGIN_IN, BOTTOM_MARGIN_IN = 1.3, 1.75
 MAP_FRAME_INSET_PX = 22
 
 CITIES = [
-    # (name, lon, lat, label side: right/left/above/below/upper-left/lower-left)
+    # (name, lon, lat, label side -- see LABEL_NAME_OFFSETS)
     ("Anchorage", -149.90, 61.22, "right"),
     ("Whitehorse", -135.06, 60.72, "right"),
     ("Yellowknife", -114.37, 62.45, "right"),
     ("Vancouver", -123.12, 49.28, "upper-left"),
     ("Seattle", -122.33, 47.61, "lower-left"),
     ("Calgary", -114.07, 51.04, "right"),
-    ("Regina", -104.61, 50.45, "below"),
-    ("Winnipeg", -97.14, 49.90, "above"),
+    ("Regina", -104.61, 50.45, "right"),
+    ("Winnipeg", -97.14, 49.90, "right"),
     ("Toronto", -79.38, 43.65, "right"),
     ("Halifax", -63.57, 44.65, "right"),
     ("St. John's", -52.71, 47.56, "left"),
@@ -184,6 +185,41 @@ CITIES = [
     ("New York", -74.01, 40.71, "right"),
     ("Mexico City", -99.13, 19.43, "right"),
 ]
+
+
+# City labels: name on the dot's line (vertically centered on the dot),
+# bold time centered underneath the name. Only "upper-left"/"lower-left"
+# (for city pairs too close together to share a line) move the name off
+# the dot's line.
+LABEL_NAME_OFFSETS = {
+    "right": (5, 0, "left", "center"),
+    "left": (-5, 0, "right", "center"),
+    "upper-left": (-4, None, "right", "bottom"),  # None: computed so the time clears the dot
+    "lower-left": (-4, -2, "right", "top"),
+}
+# Pulls the time line up toward the name (points); the name's bbox includes
+# descender space and the time's includes ascender space, so a small
+# positive nudge reads as tight-but-not-touching.
+TIME_LINE_NUDGE_PT = 2.5
+
+
+def draw_city_label(ax, base_transform, fig, lon, lat, name, time_str, side,
+                    name_font, time_font, fontsize, stroke, zorder=101):
+    dx, dy, ha, va = LABEL_NAME_OFFSETS[side]
+    if dy is None:
+        dy = 2 + fontsize * 1.05 - TIME_LINE_NUDGE_PT
+    t = offset_copy(base_transform, fig=fig, x=dx, y=dy, units="points")
+    name_txt = ax.text(lon, lat, name, color="white", ha=ha, va=va, zorder=zorder, transform=t)
+    name_txt.set_fontproperties(name_font)
+    name_txt.set_fontsize(fontsize)
+    name_txt.set_path_effects(stroke)
+    # Anchored to the name's own bounding box: centered under it.
+    time_txt = ax.annotate(time_str, xy=(0.5, 0), xycoords=name_txt, xytext=(0, TIME_LINE_NUDGE_PT),
+                           textcoords="offset points", ha="center", va="top", color="white",
+                           zorder=zorder, annotation_clip=False)
+    time_txt.set_fontproperties(time_font)
+    time_txt.set_fontsize(fontsize)
+    time_txt.set_path_effects(stroke)
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +297,7 @@ def frame_polygon_lonlat(x0, x1, y0, y1, n=200):
 def build_map(output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
+    poppins_bold = fm.FontProperties(fname=POPPINS_BOLD_PATH)
     pc = ccrs.PlateCarree()
 
     print("Loading basemap layers...")
@@ -345,18 +382,8 @@ def build_map(output_path):
         clock = fmt_clock(tz_info[tzid])
         ax.plot(lon_c, lat_c, marker="o", markersize=4.2, color="white", zorder=100,
                 mec="black", mew=0.7, transform=pc)
-        dx_pt, dy_pt, ha, va = {"right": (5, 0, "left", "center"), "left": (-5, 0, "right", "center"),
-                                "above": (0, 5, "center", "bottom"),
-                                "below": (0, -5, "center", "top"),
-                                "upper-left": (-4, 2, "right", "bottom"),
-                                "lower-left": (-4, -2, "right", "top")}[side]
-        t = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=dy_pt, units="points")
-        # Two lines: city name, clock time underneath.
-        txt = ax.text(lon_c, lat_c, f"{name}\n{clock}", color="white", ha=ha, va=va,
-                      multialignment=ha, linespacing=1.05, zorder=101, transform=t)
-        txt.set_fontproperties(poppins_semibold)
-        txt.set_fontsize(CITY_LABEL_FONTSIZE)
-        txt.set_path_effects(stroke)
+        draw_city_label(ax, geodetic_transform, fig, lon_c, lat_c, name, clock, side,
+                        poppins_semibold, poppins_bold, CITY_LABEL_FONTSIZE, stroke)
 
     ax.spines["geo"].set_edgecolor("black")
     ax.spines["geo"].set_linewidth(1.6)

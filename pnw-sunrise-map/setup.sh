@@ -11,7 +11,7 @@ apt-get install -y gdal-bin
 pip install -r requirements.txt
 
 mkdir -p /usr/share/fonts/truetype/google-fonts
-for f in Poppins-Regular Poppins-Medium; do
+for f in Poppins-Regular Poppins-Medium Poppins-Bold; do
   if [ ! -f "/usr/share/fonts/truetype/google-fonts/${f}.ttf" ]; then
     curl -sSL -o "/usr/share/fonts/truetype/google-fonts/${f}.ttf" \
       "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/${f}.ttf"
