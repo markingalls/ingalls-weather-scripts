@@ -45,7 +45,7 @@ workflows. Each project lives in its own directory with its own README.
   temps, and a daytime-condition icon per day, from the NWS forecast.
 - [`halloween-trick-or-treat-forecast/`](halloween-trick-or-treat-forecast/)
   — Halloween-themed spin on `tri-cities-7day-forecast/`: three cards
-  (default 4, 6, and 8 PM) for trick-or-treat night in the Tri-Cities,
+  (default 16:00, 18:00, and 20:00) for trick-or-treat night in the Tri-Cities,
   Yakima, or Hermiston, with feels-like temps, precip chance, wind, and
   what-to-wear tips.
 - [`tri-cities-temp-chart/`](tri-cities-temp-chart/) — generates a styled

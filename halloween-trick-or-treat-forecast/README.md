@@ -1,8 +1,8 @@
 # Halloween Trick-or-Treat Forecast
 
 A Halloween-themed spin on [`tri-cities-7day-forecast/`](../tri-cities-7day-forecast/):
-instead of seven day cards, three time-of-day cards (default **4 PM, 6 PM,
-and 8 PM** local) for trick-or-treat night, on a dark night-sky background
+instead of seven day cards, three time-of-day cards (default **16:00, 18:00,
+and 20:00** local) for trick-or-treat night, on a dark night-sky background
 with a full moon, bats, and jack-o'-lanterns. Same canvas size, fonts,
 logo placement, icon font, and card layout conventions as the 7-day.
 

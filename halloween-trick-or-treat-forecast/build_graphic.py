@@ -43,11 +43,8 @@ def short_tz_abbr(tzname):
 
 
 def clock_label(dt):
-    """16:00 -> '4 PM', 18:30 -> '6:30 PM' -- TV-style, since this is aimed at
-    parents planning an evening rather than at a forecast desk."""
-    hour12 = dt.hour % 12 or 12
-    suffix = "AM" if dt.hour < 12 else "PM"
-    return f"{hour12} {suffix}" if dt.minute == 0 else f"{hour12}:{dt.minute:02d} {suffix}"
+    """24h, matching the 'Updated' timestamp: 16:00, 17:51."""
+    return dt.strftime("%H:%M")
 
 
 # ---------- palette (Halloween night, in place of the 7-day's light theme) ----------
