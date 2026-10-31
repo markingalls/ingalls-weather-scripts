@@ -67,8 +67,9 @@ PLACE = "Kennewick, WA"
 LAT, LON = 46.2112, -119.1372
 TZ = ZoneInfo("America/Los_Angeles")
 
-BAR_HEIGHT = 0.74
-ROW_STEP = 1.78           # vertical distance between bars, data units
+BAR_HEIGHT = 0.86
+ROW_STEP = 1.85           # vertical distance between bars, data units
+HEADER_OFFSET = 0.70      # header baseline above bar center, data units
 FIG_W_IN, FIG_H_IN = 8.0, 10.0
 
 
@@ -191,8 +192,8 @@ def build_chart(fall_year, output_path):
     fig = plt.figure(figsize=(FIG_W_IN, FIG_H_IN), dpi=200)
     fig.patch.set_facecolor(BG)
     ax = fig.add_axes([0.05, 0.085, 0.90, 0.725])
-    ax.set_xlim(-0.3, 25.3)
-    ax.set_ylim(-0.8, 2 * ROW_STEP + 0.95)
+    ax.set_xlim(-0.3, 27.4)  # right margin holds the length labels
+    ax.set_ylim(-0.8, 2 * ROW_STEP + 0.92)
     ax.axis("off")
 
     # accent_ticks: hour-boundary indices whose clock label gets the accent
@@ -206,17 +207,22 @@ def build_chart(fall_year, output_path):
     for y, d, head, sub, accent_ticks in rows:
         n, _ = draw_day_bar(ax, y, d, accent_ticks)
         print(f"{d}  {n:.0f} h  sunrise {clock(sun_times_utc(d)[0])}  sunset {clock(sun_times_utc(d)[1])}")
-        # Row header above the bar: date (left) and length (right) on one
-        # line, what's special about the day underneath.
-        ax.text(0, y + 0.86, f"{d.strftime('%a, %b')} {d.day}, {d.year}", fontproperties=f_bold,
-                fontsize=14, color=INK, ha="left", va="center")
-        ax.text(25.3, y + 0.86, f"{n:.0f} hours", fontproperties=f_bold, fontsize=17, color=INK,
-                ha="right", va="center")
-        ax.text(0, y + 0.635, head, fontproperties=f_med, fontsize=11, color=ACCENT, ha="left", va="center")
-        head_w = ax.texts[-1].get_window_extent(fig.canvas.get_renderer())
-        sub_x = ax.transData.inverted().transform((head_w.x1, 0))[0]
-        ax.text(sub_x, y + 0.635, f"  •  {sub}", fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY,
+        # Length, right at the bar's end -- big number, "hours" under it --
+        # so the staggered 25/24/23 ends carry their own labels.
+        ax.text(n + 0.35, y + 0.11, f"{n:.0f}", fontproperties=f_bold, fontsize=30, color=INK,
                 ha="left", va="center")
+        ax.text(n + 0.38, y - 0.19, "hours", fontproperties=f_med, fontsize=11, color=INK_SECONDARY,
+                ha="left", va="center")
+        # One header line above the bar, baseline-aligned pieces laid end to
+        # end: date (bold) · what happens (accent) · detail (secondary).
+        x = 0.0
+        renderer = fig.canvas.get_renderer()
+        for txt, font, size, color in ((f"{d.strftime('%a, %b')} {d.day}, {d.year}", f_bold, 14, INK),
+                                       (f"    {head}", f_med, 12, ACCENT),
+                                       (f"  •  {sub}", f_reg, 11, INK_SECONDARY)):
+            t = ax.text(x, y + HEADER_OFFSET, txt, fontproperties=font, fontsize=size, color=color,
+                        ha="left", va="baseline")
+            x = ax.transData.inverted().transform((t.get_window_extent(renderer).x1, 0))[0]
 
     h = BAR_HEIGHT
     # Fall back: the repeated hour -- 01:00 PDT (elapsed 1-2) then 01:00
