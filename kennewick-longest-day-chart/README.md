@@ -2,8 +2,9 @@
 
 A styled 4:5 portrait chart (1600×2000, Instagram feed size) for the
 fall-back weekend. It shows three days in
-Kennewick as horizontal bars, each drawn to its true length and shaded
-night/day by actual sunrise and sunset:
+Kennewick as horizontal bars on a shared 25-hour track. Each bar is drawn
+to its true length and shaded night/day by actual sunrise and sunset. The
+hours a shorter day doesn't have show as a hatched gray stub:
 
 | Bar | Day (default) | Length |
 |---|---|---|

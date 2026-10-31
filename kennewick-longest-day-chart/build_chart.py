@@ -58,7 +58,10 @@ INK = "#2b2a26"
 INK_SECONDARY = "#5a584f"
 NIGHT_COLOR = "#2c3268"   # deep indigo -- late end of ../pnw-sunrise-map's ramp
 DAY_COLOR = "#f6cf74"     # sunrise gold -- early end of the same ramp
-ACCENT = "#c9531c"        # warm amber accent (repo's climatology-line hue)
+ACCENT = "#c9531c"
+MISSING_COLOR = "#e4e1d9"   # hours a short day doesn't have
+MISSING_HATCH = "#c3beb2"
+MISSING_EDGE = "#a8a397"        # warm amber accent (repo's climatology-line hue)
 
 # ---------------------------------------------------------------------------
 # Location
@@ -68,6 +71,7 @@ LAT, LON = 46.2112, -119.1372
 TZ = ZoneInfo("America/Los_Angeles")
 
 BAR_HEIGHT = 0.86
+TRACK_HOURS = 25          # every bar is drawn on the same 25-hour track
 ROW_STEP = 1.85           # vertical distance between bars, data units
 HEADER_OFFSET = 0.70      # header baseline above bar center, data units
 FIG_W_IN, FIG_H_IN = 8.0, 10.0
@@ -152,6 +156,13 @@ def draw_day_bar(ax, y, d, accent_ticks=()):
     r, s = elapsed_hours(d, rise), elapsed_hours(d, sset)
     h = BAR_HEIGHT
 
+    # Shared 25-hour track: whatever this day doesn't have is a hatched gray
+    # stub, so all three bars read against the same full-length frame.
+    if n < TRACK_HOURS:
+        ax.add_patch(Rectangle((n, y - h / 2), TRACK_HOURS - n, h, facecolor=MISSING_COLOR,
+                               edgecolor=MISSING_HATCH, hatch="////", linewidth=0, zorder=1.5))
+        ax.add_patch(Rectangle((n, y - h / 2), TRACK_HOURS - n, h, facecolor="none",
+                               edgecolor=MISSING_EDGE, linewidth=1.0, zorder=1.6))
     ax.add_patch(Rectangle((0, y - h / 2), r, h, facecolor=NIGHT_COLOR, edgecolor="none", zorder=2))
     ax.add_patch(Rectangle((r, y - h / 2), s - r, h, facecolor=DAY_COLOR, edgecolor="none", zorder=2))
     ax.add_patch(Rectangle((s, y - h / 2), n - s, h, facecolor=NIGHT_COLOR, edgecolor="none", zorder=2))
@@ -192,7 +203,7 @@ def build_chart(fall_year, output_path):
     fig = plt.figure(figsize=(FIG_W_IN, FIG_H_IN), dpi=200)
     fig.patch.set_facecolor(BG)
     ax = fig.add_axes([0.05, 0.085, 0.90, 0.725])
-    ax.set_xlim(-0.3, 27.4)  # right margin holds the length labels
+    ax.set_xlim(-0.3, TRACK_HOURS + 2.4)  # right margin holds the length labels
     ax.set_ylim(-0.8, 2 * ROW_STEP + 0.92)
     ax.axis("off")
 
@@ -207,11 +218,12 @@ def build_chart(fall_year, output_path):
     for y, d, head, sub, accent_ticks in rows:
         n, _ = draw_day_bar(ax, y, d, accent_ticks)
         print(f"{d}  {n:.0f} h  sunrise {clock(sun_times_utc(d)[0])}  sunset {clock(sun_times_utc(d)[1])}")
-        # Length, right at the bar's end -- big number, "hours" under it --
-        # so the staggered 25/24/23 ends carry their own labels.
-        ax.text(n + 0.35, y + 0.11, f"{n:.0f}", fontproperties=f_bold, fontsize=30, color=INK,
+        # Length, in a column right of the shared track -- big number,
+        # "hours" under it.
+        lx = TRACK_HOURS + 0.35
+        ax.text(lx, y + 0.11, f"{n:.0f}", fontproperties=f_bold, fontsize=30, color=INK,
                 ha="left", va="center")
-        ax.text(n + 0.38, y - 0.19, "hours", fontproperties=f_med, fontsize=11, color=INK_SECONDARY,
+        ax.text(lx + 0.03, y - 0.19, "hours", fontproperties=f_med, fontsize=11, color=INK_SECONDARY,
                 ha="left", va="center")
         # One header line above the bar, baseline-aligned pieces laid end to
         # end: date (bold) · what happens (accent) · detail (secondary).
