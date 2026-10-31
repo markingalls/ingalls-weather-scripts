@@ -203,7 +203,7 @@ def build_chart(fall_year, output_path):
     fig = plt.figure(figsize=(FIG_W_IN, FIG_H_IN), dpi=200)
     fig.patch.set_facecolor(BG)
     ax = fig.add_axes([0.05, 0.085, 0.90, 0.725])
-    ax.set_xlim(-0.3, TRACK_HOURS + 2.4)  # right margin holds the length labels
+    ax.set_xlim(-0.3, TRACK_HOURS + 0.3)
     ax.set_ylim(-0.8, 2 * ROW_STEP + 0.92)
     ax.axis("off")
 
@@ -218,19 +218,13 @@ def build_chart(fall_year, output_path):
     for y, d, head, sub, accent_ticks in rows:
         n, _ = draw_day_bar(ax, y, d, accent_ticks)
         print(f"{d}  {n:.0f} h  sunrise {clock(sun_times_utc(d)[0])}  sunset {clock(sun_times_utc(d)[1])}")
-        # Length, in a column right of the shared track -- big number,
-        # "hours" under it.
-        lx = TRACK_HOURS + 0.35
-        ax.text(lx, y + 0.11, f"{n:.0f}", fontproperties=f_bold, fontsize=30, color=INK,
-                ha="left", va="center")
-        ax.text(lx + 0.03, y - 0.19, "hours", fontproperties=f_med, fontsize=11, color=INK_SECONDARY,
-                ha="left", va="center")
         # One header line above the bar, baseline-aligned pieces laid end to
-        # end: date (bold) · what happens (accent) · detail (secondary).
+        # end: length (bold, leads) : date · what happens (accent) · detail.
         x = 0.0
         renderer = fig.canvas.get_renderer()
-        for txt, font, size, color in ((f"{d.strftime('%a, %b')} {d.day}, {d.year}", f_bold, 14, INK),
-                                       (f"    {head}", f_med, 12, ACCENT),
+        for txt, font, size, color in ((f"{n:.0f} hours:", f_bold, 17, INK),
+                                       (f" {d.strftime('%a, %b')} {d.day}, {d.year}", f_med, 13, INK),
+                                       (f"   {head}", f_med, 12, ACCENT),
                                        (f"  •  {sub}", f_reg, 11, INK_SECONDARY)):
             t = ax.text(x, y + HEADER_OFFSET, txt, fontproperties=font, fontsize=size, color=color,
                         ha="left", va="baseline")
