@@ -49,7 +49,7 @@ days out, so render within ~3 days of the target date.
   the 7-day's `CLOUDYday`, which reads wrong next to "Cloudy" at night.
 - **Temperature** — MetaMesh `temperature_2m` at that exact hour when
   `WB_API_KEY` is set and MetaMesh covers the station; otherwise NWS's
-  own hourly temperature. The attribution line reads `NWS/ECMWF/WM-6` only
+  own hourly temperature. The attribution line reads `NWS/ECMWF/MetaMesh` only
   when all three cards came from MetaMesh.
 - **Feels like** — from the same source as the temperature: MetaMesh's
   `apparent_temperature` alongside a MetaMesh temp, otherwise NWS gridpoints

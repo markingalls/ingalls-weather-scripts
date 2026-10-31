@@ -570,8 +570,8 @@ def main():
     # ---------- attribution + pumpkins ----------
     draw_jack_o_lantern(ax, LEFT + 0.035, 0.068, 0.062, aspect)
     draw_jack_o_lantern(ax, RIGHT - 0.035, 0.068, 0.062, aspect)
-    temp_src = "WM-6" if all(f["temp_source"] == "metamesh" for f in frames) else "NWS"
-    sources = "NWS/ECMWF" if temp_src == "NWS" else "NWS/ECMWF/WM-6"
+    uses_metamesh = all(f["temp_source"] == "metamesh" for f in frames)
+    sources = "NWS/ECMWF/MetaMesh" if uses_metamesh else "NWS/ECMWF"
     fig.text((LEFT + RIGHT) / 2, 0.06, f"{sources} • Ingalls Weather • Happy Halloween!",
               fontproperties=f_reg, fontsize=9.5, color=INK_SECONDARY, ha="center")
 
