@@ -92,6 +92,7 @@ OUTPUT_DIR = THIS_DIR / "output"
 
 LAND_FILE = MAPS_DIR / "land_slim.json"
 STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
+ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
@@ -241,8 +242,34 @@ OUTLINE_WIDTH = 1.8
 plt.rcParams["hatch.linewidth"] = 1.0
 
 # Layer z-order bases (each hazard's categories stack a little above its
-# base, Slight lowest). Basemap sits at 1-2.5, cities at 10+.
+# base, Slight lowest). Land sits at 1, borders at 7-7.5 (above every hazard
+# layer so state lines stay readable through the fills), cities at 10+.
 LAYER_ZORDER = {"wind": 3, "prcp": 4, "snow": 5}
+
+# Per-category z-order overrides. The wind Moderate/High hatch sits above
+# the rain fills (but below snow): drawn under a 70%-opaque rain fill it
+# was almost invisible, and hatch lines barely hide what's beneath them.
+# Wind Slight is an outline, so it stays at the wind base, under the rain.
+CATEGORY_ZORDER = {("wind", "Moderate"): 4.6, ("wind", "High"): 4.7}
+
+# ---------------------------------------------------------------------------
+# Borders -- the same approach as ../western-us-noaa-outlooks/build_map.py
+# (see the long comments there). The perspective projection is why: drawing
+# state/province borders by outlining admin-1 polygons left long straight
+# runs (the 49th parallel east of the Rockies) as 2-point chords that
+# visibly diverged from the curved country line, reading as a doubled
+# border. Borders now come from the dedicated Natural Earth line datasets,
+# re-densified so no straight run is longer than BORDER_DENSIFY_SEGMENT_DEG.
+# State lines duplicating the US/Canada line get trimmed within
+# STATE_COUNTRY_DEDUP_BUFFER_DEG of it, and coastal states' 3-nm offshore
+# boundaries are dropped (anything more than OFFSHORE_LINE_DISTANCE_DEG
+# from land).
+# ---------------------------------------------------------------------------
+GEOM_SIMPLIFY_TOLERANCE_DEG = 0.02
+BORDER_DENSIFY_SEGMENT_DEG = 0.5
+COORD_SNAP_GRID_DEG = 0.001
+STATE_COUNTRY_DEDUP_BUFFER_DEG = 0.08
+OFFSHORE_LINE_DISTANCE_DEG = 0.02
 
 
 # ---------------------------------------------------------------------------
@@ -391,21 +418,42 @@ def fetch_kmls(data_dir):
 def load_land():
     with open(LAND_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
+    return [shapely.set_precision(shape(feat["geometry"]), grid_size=COORD_SNAP_GRID_DEG)
+                    .simplify(GEOM_SIMPLIFY_TOLERANCE_DEG, preserve_topology=True)
+                    .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+            for feat in data["features"] if feat.get("geometry")]
 
 
-def load_states():
+def load_lakes():
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]
-            if "Lake" not in feat["properties"].get("featurecla", "")
-            and feat["properties"].get("admin") in TARGET_COUNTRIES]
+    return [shapely.set_precision(shape(feat["geometry"]), grid_size=COORD_SNAP_GRID_DEG)
+                    .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+            for feat in data["features"] if "Lake" in feat["properties"].get("featurecla", "")]
 
 
-def load_boundary_lines(path):
+def load_boundary_lines(path, keep):
     with open(path) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]]
+    return [shape(feat["geometry"]).segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+            for feat in data["features"] if keep(feat["properties"])]
+
+
+def load_country_lines():
+    return load_boundary_lines(
+        ADMIN0_LINES_FILE,
+        lambda props: props.get("adm0_left") in TARGET_COUNTRIES and props.get("adm0_right") in TARGET_COUNTRIES,
+    )
+
+
+def load_state_lines(country_lines):
+    lines = load_boundary_lines(ADMIN1_LINES_FILE, lambda props: props.get("adm0_name") in TARGET_COUNTRIES)
+    country_buffer = unary_union(country_lines).buffer(STATE_COUNTRY_DEDUP_BUFFER_DEG)
+    trimmed = [g for g in (line.difference(country_buffer) for line in lines) if not g.is_empty]
+    with open(LAND_FILE) as f:
+        land_data = json.load(f)
+    land_union = unary_union([shape(feat["geometry"]) for feat in land_data["features"] if feat.get("geometry")])
+    return [g for g in trimmed if g.distance(land_union) <= OFFSHORE_LINE_DISTANCE_DEG]
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +482,7 @@ def draw_hazard(ax, pc, hz, areas, border_buffer):
             geom = geom.difference(unary_union(higher))
         if geom.is_empty:
             continue
-        z = base_z + 0.1 * i
+        z = CATEGORY_ZORDER.get((hz["key"], risk), base_z + 0.1 * i)
         if sty["mode"] == "fill":
             ax.add_geometries([geom], crs=pc, facecolor=sty["color"], edgecolor=sty["color"],
                                linewidth=HAZARD_EDGE_WIDTH, alpha=sty["alpha"], zorder=z)
@@ -481,8 +529,9 @@ def build_map(texts, output_path):
 
     print("Loading basemap layers...")
     land_geoms = load_land()
-    state_geoms = load_states()
-    admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
+    lake_geoms = load_lakes()
+    country_lines = load_country_lines()
+    state_lines = load_state_lines(country_lines)
 
     pc = ccrs.PlateCarree()
     proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
@@ -495,10 +544,11 @@ def build_map(texts, output_path):
     ax.patch.set_facecolor("#bfe1ef")  # pastel ocean, as in wildcad-fires-map
 
     ax.add_geometries(land_geoms, crs=pc, facecolor="#e3e1da", edgecolor="#4a6b7a", linewidth=0.8, zorder=1)
-    ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#8a8578", linewidth=0.8, zorder=2)
-    ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
+    ax.add_geometries(lake_geoms, crs=pc, facecolor="#bfe1ef", edgecolor="#4a6b7a", linewidth=0.5, zorder=1.2)
+    ax.add_geometries(state_lines, crs=pc, facecolor="none", edgecolor="#6f6a5e", linewidth=0.8, zorder=7)
+    ax.add_geometries(country_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=7.5)
 
-    border_buffer = unary_union(admin0_lines).buffer(BORDER_TRIM_BUFFER_DEG)
+    border_buffer = unary_union(country_lines).buffer(BORDER_TRIM_BUFFER_DEG)
     # Bottom layer first, so the top layer (snow) draws last.
     for hz in reversed(HAZARDS):
         draw_hazard(ax, pc, hz, areas_by_hazard[hz["key"]], border_buffer)
