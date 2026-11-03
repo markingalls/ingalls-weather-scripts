@@ -2,8 +2,8 @@
 Pacific Northwest CPC Day 8-14 Hazards Map -- map builder
 Ingalls Weather
 
-Same domain as ../wildcad-fires-map/ and ../dew-point-storm-map/ (Prince
-George BC to Winnemucca NV, Bella Coola BC to Yellowstone WY), plotting
+Covers WA/OR/ID/western MT plus northern CA/NV/UT and WY, with a thin
+strip of southern BC/Alberta for context (see "Map domain" below), plotting
 three of the NWS Climate Prediction Center's Day 8-14 probabilistic hazard
 outlooks on one map, layered (z-order, top to bottom) as:
 
@@ -13,7 +13,8 @@ outlooks on one map, layered (z-order, top to bottom) as:
   Bottom  High Winds           Slight Risk: outline only
                                Moderate Risk: hatched
 
-Fills are translucent so a lower layer stays readable underneath a higher
+Colors are CPC's own, read from each KML's styles (see HAZARDS). Fills are
+translucent so a lower layer stays readable underneath a higher
 one (e.g. a wind hatch under a rain fill), and the two hatched layers lean
 opposite directions (snow "\\\\", wind "//") so they're still tellable
 apart where they overlap.
@@ -100,33 +101,58 @@ POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
 # ---------------------------------------------------------------------------
-# Figure geometry / map domain -- same LON/LAT domain, figure size, and
-# axes box as ../wildcad-fires-map/build_map.py, so the PNW products read
-# as a matched set: three compact legend rows below the frame, title block
-# above it.
+# Map domain -- NOT the BC-heavy domain ../wildcad-fires-map/ uses. CPC's
+# hazards outlook is US-only, so this one only keeps a strip of southern
+# BC/Alberta for context above the 49th parallel, and reaches east into
+# Wyoming/eastern Montana so a hazard area spanning the interior West (e.g.
+# a Slight Risk of High Winds whose eastern edge runs down the Front
+# Range/Bighorns) shows its full in-region outline instead of running off
+# the frame. Projection is the same NearsidePerspective look as
+# ../western-us-noaa-outlooks/, centered on the domain.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.4, 8.5
+LON_MIN, LON_MAX = -126.0, -103.5
+LAT_MIN, LAT_MAX = 39.5, 50.0
+CENTER_LON, CENTER_LAT = -114.75, 44.75
+
+# ---------------------------------------------------------------------------
+# Figure geometry, in inches, so the title block and legend rows keep a
+# fixed size whatever the map's height. MAP_ASPECT is the projected
+# extent's width/height -- recompute if the domain above changes:
+#   ax.set_extent(...); x0, x1, y0, y1 = ax.get_extent(); (x1-x0)/(y1-y0)
+# (cartopy otherwise letterboxes the frame inside the axes box).
+# ---------------------------------------------------------------------------
 FIG_DPI = 200
-AXES_RECT = [0.03, 0.149, 0.94, 0.716]
+FIG_WIDTH_IN = 10.0
+SIDE_MARGIN_FRAC = 0.03
+MAP_ASPECT = 1.658
+TOP_BLOCK_IN = 1.15      # title + subtitle + valid line, above the frame
+BOTTOM_BLOCK_IN = 1.27   # three legend rows + attribution, below the frame
+MAP_WIDTH_IN = FIG_WIDTH_IN * (1 - 2 * SIDE_MARGIN_FRAC)
+MAP_HEIGHT_IN = MAP_WIDTH_IN / MAP_ASPECT
+FIG_HEIGHT_IN = TOP_BLOCK_IN + MAP_HEIGHT_IN + BOTTOM_BLOCK_IN
+AXES_RECT = [SIDE_MARGIN_FRAC, BOTTOM_BLOCK_IN / FIG_HEIGHT_IN,
+             1 - 2 * SIDE_MARGIN_FRAC, MAP_HEIGHT_IN / FIG_HEIGHT_IN]
 MAP_FRAME_INSET_PX = 22
 
-LON_MIN, LON_MAX = -128.2, -108.8
-LAT_MIN, LAT_MAX = 39.7, 55.2
+
+def from_top(inches):
+    return 1 - inches / FIG_HEIGHT_IN
+
+
+def from_bottom(inches):
+    return inches / FIG_HEIGHT_IN
+
 
 # CPC's outlooks are nationwide; anything entirely outside this (slightly
 # padded) box is dropped so it doesn't pad out the legend.
 MAP_BBOX = box(LON_MIN - 1, LAT_MIN - 1, LON_MAX + 1, LAT_MAX + 1)
 
 CITIES = [
-    ("Bella Coola", -126.7659, 52.3728, "right"),
-    ("Wells", -121.5589, 53.1058, "right"),
     ("Vancouver", -123.1207, 49.2827, "left"),
     ("Victoria", -123.3656, 48.4284, "left"),
     ("Kelowna", -119.4960, 49.8880, "right"),
-    ("Kamloops", -120.3273, 50.6745, "right"),
-    ("Prince George", -122.7497, 53.9171, "right"),
     ("Cranbrook", -115.7697, 49.5097, "right"),
-    ("Williams Lake", -122.1417, 52.1417, "left"),
+    ("Lethbridge", -112.8418, 49.6935, "right"),
     ("Seattle", -122.3321, 47.6062, "left"),
     ("Spokane", -117.4260, 47.6588, "left"),
     ("Tri-Cities", -119.2781, 46.2565, "right"),
@@ -135,19 +161,20 @@ CITIES = [
     ("Eugene", -123.0868, 44.0521, "left"),
     ("Medford", -122.8756, 42.3265, "left"),
     ("Redding", -122.3917, 40.5865, "left"),
+    ("Reno", -119.8138, 39.5296, "right"),
     ("Burns", -119.0541, 43.5866, "right"),
     ("Boise", -116.2023, 43.6150, "left"),
     ("Twin Falls", -114.4609, 42.5629, "left"),
     ("Idaho Falls", -112.0362, 43.4917, "right"),
     ("Winnemucca", -117.7357, 40.9730, "left"),
     ("Salt Lake City", -111.8910, 40.7608, "right"),
-    ("Bozeman", -111.0429, 45.6770, "right"),
     ("Missoula", -113.9940, 46.8721, "left"),
     ("Great Falls", -111.3008, 47.5053, "right"),
-    ("Calgary", -114.0719, 51.0447, "right"),
-    ("Red Deer", -113.8112, 52.2681, "right"),
-    ("Edmonton", -113.4938, 53.5461, "right"),
-    ("Lethbridge", -112.8418, 49.6935, "right"),
+    ("Bozeman", -111.0429, 45.6770, "right"),
+    ("Billings", -108.5007, 45.7833, "right"),
+    ("Casper", -106.3131, 42.8666, "right"),
+    ("Cheyenne", -104.8202, 41.1400, "left"),
+    ("Rapid City", -103.2310, 44.0805, "left"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -156,8 +183,14 @@ CITIES = [
 #   fill     translucent solid fill + same-color edge
 #   hatch    hatch lines + same-color edge, no fill
 #   outline  edge only
-# Colors follow CPC's own convention per hazard (blues/purple for snow,
-# greens for precipitation, browns for wind), deepening with risk level.
+# Colors are CPC's own: each KML's <Style> per category (PolyStyle color,
+# KML's aabbggrr hex) is read at runtime by kml_category_colors() and
+# overrides the color below, so the map tracks any palette change CPC
+# makes. The values here are those same CPC colors as of Nov 2026, used as
+# a fallback if a style can't be read (and for the wind High Risk, which
+# CPC hasn't issued recently enough to have a style to copy -- that one is
+# just a darker shade of CPC's wind Moderate brown). Fill alpha matches
+# CPC's 0xb2 (70%).
 # ---------------------------------------------------------------------------
 CPC_THREATS_BASE = "https://www.cpc.ncep.noaa.gov/products/predictions/threats"
 
@@ -168,9 +201,9 @@ HAZARDS = [
         url=f"{CPC_THREATS_BASE}/snow_prob_D8_14.kml",
         name_suffix="Risk of Heavy Snow",
         categories={
-            "Slight":   dict(mode="hatch", color="#3d6fd1", hatch="\\\\\\\\", alpha=1.0),
-            "Moderate": dict(mode="fill",  color="#3d6fd1", alpha=0.72),
-            "High":     dict(mode="fill",  color="#6a3aa6", alpha=0.78),
+            "Slight":   dict(mode="hatch", color="#a121f0", hatch="\\\\\\\\", alpha=1.0),
+            "Moderate": dict(mode="fill",  color="#ff65b6", alpha=0.70),
+            "High":     dict(mode="fill",  color="#c71585", alpha=0.70),
         },
     ),
     dict(
@@ -179,9 +212,9 @@ HAZARDS = [
         url=f"{CPC_THREATS_BASE}/prcp_prob_D8_14.kml",
         name_suffix="Risk of Heavy Precipitation",
         categories={
-            "Slight":   dict(mode="fill", color="#98d18f", alpha=0.55),
-            "Moderate": dict(mode="fill", color="#3f9a4e", alpha=0.58),
-            "High":     dict(mode="fill", color="#1c5e33", alpha=0.62),
+            "Slight":   dict(mode="fill", color="#d1ff73", alpha=0.70),
+            "Moderate": dict(mode="fill", color="#98e600", alpha=0.70),
+            "High":     dict(mode="fill", color="#4c7300", alpha=0.70),
         },
     ),
     dict(
@@ -190,11 +223,9 @@ HAZARDS = [
         url=f"{CPC_THREATS_BASE}/wind_prob_D8_14.kml",
         name_suffix="Risk of High Winds",
         categories={
-            "Slight":   dict(mode="outline", color="#8b5a2b", alpha=1.0),
-            "Moderate": dict(mode="hatch",   color="#8b5a2b", hatch="////", alpha=1.0),
-            # CPC hasn't issued a High Risk of High Winds in recent memory,
-            # but style it in case -- denser hatch, darker brown.
-            "High":     dict(mode="hatch",   color="#5a3412", hatch="//////", alpha=1.0),
+            "Slight":   dict(mode="outline", color="#cdaa66", alpha=1.0),
+            "Moderate": dict(mode="hatch",   color="#732600", hatch="////", alpha=1.0),
+            "High":     dict(mode="hatch",   color="#4a1800", hatch="//////", alpha=1.0),
         },
     ),
 ]
@@ -244,6 +275,27 @@ def _parse_polygons(placemark_xml):
             poly = shapely.make_valid(poly)
         polys.append(poly)
     return polys
+
+
+def kml_category_colors(text, hazard):
+    """{risk: "#rrggbb"} from the KML's own <Style> blocks, via each
+    category's Placemark <styleUrl>. KML colors are aabbggrr hex."""
+    styles = {}
+    for sid, body in re.findall(r'<Style id="([^"]+)">(.*?)</Style>', text, re.S):
+        m = re.search(r"<PolyStyle>.*?<color>([0-9a-fA-F]{8})</color>", body, re.S)
+        if m:
+            c = m.group(1)
+            styles[sid] = f"#{c[6:8]}{c[4:6]}{c[2:4]}".lower()
+    colors = {}
+    for pm in re.findall(r"<Placemark[ >].*?</Placemark>", text, re.S):
+        name = re.search(r"<name>(.*?)</name>", pm, re.S)
+        url = re.search(r"<styleUrl>#?(.*?)</styleUrl>", pm, re.S)
+        if not (name and url) or not name.group(1).strip().endswith(hazard["name_suffix"]):
+            continue
+        risk = name.group(1).strip().split(" ", 1)[0]
+        if risk in hazard["categories"] and url.group(1).strip() in styles:
+            colors[risk] = styles[url.group(1).strip()]
+    return colors
 
 
 def parse_hazard_kml(text, hazard):
@@ -412,6 +464,11 @@ def build_map(texts, output_path):
     areas_by_hazard = {}
     all_starts, all_ends = [], []
     for hz in HAZARDS:
+        for risk, color in kml_category_colors(texts[hz["key"]], hz).items():
+            if color != hz["categories"][risk]["color"]:
+                print(f"NOTE: CPC {hz['title']} {risk} color is now {color} "
+                      f"(was {hz['categories'][risk]['color']}) -- using CPC's.")
+            hz["categories"][risk]["color"] = color
         areas_by_hazard[hz["key"]] = parse_hazard_kml(texts[hz["key"]], hz)
         s, e = all_placemark_dates(texts[hz["key"]])
         all_starts += s
@@ -428,10 +485,12 @@ def build_map(texts, output_path):
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
     pc = ccrs.PlateCarree()
+    proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON, central_latitude=CENTER_LAT,
+                                     satellite_height=4_000_000)
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
 
-    ax = fig.add_axes(AXES_RECT, projection=pc)
+    ax = fig.add_axes(AXES_RECT, projection=proj)
     ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
     ax.patch.set_facecolor("#bfe1ef")  # pastel ocean, as in wildcad-fires-map
 
@@ -446,8 +505,15 @@ def build_map(texts, output_path):
 
     geodetic_transform = pc._as_mpl_transform(ax)
     city_stroke = [pe.withStroke(linewidth=1.5, foreground=(1, 1, 1, 0.85))]
+    # The perspective projection's frame is a rectangle in projected space,
+    # not in lon/lat, so a city inside LON/LAT_MIN/MAX can still sit right
+    # at (or past) the frame's curved-in corners -- test in projected space,
+    # with a margin so a label doesn't spill over the frame edge.
+    x0, x1, y0, y1 = ax.get_extent()
+    margin = 0.03 * (y1 - y0)
     for name, lon_c, lat_c, pos in CITIES:
-        if not (LON_MIN <= lon_c <= LON_MAX and LAT_MIN <= lat_c <= LAT_MAX):
+        px, py = proj.transform_point(lon_c, lat_c, pc)
+        if not (x0 + margin <= px <= x1 - margin and y0 + margin <= py <= y1 - margin):
             continue
         ax.plot(lon_c, lat_c, marker="o", markersize=3.6, color="#3a3835", zorder=10,
                 mec="white", mew=0.6, transform=pc)
@@ -470,8 +536,8 @@ def build_map(texts, output_path):
     fig_w_px = FIG_WIDTH_IN * FIG_DPI
     frame_left = frame_px.x0 / fig_w_px
     label_x = frame_left + 0.005
-    swatch_x = frame_left + 0.135
-    row_ys = [0.124, 0.092, 0.060]
+    swatch_x = frame_left + 0.115
+    row_ys = [from_bottom(1.05), from_bottom(0.78), from_bottom(0.51)]
     for hz, y in zip(HAZARDS, row_ys):
         fig.text(label_x, y, hz["title"], fontsize=9.5, fontproperties=poppins_semibold,
                  color="#2b2a26", ha="left", va="center")
@@ -492,14 +558,14 @@ def build_map(texts, output_path):
             text.set_fontsize(8.75)
 
     # Title & subtitle above the map
-    fig.text(0.03, 0.977, "Pacific Northwest 8–14 Day Hazards", fontsize=19,
+    fig.text(SIDE_MARGIN_FRAC, from_top(0.195), "Pacific Northwest 8–14 Day Hazards", fontsize=19,
               fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.940, "NWS Climate Prediction Center — Heavy Snow, Heavy Precipitation, High Winds",
+    fig.text(SIDE_MARGIN_FRAC, from_top(0.51), "NWS Climate Prediction Center — Heavy Snow, Heavy Precipitation, High Winds",
               fontsize=11.5, fontproperties=poppins_semibold, color="#3a3835", ha="left", va="top")
-    fig.text(0.03, 0.909, f"Valid {period} • U.S. only",
+    fig.text(SIDE_MARGIN_FRAC, from_top(0.77), f"Valid {period} • U.S. only",
               fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
-    fig.text(0.5, 0.014, "NOAA / CPC — Ingalls Weather", fontsize=9,
+    fig.text(0.5, from_bottom(0.12), "NOAA / CPC — Ingalls Weather", fontsize=9,
               fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

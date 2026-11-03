@@ -1,11 +1,11 @@
 # Pacific Northwest CPC 8–14 Day Hazards Map
 
 Styled map of the NWS Climate Prediction Center's Day 8–14 probabilistic
-hazard outlooks over the canonical Pacific Northwest domain (same as
-[`../wildcad-fires-map/`](../wildcad-fires-map/) and
-[`../dew-point-storm-map/`](../dew-point-storm-map/): Prince George BC to
-Winnemucca NV, Bella Coola BC to Yellowstone WY). Three hazards share one
-map, layered top to bottom:
+hazard outlooks over the Pacific Northwest and interior West: WA/OR/ID/MT
+plus northern CA/NV/UT and WY, with only a thin strip of southern
+BC/Alberta (CPC's outlook is US-only). The domain reaches east to the
+Front Range so hazard areas spanning the interior West show their full
+in-region edge. Three hazards share one map, layered top to bottom:
 
 | Layer  | Hazard              | Slight Risk   | Moderate Risk | High Risk   |
 |--------|---------------------|---------------|---------------|-------------|
@@ -41,6 +41,11 @@ all under `https://www.cpc.ncep.noaa.gov/products/predictions/threats/`.
 
 ## Notes
 
+- Colors are CPC's own. Each KML's per-category `<Style>` color is read at
+  runtime, so the map follows any palette change CPC makes. The `HAZARDS`
+  list in `build_map.py` keeps the same values as a fallback. Fills use
+  CPC's 70% opacity.
+
 - Fills are translucent, so a lower layer stays visible under a higher one
   (e.g. the wind hatch shows through the rain fill). Within one hazard, a
   hatched or filled Slight area has any higher category cut out of it so the
@@ -49,5 +54,6 @@ all under `https://www.cpc.ncep.noaa.gov/products/predictions/threats/`.
   Because CPC clips its polygons at the border, the outline-only wind
   Slight Risk has any edge along the US/Canada border removed; otherwise it
   just reads as a recolored border line.
-- Category colors, hatch patterns, and the layer order live in the `HAZARDS`
-  list near the top of `build_map.py`.
+- Hatch patterns, fill/hatch/outline modes, and the layer order live in the
+  `HAZARDS` list near the top of `build_map.py`; the domain and figure
+  geometry are just above it.

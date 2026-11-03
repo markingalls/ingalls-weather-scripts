@@ -34,7 +34,7 @@ workflows. Each project lives in its own directory with its own README.
   are consistent with thunderstorms today.
 - [`pnw-cpc-hazards-map/`](pnw-cpc-hazards-map/) — the CPC Day 8–14
   heavy snow, heavy precipitation, and high wind hazard outlooks layered on
-  one map over the same Pacific Northwest domain as `wildcad-fires-map/`.
+  one map over the Pacific Northwest and interior West, in CPC's own colors.
 - [`wildcad-fires-map/`](wildcad-fires-map/) — the canonical map of
   currently active wildfires across the same domain as
   `dew-point-storm-map/`, merged from WildCAD-E (US dispatch centers),
