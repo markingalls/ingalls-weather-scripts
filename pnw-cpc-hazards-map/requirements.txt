@@ -1,0 +1,6 @@
+matplotlib
+cartopy
+shapely>=2.0
+Pillow
+numpy
+requests
