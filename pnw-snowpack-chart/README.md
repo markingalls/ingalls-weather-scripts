@@ -104,9 +104,11 @@ the next calendar year's water year.
   median is meaningless and the plotted value is just the mean of
   reporting stations.
 - **Truncation**: this year's line ends at the most recent day on which
-  at least half the station set has reported. Today's values post station
-  by station through the morning, so running early in the day typically
-  ends the line at yesterday (the fetch prints any day it drops).
+  at least half the station set has reported. AWDB dates each daily
+  value by the end of the day it covers (the "Nov 3" value is the reading
+  at midnight going into Nov 4), so today never has a value yet and the
+  line normally ends at yesterday; right after midnight, yesterday can
+  still be filling in (the fetch prints any day it drops).
 - **Label placement**: the latest-value label sits above the point (with a
   leader line) while it's in the bottom half of the plot, and below it
   once the line is in the top half, so it clears both the rising median

@@ -85,8 +85,9 @@ DEFAULT_REFERENCE_WYS = [2024, 2023, 2025]
 NORMALS_PERIOD = "1991-2020"
 
 # Drop a trailing day from the observed series unless at least this
-# fraction of the station set has reported it (today's values often post
-# station by station through the morning).
+# fraction of the station set has reported it. AWDB dates a daily value by
+# the end of the day it covers, so today's value never exists yet, and
+# yesterday's can still be filling in shortly after midnight.
 MIN_REPORTING_FRACTION = 0.5
 
 # Below this regional-median SWE (inches) -- early October, late summer --
