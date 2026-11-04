@@ -211,13 +211,16 @@ def main():
     title_y = subtitle_y + 0.035
     title = f"{data['label']} Snowpack — Water Year {wy}"
     fig.text(left_x, title_y, title, fontproperties=f_bold, fontsize=22, color=INK)
-    subtitle = (f"NRCS SNOTEL regional mean SWE • {data['n_stations']} stations in "
+    subtitle = (f"Regional mean snow-pillow SWE • {data['n_stations']} stations in "
                 f"{', '.join(data['states'])} • through {latest_date.strftime('%b %-d, %Y')}")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
+    sources = "USDA NRCS SNOTEL"
+    if "BC" in data["states"]:
+        sources += " / BC River Forecast Centre"
     fig.text(center_x, 0.02,
-              "USDA NRCS SNOTEL / Air and Water Database (observed & 1991–2020 median) — Ingalls Weather",
+              f"{sources}, via NRCS Air and Water Database (observed & 1991–2020 median) — Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
     plt.savefig(args.output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)

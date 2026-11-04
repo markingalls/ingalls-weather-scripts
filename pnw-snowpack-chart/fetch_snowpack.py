@@ -1,27 +1,36 @@
 """
-Fetches Pacific Northwest snowpack (snow water equivalent, SWE) from the
-NRCS SNOTEL network via the NRCS Air and Water Database (AWDB) REST API and
+Fetches Pacific Northwest snowpack (snow water equivalent, SWE) from
+automated snow-pillow stations via the NRCS Air and Water Database (AWDB)
+REST API -- NRCS SNOTEL in the U.S. states, and the BC River Forecast
+Centre's automated snow weather stations in British Columbia, which AWDB
+also carries (network code MSNT) -- and
 writes snowpack.json: a regional daily SWE series for the current water
 year (Oct 1 .. the most recent day reported) plus the full-season
 (Oct 1 .. Sep 30) NRCS daily-median curve to plot it against. No API key
 required.
 
-Two AWDB calls, both covering every SNOTEL station in the requested states
-(default WA, OR, ID) via a "*:<STATE>:SNTL" wildcard triplet:
+AWDB calls cover every automated station in the requested states/
+provinces (default WA, OR, ID, BC) via a "*:<STATE>:<NETWORK>" wildcard
+triplet -- SNTL for U.S. states, MSNT for BC (see NETWORK_BY_STATE):
 
-  1. The NRCS daily median (AWDB's centralTendencyType=MEDIAN -- NRCS's
+  1. The NRCS daily median (AWDB's centralTendencyType=MEDIAN -- the
      1991-2020 normals) for every calendar day of the year. AWDB only
-     returns central tendencies alongside dates that actually have data,
-     so a future date in the current water year comes back empty -- to
-     get the full season's curve this pulls a completed reference water
-     year instead (default WY2024, which includes Feb 29, so every
-     calendar day is covered) and keeps just its per-day "median" field.
+     returns a central tendency alongside a date that actually has an
+     observed value, so a future date in the current water year comes
+     back empty, and so does any day a station was down. To get a full
+     season's curve this reads the "median" field from several completed
+     reference water years (default WY2024, WY2023, WY2025 -- WY2024
+     includes Feb 29) and merges them, first year to have a given
+     calendar day wins. The medians are the same normals whichever year
+     they're read from; merging just papers over station outages, which
+     are common at the BC stations. A Feb 29 still missing after that is
+     filled with the mean of Feb 28 and Mar 1.
   2. The current water year's observed daily SWE, Oct 1 .. today.
 
 Regional aggregation (see README Notes for the reasoning):
 
-  - The station set is fixed to stations that have an NRCS median for
-    every calendar day, so the median curve is one consistent set of
+  - The station set is fixed to stations that have a median for every
+    calendar day (stations too new to have normals drop out here), so the median curve is one consistent set of
     sites all season.
   - The regional median curve is the mean of those stations' daily
     medians.
@@ -37,19 +46,26 @@ Regional aggregation (see README Notes for the reasoning):
 """
 import argparse
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 import requests
 
 BASE_URL = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data"
 
-DEFAULT_STATES = ["WA", "OR", "ID"]
+DEFAULT_STATES = ["WA", "OR", "ID", "BC"]
+
+# AWDB network code for each region's automated snow-pillow stations.
+# U.S. states use NRCS SNOTEL; BC's automated snow weather stations (run by
+# the BC River Forecast Centre) are carried in AWDB under MSNT. BC's manual
+# snow courses (network SNOW) are monthly, not daily, so they're left out.
+NETWORK_BY_STATE = {"BC": "MSNT"}
+DEFAULT_NETWORK = "SNTL"
 DEFAULT_LABEL = "Pacific Northwest"
 
-# A completed water year containing Feb 29, so the normals cover all 366
-# calendar days. Any completed water year works -- the "median" values are
-# the same 1991-2020 normals regardless -- this one just covers leap day.
-DEFAULT_REFERENCE_WY = 2024
+# Completed water years to read the daily medians from, merged in order
+# (see module docstring). WY2024 goes first because it includes Feb 29.
+DEFAULT_REFERENCE_WYS = [2024, 2023, 2025]
 
 NORMALS_PERIOD = "1991-2020"
 
@@ -71,7 +87,7 @@ def water_year_for(d):
 
 def awdb_daily_swe(states, begin, end, with_median):
     params = {
-        "stationTriplets": ",".join(f"*:{s}:SNTL" for s in states),
+        "stationTriplets": ",".join(f"*:{s}:{NETWORK_BY_STATE.get(s, DEFAULT_NETWORK)}" for s in states),
         "elements": "WTEQ",
         "duration": "DAILY",
         "beginDate": begin.isoformat(),
@@ -84,18 +100,21 @@ def awdb_daily_swe(states, begin, end, with_median):
     return r.json()
 
 
-def parse_normals(resp):
-    """{triplet: {"MM-DD": median_in}} for stations with a median on
-    every calendar day of the reference year."""
+def merge_normals(resps):
+    """{triplet: {"MM-DD": median_in}}, merged across reference-year
+    responses (first response to have a given calendar day wins)."""
     out = {}
-    for stn in resp:
-        if not stn.get("data"):
-            continue
-        medians = {}
-        for v in stn["data"][0].get("values", []):
-            if v.get("median") is not None:
-                medians[v["date"][5:10]] = float(v["median"])
-        out[stn["stationTriplet"]] = medians
+    for resp in resps:
+        for stn in resp:
+            if not stn.get("data"):
+                continue
+            medians = out.setdefault(stn["stationTriplet"], {})
+            for v in stn["data"][0].get("values", []):
+                if v.get("median") is not None:
+                    medians.setdefault(v["date"][5:10], float(v["median"]))
+    for medians in out.values():
+        if "02-29" not in medians and "02-28" in medians and "03-01" in medians:
+            medians["02-29"] = round((medians["02-28"] + medians["03-01"]) / 2, 2)
     return out
 
 
@@ -123,11 +142,11 @@ def season_dates(wy):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--states", nargs="+", default=DEFAULT_STATES,
-                    help="State codes whose SNOTEL stations to pool, e.g. WA OR ID")
+                    help="State/province codes whose stations to pool, e.g. WA OR ID BC")
     ap.add_argument("--label", default=DEFAULT_LABEL, help="Region name shown in the chart title")
     ap.add_argument("--end-date", default=None, help="YYYY-MM-DD, defaults to today")
-    ap.add_argument("--reference-wy", type=int, default=DEFAULT_REFERENCE_WY,
-                    help="Completed water year to read the daily medians from")
+    ap.add_argument("--reference-wys", type=int, nargs="+", default=DEFAULT_REFERENCE_WYS,
+                    help="Completed water years to read the daily medians from, merged in order")
     ap.add_argument("--output", default="snowpack.json")
     args = ap.parse_args()
 
@@ -136,24 +155,34 @@ if __name__ == "__main__":
     wy = water_year_for(end)
     wy_start = date(wy - 1, 10, 1)
 
-    print(f"Fetching NRCS daily medians ({NORMALS_PERIOD}) for SNOTEL in {', '.join(states)} "
-          f"(reference WY{args.reference_wy})...")
-    ref_start, ref_end = date(args.reference_wy - 1, 10, 1), date(args.reference_wy, 9, 30)
-    normals = parse_normals(awdb_daily_swe(states, ref_start, ref_end, with_median=True))
-    n_ref_days = (ref_end - ref_start).days + 1
-    normals = {t: a for t, a in normals.items() if len(a) >= n_ref_days}
-    stations = sorted(normals)
-    print(f"  {len(stations)} stations with a full year of daily medians")
+    # All the AWDB calls are independent and slow (~1 min each), so run
+    # them concurrently.
+    ref_wys = ", ".join(f"WY{y}" for y in args.reference_wys)
+    print(f"Fetching daily medians ({NORMALS_PERIOD}; reference {ref_wys}) and WY{wy} observed SWE "
+          f"({wy_start} .. {end}) for {', '.join(states)}...")
+    with ThreadPoolExecutor(max_workers=len(args.reference_wys) + 1) as ex:
+        ref_futures = [ex.submit(awdb_daily_swe, states, date(y - 1, 10, 1), date(y, 9, 30), True)
+                       for y in args.reference_wys]
+        obs_future = ex.submit(awdb_daily_swe, states, wy_start, end, False)
+        normals = merge_normals([f.result() for f in ref_futures])
+        observed = parse_observed(obs_future.result())
 
-    print(f"Fetching WY{wy} observed SWE ({wy_start} .. {end})...")
-    observed = parse_observed(awdb_daily_swe(states, wy_start, end, with_median=False))
+    n_all = len(normals)
+    normals = {t: m for t, m in normals.items() if len(m) >= 366}
+    stations = sorted(normals)
+    by_state = {}
+    for t in stations:
+        st = t.split(":")[1]
+        by_state[st] = by_state.get(st, 0) + 1
+    print(f"  {len(stations)} of {n_all} stations have a median for every calendar day: "
+          + ", ".join(f"{st} {by_state.get(st, 0)}" for st in states))
 
     # Full-season regional median curve.
     median_curve = []
     for d in season_dates(wy):
         md = d.isoformat()[5:]
         vals = [normals[t][md] for t in stations if md in normals[t]]
-        if not vals:  # Feb 29 in a non-leap reference year -- shouldn't happen with WY2024
+        if not vals:
             continue
         median_curve.append({"date": d.isoformat(), "median_swe_in": round(sum(vals) / len(vals), 2)})
     median_by_date = {row["date"]: row["median_swe_in"] for row in median_curve}
@@ -188,14 +217,16 @@ if __name__ == "__main__":
 
     peak = max(median_curve, key=lambda r: r["median_swe_in"])
     out = {
-        "source": "NRCS AWDB REST API, SNOTEL element WTEQ (daily snow water equivalent)",
+        "source": ("NRCS AWDB REST API, element WTEQ (daily snow water equivalent): "
+                   "NRCS SNOTEL (U.S.) + BC River Forecast Centre automated snow weather stations"),
         "label": args.label,
         "states": states,
         "water_year": wy,
         "normals_period": NORMALS_PERIOD,
         "normals_statistic": "median",
-        "normals_reference_wy": args.reference_wy,
+        "normals_reference_wys": args.reference_wys,
         "n_stations": len(stations),
+        "stations_by_state": {st: by_state.get(st, 0) for st in states},
         "latest_date": obs_days[-1]["date"],
         "median_peak": {"date": peak["date"], "median_swe_in": peak["median_swe_in"]},
         "median": median_curve,
