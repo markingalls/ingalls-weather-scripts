@@ -42,18 +42,15 @@ AXIS_COLOR = "#000000"
 SWE_COLOR = "#164f29"
 SWE_FILL_ALPHA = 0.14
 
-# Warm amber for the climatology line, as in the other charts, over a soft
-# neutral fill so the shape of a normal season reads at a glance.
+# Warm amber for the climatology (median) line, as in the other charts --
+# a line only, no fill underneath, so it reads as a reference not a series.
 CLIMO_LINE = "#c9531c"
-CLIMO_FILL = "#c7c5c0"
-CLIMO_FILL_ALPHA = 0.45
 
-# z-order layering, back to front: average fill -> gridlines -> this
-# year's fill -> average line -> this year's line -> labels.
-Z_SHADING = 1
+# z-order layering, back to front: gridlines -> this year's fill ->
+# median line -> this year's line -> labels.
 Z_GRID = 2
 Z_SWE_FILL = 3
-Z_AVG = 4
+Z_MEDIAN = 4
 Z_SWE = 5
 
 
@@ -68,8 +65,8 @@ def main():
     args = parse_args()
     data = json.load(open(args.input))
 
-    avg_dates = [datetime.fromisoformat(r["date"]) for r in data["average"]]
-    avg_vals = np.array([r["avg_swe_in"] for r in data["average"]])
+    norm_dates = [datetime.fromisoformat(r["date"]) for r in data["median"]]
+    median_vals = np.array([r["median_swe_in"] for r in data["median"]])
 
     obs = data["observed"]
     obs_dates = [datetime.fromisoformat(r["date"]) for r in obs]
@@ -78,7 +75,7 @@ def main():
     wy = data["water_year"]
     latest = obs[-1]
     latest_date = obs_dates[-1]
-    peak = data["average_peak"]
+    peak = data["median_peak"]
     peak_date = datetime.fromisoformat(peak["date"])
 
     # ---------- figure (same footprint as the other charts) ----------
@@ -87,13 +84,11 @@ def main():
     ax = fig.add_axes([0.075, 0.10, 0.87, 0.65])
     ax.set_facecolor("white")
 
-    avg_label = f"Average ({data['normals_period']})"
+    median_label = f"Median ({data['normals_period']})"
     obs_label = f"WY{wy} (Oct 1 – {latest_date.strftime('%b %-d')})"
 
-    ax.fill_between(avg_dates, 0, avg_vals, color=CLIMO_FILL, alpha=CLIMO_FILL_ALPHA,
-                     linewidth=0, zorder=Z_SHADING)
-    ax.plot(avg_dates, avg_vals, color=CLIMO_LINE, linewidth=2.2, linestyle="--",
-            dashes=(6, 3), zorder=Z_AVG, label=avg_label)
+    ax.plot(norm_dates, median_vals, color=CLIMO_LINE, linewidth=2.2, linestyle="--",
+            dashes=(6, 3), zorder=Z_MEDIAN, label=median_label)
 
     ax.fill_between(obs_dates, 0, obs_vals, color=SWE_COLOR, alpha=SWE_FILL_ALPHA,
                      linewidth=0, zorder=Z_SWE_FILL)
@@ -107,22 +102,22 @@ def main():
     ax.axvline(latest_date, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
     # ---------- y-axis: 0 .. a bit above the taller of the two curves ----------
-    ymax = float(np.nanmax(np.concatenate([avg_vals, obs_vals])))
+    ymax = float(np.nanmax(np.concatenate([median_vals, obs_vals])))
     ax.set_ylim(0, ymax * 1.14)
 
     # ---------- labels ----------
     label_stroke = [pe.withStroke(linewidth=3, foreground="white")]
 
-    # latest value + percent of average, offset up-and-right of the point
+    # latest value + percent of median, offset up-and-right of the point
     # (flipped to the left once the season is far enough along that the
     # label would run off the right edge)
-    pct = latest.get("pct_of_avg")
+    pct = latest.get("pct_of_median")
     latest_text = f"{obs_vals[-1]:.1f}\" SWE"
     if pct is not None:
-        latest_text += f"\n{pct:.0f}% of average"
-    season_frac = (latest_date - avg_dates[0]) / (avg_dates[-1] - avg_dates[0])
+        latest_text += f"\n{pct:.0f}% of median"
+    season_frac = (latest_date - norm_dates[0]) / (norm_dates[-1] - norm_dates[0])
     on_right = season_frac < 0.8
-    # sit the label well above the point (clear of the rising average curve)
+    # sit the label well above the point (clear of the rising median curve)
     # while there's room; once the line is in the top half of the plot,
     # hang it below instead so it can't collide with the legend strip.
     above = obs_vals[-1] < 0.5 * ymax
@@ -134,13 +129,13 @@ def main():
                        arrowprops=dict(arrowstyle="-", color=SWE_COLOR, lw=0.9, shrinkA=2, shrinkB=5))
     txt.set_path_effects(label_stroke)
 
-    # average-peak callout
-    ax.plot([peak_date], [peak["avg_swe_in"]], marker="o", markersize=5.5, color=CLIMO_LINE,
-            markeredgecolor="white", markeredgewidth=1.2, zorder=Z_AVG + 0.5)
-    ptxt = ax.annotate(f"Avg peak {peak['avg_swe_in']:.1f}\" ({peak_date.strftime('%b %-d')})",
-                        xy=(peak_date, peak["avg_swe_in"]), xytext=(0, 10), textcoords="offset points",
+    # median-peak callout
+    ax.plot([peak_date], [peak["median_swe_in"]], marker="o", markersize=5.5, color=CLIMO_LINE,
+            markeredgecolor="white", markeredgewidth=1.2, zorder=Z_MEDIAN + 0.5)
+    ptxt = ax.annotate(f"Median peak {peak['median_swe_in']:.1f}\" ({peak_date.strftime('%b %-d')})",
+                        xy=(peak_date, peak["median_swe_in"]), xytext=(0, 10), textcoords="offset points",
                         ha="center", va="bottom", fontproperties=f_med, fontsize=10,
-                        color=CLIMO_LINE, zorder=Z_AVG + 0.5)
+                        color=CLIMO_LINE, zorder=Z_MEDIAN + 0.5)
     ptxt.set_path_effects(label_stroke)
 
     # ---------- axes styling ----------
@@ -154,7 +149,7 @@ def main():
         ax.spines[spine].set_linewidth(1.0)
 
     # full water year on the x-axis, Oct 1 .. Sep 30, month ticks
-    ax.set_xlim(avg_dates[0], avg_dates[-1])
+    ax.set_xlim(norm_dates[0], norm_dates[-1])
     ax.xaxis.set_major_locator(mdates.MonthLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %-d"))
     ax.tick_params(axis="both", colors=AXIS_COLOR, labelsize=10, length=4)
@@ -175,7 +170,7 @@ def main():
 
     # ---------- legend (horizontal strip above the plot, out of the data's way) ----------
     handles, labels = ax.get_legend_handles_labels()
-    order = [obs_label, avg_label]
+    order = [obs_label, median_label]
     by_label = dict(zip(labels, handles))
     leg = fig.legend([by_label[l] for l in order], order,
                       loc="lower left", bbox_to_anchor=(left_x, top_y + 0.012),
@@ -219,7 +214,7 @@ def main():
 
     # ---------- attribution ----------
     fig.text(center_x, 0.02,
-              "USDA NRCS SNOTEL / Air and Water Database (observed & 1991–2020 average) — Ingalls Weather",
+              "USDA NRCS SNOTEL / Air and Water Database (observed & 1991–2020 median) — Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
     plt.savefig(args.output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)

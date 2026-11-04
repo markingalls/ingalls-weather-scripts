@@ -51,7 +51,7 @@ workflows. Each project lives in its own directory with its own README.
 - [`pnw-snowpack-chart/`](pnw-snowpack-chart/) — generates a styled
   water-year (Oct 1 – Sep 30) chart of Pacific Northwest snowpack: this
   year's regional SNOTEL snow water equivalent across WA, OR, and ID
-  against the NRCS 1991-2020 daily average.
+  against the NRCS 1991-2020 daily median.
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
