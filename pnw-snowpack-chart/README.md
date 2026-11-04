@@ -1,0 +1,84 @@
+# Pacific Northwest Snowpack Chart
+
+Generates a styled water-year snowpack chart for Ingalls Weather's
+Instagram: this water year's regional **snow water equivalent (SWE)**
+across the NRCS SNOTEL network in Washington, Oregon, and Idaho, plotted
+against the NRCS **1991-2020 daily average**. The x-axis always spans the
+full water year (**Oct 1 .. Sep 30**), so the average curve shows the whole
+season's build-up, peak, and melt-out, while this year's line stops at the
+most recent day reported. The latest point is labeled with its SWE and
+percent of average, and the average peak is called out.
+
+Same canvas footprint, fonts, palette, and layout as the
+[Tri-Cities temperature chart](../tri-cities-temp-chart/) and
+[850 mb chart](../850-700-temp-chart/): forest-green data line, amber
+dashed climatology line, horizontal legend strip above the plot, dotted
+vertical marker at the latest day, logo bottom-right.
+
+## Files
+
+- `fetch_snowpack.py` -- pulls daily SWE (element `WTEQ`) for every SNOTEL
+  station in the requested states from the NRCS Air and Water Database
+  (AWDB) REST API, aggregates it into one regional series plus the
+  full-season average curve, and writes `snowpack.json`. No API key
+  needed.
+- `build_chart.py` -- renders `snowpack.json` into `pnw_snowpack_chart.png`.
+- `requirements.txt` / `setup.sh` -- Python dependencies, plus the Poppins
+  font (not packaged for apt).
+
+## Usage
+
+```bash
+bash setup.sh                      # first time / fresh environment only
+
+# Default: WA + OR + ID
+python3 fetch_snowpack.py
+python3 build_chart.py
+
+# A different region -- e.g. Washington only
+python3 fetch_snowpack.py --states WA --label "Washington"
+python3 build_chart.py
+```
+
+The fetch takes about a minute (AWDB is slow on multi-state wildcard
+queries). Re-run it any time to pick up the latest day; the water year is
+chosen automatically from `--end-date` (default today): Oct 1 onward is
+the next calendar year's water year.
+
+## Notes
+
+- **Source**: NRCS AWDB REST API
+  (`wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data`), SNOTEL network,
+  daily `WTEQ`, queried with a `*:<STATE>:SNTL` wildcard per state.
+- **Average, not median**: the comparison curve is AWDB's
+  `centralTendencyType=AVERAGE` -- NRCS's 1991-2020 daily average. (NRCS's
+  own products usually lead with median; switching is a one-word change
+  in `awdb_daily_swe`.)
+- **Full-season average curve**: AWDB only returns central tendencies
+  alongside dates that actually have data, so asking for the rest of the
+  current water year returns nothing. The script instead reads the
+  averages from a completed reference water year (`--reference-wy`,
+  default WY2024, which includes Feb 29 so every calendar day is covered)
+  -- the average for a given calendar day is the same 1991-2020 value
+  whichever year it's read from.
+- **Station set**: fixed to stations with an average for every calendar
+  day (~214 across WA/OR/ID), so the average curve is one consistent set
+  of sites all season. `snowpack.json`'s `n_stations` reports the count.
+- **Regional aggregation**: the average curve is the mean of those
+  stations' daily averages. Each observed day's percent of average is
+  `sum(observed) / sum(average)` over only the stations that reported
+  that day (the NRCS "same stations on both sides" index method), and the
+  plotted SWE is that ratio times the regional average curve -- so a few
+  stations dropping out on a given day doesn't make the line jump. Early
+  in October, when the regional average is under 0.05", percent of
+  average is meaningless and the plotted value is just the mean of
+  reporting stations.
+- **Truncation**: this year's line ends at the most recent day on which
+  at least half the station set has reported. Today's values post station
+  by station through the morning, so running early in the day typically
+  ends the line at yesterday (the fetch prints any day it drops).
+- **Label placement**: the latest-value label sits above the point (with a
+  leader line) while it's in the bottom half of the plot, and below it
+  once the line is in the top half, so it clears both the rising average
+  curve early in the season and the legend strip near peak; it flips to
+  the left of the point late in the water year so it stays on-canvas.
