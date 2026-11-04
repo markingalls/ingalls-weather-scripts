@@ -56,8 +56,8 @@ the next calendar year's water year.
   `centralTendencyType=MEDIAN` -- NRCS's 1991-2020 daily median, the same
   statistic NRCS's own snowpack reports lead with (a mean gets pulled up
   by a few huge years). Each station's daily median is pulled, then those
-  are averaged across stations to make the regional curve. It's drawn as
-  a line only, with no shading underneath.
+  are averaged across stations to make the regional curve. Both it and
+  this year's line are drawn as lines only, with no shading underneath.
 - **Full-season median curve**: AWDB only returns central tendencies
   alongside dates that actually have data, so asking for the rest of the
   current water year returns nothing. The script instead reads the

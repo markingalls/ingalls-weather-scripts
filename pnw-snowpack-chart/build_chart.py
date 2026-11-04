@@ -40,16 +40,13 @@ AXIS_COLOR = "#000000"
 # Forest green for "this year" -- the same primary-data-line hue the other
 # charts use (the pine tree in the Ingalls Weather logo).
 SWE_COLOR = "#164f29"
-SWE_FILL_ALPHA = 0.14
 
-# Warm amber for the climatology (median) line, as in the other charts --
-# a line only, no fill underneath, so it reads as a reference not a series.
+# Warm amber for the climatology (median) line, as in the other charts.
+# Both curves are drawn as lines only, with no fill underneath.
 CLIMO_LINE = "#c9531c"
 
-# z-order layering, back to front: gridlines -> this year's fill ->
-# median line -> this year's line -> labels.
+# z-order layering, back to front: gridlines -> median line -> this year's line -> labels.
 Z_GRID = 2
-Z_SWE_FILL = 3
 Z_MEDIAN = 4
 Z_SWE = 5
 
@@ -102,8 +99,6 @@ def main():
     ax.plot(norm_dates, median_vals, color=CLIMO_LINE, linewidth=2.2, linestyle="--",
             dashes=(6, 3), zorder=Z_MEDIAN, label=median_label)
 
-    ax.fill_between(obs_dates, 0, obs_vals, color=SWE_COLOR, alpha=SWE_FILL_ALPHA,
-                     linewidth=0, zorder=Z_SWE_FILL)
     ax.plot(obs_dates, obs_vals, color=SWE_COLOR, linewidth=2.8, zorder=Z_SWE,
             solid_capstyle="round", label=obs_label)
     ax.plot([latest_date], [obs_vals[-1]], marker="o", markersize=7, color=SWE_COLOR,
