@@ -3,17 +3,19 @@
 Generates a styled water-year snowpack chart for Ingalls Weather's
 Instagram: this water year's regional **snow water equivalent (SWE)**
 across the NRCS SNOTEL network in Washington, Oregon, and Idaho, plotted
-against the NRCS **1991-2020 daily median**. The x-axis always spans the
-full water year (**Oct 1 .. Sep 30**), so the median curve shows the whole
-season's build-up, peak, and melt-out, while this year's line stops at the
-most recent day reported. The latest point is labeled with its SWE and
-percent of median, and the median's peak is called out.
+against the NRCS **1991-2020 daily median**. The x-axis always runs
+**Oct 1 to Aug 1** (August and September are cut, since the median is
+effectively zero by then), so the median curve shows the season's
+build-up, peak, and melt-out, while this year's line stops at the most
+recent day reported. The latest point is labeled with its SWE and percent
+of median, and the median's peak is called out.
 
 Same canvas footprint, fonts, palette, and layout as the
 [Tri-Cities temperature chart](../tri-cities-temp-chart/) and
 [850 mb chart](../850-700-temp-chart/): forest-green data line, amber
-dashed climatology (median) line, horizontal legend strip above the plot, dotted
-vertical marker at the latest day, logo bottom-right.
+dashed climatology (median) line, and a horizontal legend strip above the
+plot. One difference: the logo sits in the plot's top-right corner rather
+than bottom-right, since that's empty space on a snowpack curve.
 
 ## Files
 

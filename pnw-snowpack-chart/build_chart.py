@@ -73,6 +73,18 @@ def main():
     obs_vals = np.array([np.nan if r["swe_in"] is None else r["swe_in"] for r in obs])
 
     wy = data["water_year"]
+
+    # Show Oct 1 .. Aug 1 only -- by August the median is effectively zero,
+    # so the last two months of the water year are just a flat line.
+    x_end = datetime(wy, 8, 1)
+    keep = [i for i, d in enumerate(norm_dates) if d <= x_end]
+    norm_dates = [norm_dates[i] for i in keep]
+    median_vals = median_vals[keep]
+    obs_keep = [i for i, d in enumerate(obs_dates) if d <= x_end]
+    obs = [obs[i] for i in obs_keep]
+    obs_dates = [obs_dates[i] for i in obs_keep]
+    obs_vals = obs_vals[obs_keep]
+
     latest = obs[-1]
     latest_date = obs_dates[-1]
     peak = data["median_peak"]
@@ -96,10 +108,6 @@ def main():
             solid_capstyle="round", label=obs_label)
     ax.plot([latest_date], [obs_vals[-1]], marker="o", markersize=7, color=SWE_COLOR,
             markeredgecolor="white", markeredgewidth=1.4, zorder=Z_SWE + 1)
-
-    # dotted vertical marker at the latest day, like the observed/forecast
-    # divider in tri-cities-temp-chart
-    ax.axvline(latest_date, color=AXIS_COLOR, linewidth=1.0, linestyle=":", zorder=Z_GRID)
 
     # ---------- y-axis: 0 .. a bit above the taller of the two curves ----------
     ymax = float(np.nanmax(np.concatenate([median_vals, obs_vals])))
@@ -179,7 +187,7 @@ def main():
     for text in leg.get_texts():
         text.set_color(INK_SECONDARY)
 
-    # ---------- logo (bottom-right, matching the alerts map placement) ----------
+    # ---------- logo (top-right inside the plot, clear of the median peak) ----------
     LOGO_PATH = "../assets/ingalls_weather_logo.png"
     if os.path.exists(LOGO_PATH):
         logo_img = plt.imread(LOGO_PATH)
@@ -196,7 +204,7 @@ def main():
         logo_height_fig = logo_height_in / fig_h_in
 
         logo_x0 = axpos.x1 - inset_x - logo_width_fig
-        logo_y0 = axpos.y0 + inset_y
+        logo_y0 = axpos.y1 - inset_y - logo_height_fig
         logo_ax = fig.add_axes([logo_x0, logo_y0, logo_width_fig, logo_height_fig], zorder=20)
         logo_ax.imshow(logo_img)
         logo_ax.axis("off")
