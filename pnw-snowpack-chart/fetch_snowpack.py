@@ -27,6 +27,15 @@ triplet -- SNTL for U.S. states, MSNT for BC (see NETWORK_BY_STATE):
      filled with the mean of Feb 28 and Mar 1.
   2. The current water year's observed daily SWE, Oct 1 .. today.
 
+Plus one AWDB stations-metadata call for any region in HUC_PREFIX_BY_STATE
+(by default just BC): AWDB carries automated stations across the whole
+province, up to ~57.6N, so BC stations are kept only if their USGS
+hydrologic unit code (HUC) starts with "17" -- HUC region 17, the Pacific
+Northwest (Columbia Basin plus Puget Sound and the coast). In practice
+that's the southern-BC stations in the Columbia drainage and a few in
+the Skagit/Chilliwack. BC stations AWDB doesn't tag with any HUC are
+dropped too.
+
 Regional aggregation (see README Notes for the reasoning):
 
   - The station set is fixed to stations that have a median for every
@@ -52,6 +61,7 @@ from datetime import date, timedelta
 import requests
 
 BASE_URL = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/data"
+STATIONS_URL = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1/stations"
 
 DEFAULT_STATES = ["WA", "OR", "ID", "BC"]
 
@@ -61,6 +71,11 @@ DEFAULT_STATES = ["WA", "OR", "ID", "BC"]
 # snow courses (network SNOW) are monthly, not daily, so they're left out.
 NETWORK_BY_STATE = {"BC": "MSNT"}
 DEFAULT_NETWORK = "SNTL"
+
+# Regions whose stations are kept only if their HUC starts with the given
+# prefix (see module docstring). "17" is HUC region 17, Pacific Northwest.
+# U.S. states aren't filtered -- every WA/OR/ID SNOTEL station counts.
+HUC_PREFIX_BY_STATE = {"BC": "17"}
 DEFAULT_LABEL = "Pacific Northwest"
 
 # Completed water years to read the daily medians from, merged in order
@@ -98,6 +113,22 @@ def awdb_daily_swe(states, begin, end, with_median):
     r = requests.get(BASE_URL, params=params, timeout=300)
     r.raise_for_status()
     return r.json()
+
+
+def awdb_station_hucs(states):
+    """{triplet: huc or ""} for every station in `states` (metadata only)."""
+    params = {
+        "stationTriplets": ",".join(f"*:{s}:{NETWORK_BY_STATE.get(s, DEFAULT_NETWORK)}" for s in states),
+        "returnStationElements": "false",
+    }
+    r = requests.get(STATIONS_URL, params=params, timeout=300)
+    r.raise_for_status()
+    return {stn["stationTriplet"]: stn.get("huc") or "" for stn in r.json()}
+
+
+def passes_huc_filter(triplet, hucs):
+    prefix = HUC_PREFIX_BY_STATE.get(triplet.split(":")[1])
+    return prefix is None or hucs.get(triplet, "").startswith(prefix)
 
 
 def merge_normals(resps):
@@ -160,13 +191,21 @@ if __name__ == "__main__":
     ref_wys = ", ".join(f"WY{y}" for y in args.reference_wys)
     print(f"Fetching daily medians ({NORMALS_PERIOD}; reference {ref_wys}) and WY{wy} observed SWE "
           f"({wy_start} .. {end}) for {', '.join(states)}...")
-    with ThreadPoolExecutor(max_workers=len(args.reference_wys) + 1) as ex:
+    huc_states = [st for st in states if st in HUC_PREFIX_BY_STATE]
+    with ThreadPoolExecutor(max_workers=len(args.reference_wys) + 2) as ex:
         ref_futures = [ex.submit(awdb_daily_swe, states, date(y - 1, 10, 1), date(y, 9, 30), True)
                        for y in args.reference_wys]
         obs_future = ex.submit(awdb_daily_swe, states, wy_start, end, False)
+        huc_future = ex.submit(awdb_station_hucs, huc_states) if huc_states else None
         normals = merge_normals([f.result() for f in ref_futures])
         observed = parse_observed(obs_future.result())
+        hucs = huc_future.result() if huc_future else {}
 
+    n_before_huc = len(normals)
+    normals = {t: m for t, m in normals.items() if passes_huc_filter(t, hucs)}
+    if huc_states:
+        print(f"  HUC filter ({', '.join(f'{st} HUC {HUC_PREFIX_BY_STATE[st]}*' for st in huc_states)}): "
+              f"kept {len(normals)} of {n_before_huc} stations")
     n_all = len(normals)
     normals = {t: m for t, m in normals.items() if len(m) >= 366}
     stations = sorted(normals)
@@ -227,6 +266,7 @@ if __name__ == "__main__":
         "normals_reference_wys": args.reference_wys,
         "n_stations": len(stations),
         "stations_by_state": {st: by_state.get(st, 0) for st in states},
+        "huc_prefix_by_state": {st: HUC_PREFIX_BY_STATE[st] for st in huc_states},
         "latest_date": obs_days[-1]["date"],
         "median_peak": {"date": peak["date"], "median_swe_in": peak["median_swe_in"]},
         "median": median_curve,

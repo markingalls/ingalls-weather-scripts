@@ -45,7 +45,7 @@ python3 build_chart.py
 ```
 
 The fetch takes a little over a minute (AWDB is slow on multi-state
-wildcard queries; the script runs its four calls concurrently). Re-run it any time to pick up the latest day; the water year is
+wildcard queries; the script runs its calls concurrently). Re-run it any time to pick up the latest day; the water year is
 chosen automatically from `--end-date` (default today): Oct 1 onward is
 the next calendar year's water year.
 
@@ -58,8 +58,20 @@ the next calendar year's water year.
   weather stations, run by the BC River Forecast Centre, are carried in
   AWDB under network `MSNT` (`NETWORK_BY_STATE` in `fetch_snowpack.py`).
   BC's manual snow courses (`SNOW`) are monthly readings, not daily, so
-  they're left out. All values come back in inches. BC spans the whole
-  province, including the far north, not just its southern ranges.
+  they're left out. All values come back in inches.
+- **BC is limited to Pacific Northwest drainages**: AWDB carries BC
+  stations across the whole province, up to ~57.6N. The script keeps
+  only BC stations whose USGS hydrologic unit code (HUC) starts with
+  `17`, i.e. HUC region 17, the Pacific Northwest. That's 18 stations,
+  mostly southern-BC Columbia Basin sites (Okanagan, Kootenays,
+  Revelstoke) plus Blackwall Peak and Chilliwack River. Of those, 4
+  (Trout Creek West, Greyback Reservoir, Whiterocks Mountain, Oyama
+  Lake) are too new for normals, so 14 make it onto the chart. Two
+  side effects: BC stations AWDB doesn't tag with any HUC are dropped
+  even if they're close to the border (e.g. Wahleach Lake, Spuzzum
+  Creek, Vancouver Island's Jump Creek), and two stations tagged HUC 19
+  (Alaska drainages) are dropped. The filter lives in
+  `HUC_PREFIX_BY_STATE`; U.S. states aren't filtered.
 - **Median, not mean**: the comparison curve is AWDB's
   `centralTendencyType=MEDIAN` -- NRCS's 1991-2020 daily median, the same
   statistic NRCS's own snowpack reports lead with (a mean gets pulled up
@@ -74,12 +86,11 @@ the next calendar year's water year.
   WY2024, WY2023, WY2025) and merges them, first year with a given
   calendar day winning. The median for a calendar day is the same
   1991-2020 value whichever year it's read from, so merging just fills
-  outage gaps. That matters mostly for BC, where only 20 of 55 stations
-  had an unbroken WY2024; merging three years brings 50 up to full
-  coverage. WY2024 goes first because it includes Feb 29; a Feb 29 still
+  outage gaps. That matters mostly for BC, where many stations had
+  outages in WY2024. WY2024 goes first because it includes Feb 29; a Feb 29 still
   missing is filled with the mean of Feb 28 and Mar 1.
 - **Station set**: fixed to stations with a median for every calendar
-  day (276 as of Nov 2026: WA 68, OR 77, ID 81, BC 50), so the median
+  day (240 as of Nov 2026: WA 68, OR 77, ID 81, BC 14), so the median
   curve is one consistent set of sites all season. Stations too new to
   have normals drop out here. `snowpack.json`'s `n_stations` and
   `stations_by_state` report the counts.
