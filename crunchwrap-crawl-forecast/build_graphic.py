@@ -438,29 +438,36 @@ def draw_sauce_packet(ax, cx, cy, h, aspect, color, angle_deg=0):
 
 
 def draw_taco(ax, cx, cy, w, aspect):
-    """A hard-shell taco standing upright: curved shell below, with lettuce,
-    tomato, and cheese piled out of the open top. (cx, cy) is the middle of
-    the shell's open edge."""
+    """A hard-shell taco from the side: flat fold along the bottom, domed
+    shell on top, with lettuce, tomato, and cheese spilling out along the
+    curved open edge. (cx, cy) is the middle of the flat bottom."""
     h = w * 0.55
-    # lettuce fringe -- a scalloped band just above the shell's open edge
-    xs = [w * 0.49 * (i / 20 - 1) for i in range(41)]
-    fringe = ([(x, 0.22 * h + 0.09 * h * math.cos(x / w * 14 * math.pi)) for x in xs]
-              + [(w * 0.49, -0.02 * h), (-w * 0.49, -0.02 * h)])
-    ax.add_patch(Polygon(_rotate(fringe, cx, cy, 0, aspect), closed=True,
+
+    def arc_point(t_deg, r):
+        t = math.radians(t_deg)
+        return (w / 2 * r * math.cos(t), h * r * math.sin(t))
+
+    # lettuce: a scalloped band hugging the outside of the dome, tucked
+    # under the shell so only the frilly outer edge shows
+    ts = range(10, 171, 3)
+    outer = [arc_point(t, 1.13 + 0.06 * math.cos(math.radians(t) * 22)) for t in ts]
+    inner = [arc_point(t, 0.85) for t in reversed(ts)]
+    ax.add_patch(Polygon(_rotate(outer + inner, cx, cy, 0, aspect), closed=True,
                          facecolor=LETTUCE, edgecolor="none", zorder=1.9))
-    for dx in (-0.30, -0.02, 0.26):
-        ax.add_patch(Ellipse((cx + dx * w * aspect, cy + 0.26 * h), 0.13 * w * aspect, 0.13 * w,
+    for t in (35, 90, 145):
+        x, y = arc_point(t, 1.10)
+        ax.add_patch(Ellipse((cx + x * aspect, cy + y), 0.13 * w * aspect, 0.13 * w,
                              facecolor=TOMATO, edgecolor="none", zorder=1.95))
-    for dx in (-0.16, 0.12, 0.38):
-        ax.add_patch(Rectangle((cx + dx * w * aspect, cy + 0.10 * h), 0.04 * w * aspect, 0.30 * h,
-                               facecolor=CHEESE, edgecolor="none", zorder=1.97))
-    shell = [(w / 2 * math.cos(math.radians(t)), -h * math.sin(math.radians(t))) for t in range(0, 181, 6)]
+    for t in (60, 118, 20, 162):
+        x, y = arc_point(t, 1.12)
+        ax.add_patch(Ellipse((cx + x * aspect, cy + y), 0.05 * w * aspect, 0.16 * h,
+                             angle=t - 90, facecolor=CHEESE, edgecolor="none", zorder=1.97))
+    shell = [arc_point(t, 1.0) for t in range(0, 181, 6)]
     ax.add_patch(Polygon(_rotate(shell, cx, cy, 0, aspect), closed=True,
                          facecolor=TORTILLA, edgecolor=TORTILLA_DARK, linewidth=1.5, zorder=2))
-    # the shell's inner fold, a smaller arc inside the curve
-    inner = _rotate([(w * 0.36 * math.cos(math.radians(t)), -h * 0.72 * math.sin(math.radians(t)))
-                     for t in range(10, 171, 8)], cx, cy, 0, aspect)
-    ax.plot([x for x, _ in inner], [y for _, y in inner], color=TORTILLA_DARK, linewidth=1.2, zorder=2.05)
+    # a crease just inside the curve, where the shell's rim turns in
+    crease = _rotate([arc_point(t, 0.82) for t in range(14, 167, 6)], cx, cy, 0, aspect)
+    ax.plot([x for x, _ in crease], [y for _, y in crease], color=TORTILLA_DARK, linewidth=1.1, zorder=2.05)
 
 
 def draw_checkered_strip(ax, y0, square_in, fig_w_in, fig_h_in):
@@ -474,6 +481,29 @@ def draw_checkered_strip(ax, y0, square_in, fig_w_in, fig_h_in):
             if (i + row) % 2 == 0:
                 ax.add_patch(Rectangle((i * sq_w, y0 + row * sq_h), sq_w, sq_h,
                                        facecolor="white", edgecolor="none", alpha=0.9, zorder=1))
+
+
+def hottest_hour(data, race_day, local_tz):
+    """The local top-of-the-hour with the day's highest temperature, from
+    the same source the cards use (MetaMesh, else NWS hourly). Ties go to
+    the earliest hour."""
+    best = None
+    records = (data.get("metamesh") or {}).get("forecasts", [])
+    if records and isinstance(records[0], list):
+        records = records[0]
+    for rec in records:
+        t = datetime.fromisoformat(rec["time"].replace("Z", "+00:00")).astimezone(local_tz)
+        if t.date() == race_day and rec.get("temperature_2m") is not None:
+            if best is None or rec["temperature_2m"] > best[1]:
+                best = (t, rec["temperature_2m"])
+    if best is None:
+        for period in data["hourly"]:
+            t = datetime.fromisoformat(period["startTime"]).astimezone(local_tz)
+            if t.date() == race_day and (best is None or period["temperature"] > best[1]):
+                best = (t, period["temperature"])
+    if best is None:
+        raise SystemExit(f"No hourly temperatures for {race_day} -- re-run fetch_forecast.py.")
+    return best[0]
 
 
 def next_saturday(today):
@@ -507,7 +537,9 @@ def main():
         ("START", start, True),
         (f"LAST YEAR WINNER - {elapsed_label(winner)}", start + winner, False),
         (f"CUTOFF - {elapsed_label(limit)}", start + limit, False),
+        ("HOTTEST HOUR", hottest_hour(data, race_day, local_tz), False),
     ]
+    stages.sort(key=lambda stage: stage[1])
     frames = []
     for role, frame_time, is_start in stages:
         frame = build_frame(data, frame_time, sunrise, sunset, is_start)
@@ -533,7 +565,7 @@ def main():
 
     LEFT, RIGHT = 0.055, 0.965
     CARD_TOP, CARD_BOTTOM = 0.775, 0.135
-    GUTTER = 0.022
+    GUTTER = 0.016
     n = len(frames)
     card_w = (RIGHT - LEFT - (n - 1) * GUTTER) / n
 
@@ -563,26 +595,26 @@ def main():
             facecolor=CARD_FILL, edgecolor=CARD_EDGE, linewidth=1.0, zorder=2))
 
         ax.text(cx, ROLE_Y, frame["role"], ha="center", va="top",
-                 fontproperties=f_bold, fontsize=12.5, color=MAGENTA, zorder=3)
+                 fontproperties=f_bold, fontsize=10, color=MAGENTA, zorder=3)
         ax.text(cx, TIME_Y, clock_label(frame["time"]), ha="center", va="top",
-                 fontproperties=f_bold, fontsize=30, color=BG, zorder=3)
+                 fontproperties=f_bold, fontsize=27, color=BG, zorder=3)
         ax.text(cx, LIGHT_Y, frame["light"], ha="center", va="top",
                  fontproperties=f_med, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
         icon_text = ax.text(cx, ICON_Y, frame["glyph"], ha="center", va="center",
-                             fontproperties=ICON_FONT, fontsize=60, color=frame["glyph_color"], zorder=3)
+                             fontproperties=ICON_FONT, fontsize=54, color=frame["glyph_color"], zorder=3)
         # same fake-bold stroke as the 7-day -- the icon font has no bold weight
         icon_text.set_path_effects([pe.withStroke(linewidth=2.0, foreground=frame["glyph_color"])])
 
         ax.text(cx, COND_Y, frame["condition"], ha="center", va="center",
-                 fontproperties=f_reg, fontsize=12.5, color=INK, zorder=3)
+                 fontproperties=f_reg, fontsize=11.5, color=INK, zorder=3)
 
         temp_text = f"{frame['temp']}°" if frame["temp"] is not None else "—"
         ax.text(cx, TEMP_Y, temp_text, ha="center", va="center",
-                 fontproperties=f_bold, fontsize=40, color=INK, zorder=3)
+                 fontproperties=f_bold, fontsize=36, color=INK, zorder=3)
         if frame["feels_like"] is not None:
             ax.text(cx, FEELS_Y, f"Feels like {frame['feels_like']}°", ha="center", va="center",
-                     fontproperties=f_med, fontsize=12.5, color=INK_SECONDARY, zorder=3)
+                     fontproperties=f_med, fontsize=11.5, color=INK_SECONDARY, zorder=3)
 
         # precip chance (if any) then wind, packed into the two detail rows
         detail_ys = iter([DETAIL_1_Y, DETAIL_2_Y])
@@ -608,7 +640,7 @@ def main():
                  color=CARD_EDGE, linewidth=1.0, zorder=3)
         for tip, y in zip(frame["tips"], [TIP_1_Y, TIP_2_Y]):
             ax.text(cx, y, tip, ha="center", va="center",
-                     fontproperties=f_med, fontsize=11.5, color=MAGENTA if y == TIP_1_Y else INK_SECONDARY,
+                     fontproperties=f_med, fontsize=10, color=MAGENTA if y == TIP_1_Y else INK_SECONDARY,
                      zorder=3)
 
     # ---------- logo (top-left, round badge) + title / subtitle ----------
@@ -641,8 +673,8 @@ def main():
               fontproperties=f_reg, fontsize=12, color=SUB_INK)
 
     # ---------- attribution + tacos + finish line ----------
-    draw_taco(ax, LEFT + 0.035, 0.092, 0.075, aspect)
-    draw_taco(ax, RIGHT - 0.035, 0.092, 0.075, aspect)
+    draw_taco(ax, LEFT + 0.035, 0.052, 0.075, aspect)
+    draw_taco(ax, RIGHT - 0.035, 0.052, 0.075, aspect)
     draw_checkered_strip(ax, 0.0, 0.14, fig_w_in, fig_h_in)
     uses_metamesh = all(f["temp_source"] == "metamesh" for f in frames)
     sources = "NWS/ECMWF/MetaMesh" if uses_metamesh else "NWS/ECMWF"

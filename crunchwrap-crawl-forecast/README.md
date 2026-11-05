@@ -2,13 +2,14 @@
 
 A taco-shop-themed spin on [`tri-cities-7day-forecast/`](../tri-cities-7day-forecast/),
 built from [`halloween-trick-or-treat-forecast/`](../halloween-trick-or-treat-forecast/):
-three cards for the Tri-Cities Crunchwrap Crawl, one per key moment of the
-race:
+four cards for the Tri-Cities Crunchwrap Crawl, one per key moment of the
+race, in time order:
 
 | Card | Default | Why |
 |---|---|---|
 | **START** | 08:00 | gun time |
 | **LAST YEAR WINNER - 4:59:24** | start + 4:59:24 (12:59) | where last year's winner would cross the line |
+| **HOTTEST HOUR** | warmest hour of race day | MetaMesh's (else NWS's) hourly max; ties go to the earlier hour |
 | **CUTOFF - 12:00:00** | start + 12:00:00 (20:00) | the time limit, where the last finishers are |
 
 The card shows the actual clock time (12:59), but the weather on it comes
