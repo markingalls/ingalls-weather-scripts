@@ -110,3 +110,8 @@ tpw-wm6-ensemble-map/output/*.png
 # run, and the rendered graphics are outputs too -- neither is source.
 halloween-trick-or-treat-forecast/forecast_*.json
 halloween-trick-or-treat-forecast/*_trick_or_treat_forecast.png
+# --- crunchwrap-crawl-forecast ---
+# forecast.json is live data fetch_forecast.py regenerates every run, and
+# the rendered graphic is an output too -- neither is source.
+crunchwrap-crawl-forecast/forecast.json
+crunchwrap-crawl-forecast/crunchwrap_crawl_forecast*.png
