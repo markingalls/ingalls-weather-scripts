@@ -2,18 +2,11 @@
 
 A taco-shop-themed spin on [`tri-cities-7day-forecast/`](../tri-cities-7day-forecast/),
 built from [`halloween-trick-or-treat-forecast/`](../halloween-trick-or-treat-forecast/):
-four cards for the Tri-Cities Crunchwrap Crawl, one per key moment of the
-race, in time order:
-
-| Card | Default | Why |
-|---|---|---|
-| **START** | 08:00 | gun time |
-| **LAST YEAR WINNER - 4:59:24** | start + 4:59:24 (12:59) | where last year's winner would cross the line |
-| **HOTTEST HOUR** | warmest hour of race day | MetaMesh's (else NWS's) hourly max; ties go to the earlier hour |
-| **CUTOFF - 12:00:00** | start + 12:00:00 (20:00) | the time limit, where the last finishers are |
-
-The card shows the actual clock time (12:59), but the weather on it comes
-from the nearest top of the hour (13:00), since every feed here is hourly.
+four cards for the Tri-Cities Crunchwrap Crawl at fixed hours through the
+race (`--hours`, default 08:00, 12:00, 16:00, 20:00). Each card is labeled
+with the race clock at that hour: `START` at the gun (`--start`, 08:00),
+`CUTOFF - 12:00:00` when it matches the time limit (`--limit`), and
+`RACE CLOCK H:MM:SS` in between.
 
 Deep purple background, white cards, magenta/cheese accents, a grilled
 hexagonal crunchwrap with hot-sauce packets, tacos, and a checkered
@@ -32,7 +25,7 @@ python3 fetch_forecast.py
 python3 build_graphic.py      # -> crunchwrap_crawl_forecast.png
 
 # Different date/start/record/limit
-python3 build_graphic.py --date 2027-11-06 --start 07:30 --winner 4:52:10 --limit 12:00:00
+python3 build_graphic.py --date 2027-11-06 --start 07:00 --limit 12:00:00 --hours 7 11 15 19
 ```
 
 `--date` defaults to the coming Saturday (today, if run on a Saturday).

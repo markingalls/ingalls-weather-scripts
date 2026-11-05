@@ -483,41 +483,18 @@ def draw_checkered_strip(ax, y0, square_in, fig_w_in, fig_h_in):
                                        facecolor="white", edgecolor="none", alpha=0.9, zorder=1))
 
 
-def hottest_hour(data, race_day, local_tz):
-    """The local top-of-the-hour with the day's highest temperature, from
-    the same source the cards use (MetaMesh, else NWS hourly). Ties go to
-    the earliest hour."""
-    best = None
-    records = (data.get("metamesh") or {}).get("forecasts", [])
-    if records and isinstance(records[0], list):
-        records = records[0]
-    for rec in records:
-        t = datetime.fromisoformat(rec["time"].replace("Z", "+00:00")).astimezone(local_tz)
-        if t.date() == race_day and rec.get("temperature_2m") is not None:
-            if best is None or rec["temperature_2m"] > best[1]:
-                best = (t, rec["temperature_2m"])
-    if best is None:
-        for period in data["hourly"]:
-            t = datetime.fromisoformat(period["startTime"]).astimezone(local_tz)
-            if t.date() == race_day and (best is None or period["temperature"] > best[1]):
-                best = (t, period["temperature"])
-    if best is None:
-        raise SystemExit(f"No hourly temperatures for {race_day} -- re-run fetch_forecast.py.")
-    return best[0]
-
-
 def next_saturday(today):
     return today + timedelta(days=(5 - today.weekday()) % 7)
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Render the Crunchwrap Crawl race-day forecast: start, last year's winner, and cutoff.")
+    ap = argparse.ArgumentParser(description="Render the Crunchwrap Crawl race-day forecast at fixed hours through the race.")
     ap.add_argument("--forecast", default="forecast.json", help="from fetch_forecast.py")
     ap.add_argument("--date", help="Local race date, YYYY-MM-DD (default: the coming Saturday)")
     ap.add_argument("--start", default="08:00", help="Local start time, HH:MM")
-    ap.add_argument("--winner", default="4:59:24",
-                     help="Last year's winning time, H:MM:SS -- the middle card")
-    ap.add_argument("--limit", default="12:00:00", help="Time limit, H:MM:SS -- the cutoff card")
+    ap.add_argument("--limit", default="12:00:00", help="Time limit, H:MM:SS -- labels the cutoff card")
+    ap.add_argument("--hours", type=int, nargs="+", default=[8, 12, 16, 20],
+                     help="Local hours (24h) for each card")
     ap.add_argument("--output", default="crunchwrap_crawl_forecast.png")
     return ap.parse_args()
 
@@ -531,18 +508,18 @@ def main():
 
     sunrise, sunset = sun_times(race_day, data["lat"], data["lon"], local_tz)
     start = datetime.combine(race_day, dtime.fromisoformat(args.start), tzinfo=local_tz)
-    winner = parse_race_time(args.winner)
     limit = parse_race_time(args.limit)
-    stages = [
-        ("START", start, True),
-        (f"LAST YEAR WINNER - {elapsed_label(winner)}", start + winner, False),
-        (f"CUTOFF - {elapsed_label(limit)}", start + limit, False),
-        ("HOTTEST HOUR", hottest_hour(data, race_day, local_tz), False),
-    ]
-    stages.sort(key=lambda stage: stage[1])
     frames = []
-    for role, frame_time, is_start in stages:
-        frame = build_frame(data, frame_time, sunrise, sunset, is_start)
+    for hour in args.hours:
+        frame_time = datetime.combine(race_day, dtime(hour), tzinfo=local_tz)
+        elapsed = frame_time - start
+        if elapsed == timedelta(0):
+            role = "START"
+        elif elapsed == limit:
+            role = f"CUTOFF - {elapsed_label(limit)}"
+        else:
+            role = f"RACE CLOCK {elapsed_label(elapsed)}"
+        frame = build_frame(data, frame_time, sunrise, sunset, is_start=elapsed == timedelta(0))
         frame["role"] = role
         frames.append(frame)
 
