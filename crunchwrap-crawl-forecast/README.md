@@ -8,8 +8,11 @@ race:
 | Card | Default | Why |
 |---|---|---|
 | **START** | 08:00 | gun time |
-| **RECORD PACE** | start + 5:00 | where last year's record holder finished |
-| **CUTOFF** | start + 12:00 | the time limit, where the last finishers are |
+| **LAST YEAR WINNER - 4:59:24** | start + 4:59:24 (12:59) | where last year's winner would cross the line |
+| **CUTOFF - 12:00:00** | start + 12:00:00 (20:00) | the time limit, where the last finishers are |
+
+The card shows the actual clock time (12:59), but the weather on it comes
+from the nearest top of the hour (13:00), since every feed here is hourly.
 
 Deep purple background, white cards, magenta/cheese accents, a grilled
 hexagonal crunchwrap with hot-sauce packets, tacos, and a checkered
@@ -28,7 +31,7 @@ python3 fetch_forecast.py
 python3 build_graphic.py      # -> crunchwrap_crawl_forecast.png
 
 # Different date/start/record/limit
-python3 build_graphic.py --date 2027-11-06 --start 07:30 --record-hours 4.75 --limit-hours 12
+python3 build_graphic.py --date 2027-11-06 --start 07:30 --winner 4:52:10 --limit 12:00:00
 ```
 
 `--date` defaults to the coming Saturday (today, if run on a Saturday).

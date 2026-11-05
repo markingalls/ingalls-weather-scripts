@@ -50,7 +50,7 @@ workflows. Each project lives in its own directory with its own README.
   what-to-wear tips.
 - [`crunchwrap-crawl-forecast/`](crunchwrap-crawl-forecast/) — taco-themed
   race-day forecast for the Tri-Cities Crunchwrap Crawl: three cards for the
-  start, record pace, and cutoff, with feels-like temps, precip chance,
+  start, last year's winning time, and cutoff, with feels-like temps, precip chance,
   wind, and runner tips.
 - [`tri-cities-temp-chart/`](tri-cities-temp-chart/) — generates a styled
   14-day chart of Tri-Cities daily high temperature: 7 days observed

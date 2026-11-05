@@ -46,9 +46,16 @@ def clock_label(dt):
 
 
 def elapsed_label(td):
-    """timedelta(hours=5) -> '5:00' -- race-clock style."""
-    minutes = round(td.total_seconds() / 60)
-    return f"{minutes // 60}:{minutes % 60:02d}"
+    """timedelta(hours=4, minutes=59, seconds=24) -> '4:59:24' -- race-clock style."""
+    seconds = round(td.total_seconds())
+    return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+
+def parse_race_time(text):
+    """'4:59:24' / '12:00:00' / '5:00' (H:MM) -> timedelta."""
+    parts = [int(p) for p in text.split(":")]
+    hours, minutes, seconds = (parts + [0, 0])[:3]
+    return timedelta(hours=hours, minutes=minutes, seconds=seconds)
 
 
 # ---------- palette (fast-food purple in place of the 7-day's light theme) ----------
@@ -346,7 +353,11 @@ def runner_tips(frame):
     return tips[:2]
 
 
-def build_frame(data, frame_time, sunrise, sunset, is_start):
+def build_frame(data, clock_time, sunrise, sunset, is_start):
+    # The card shows the real clock time (12:59:24 -> "12:59"), but every
+    # feed here is hourly and MetaMesh/the ensemble only match on the hour,
+    # so the weather comes from the nearest top of the hour.
+    frame_time = (clock_time + timedelta(minutes=30)).replace(minute=0, second=0, microsecond=0)
     period = nws_hour(data["hourly"], frame_time)
     if period is None:
         raise SystemExit(f"NWS hourly feed doesn't cover {frame_time.isoformat()} -- re-run fetch_forecast.py.")
@@ -368,9 +379,9 @@ def build_frame(data, frame_time, sunrise, sunset, is_start):
 
     wind = parse_nws_wind(period)
     frame = {
-        "time": frame_time,
+        "time": clock_time,
         "is_start": is_start,
-        "light": light_label(frame_time, sunrise, sunset),
+        "light": light_label(clock_time, sunrise, sunset),
         "glyph": glyph,
         "glyph_color": color,
         "condition": period["shortForecast"],
@@ -469,13 +480,13 @@ def next_saturday(today):
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Render the Crunchwrap Crawl race-day forecast: start, record pace, and cutoff.")
+    ap = argparse.ArgumentParser(description="Render the Crunchwrap Crawl race-day forecast: start, last year's winner, and cutoff.")
     ap.add_argument("--forecast", default="forecast.json", help="from fetch_forecast.py")
     ap.add_argument("--date", help="Local race date, YYYY-MM-DD (default: the coming Saturday)")
     ap.add_argument("--start", default="08:00", help="Local start time, HH:MM")
-    ap.add_argument("--record-hours", type=float, default=5,
-                     help="Course record, in hours -- the middle card's 'record pace' time")
-    ap.add_argument("--limit-hours", type=float, default=12, help="Time limit, in hours -- the cutoff card")
+    ap.add_argument("--winner", default="4:59:24",
+                     help="Last year's winning time, H:MM:SS -- the middle card")
+    ap.add_argument("--limit", default="12:00:00", help="Time limit, H:MM:SS -- the cutoff card")
     ap.add_argument("--output", default="crunchwrap_crawl_forecast.png")
     return ap.parse_args()
 
@@ -489,12 +500,12 @@ def main():
 
     sunrise, sunset = sun_times(race_day, data["lat"], data["lon"], local_tz)
     start = datetime.combine(race_day, dtime.fromisoformat(args.start), tzinfo=local_tz)
-    record = timedelta(hours=args.record_hours)
-    limit = timedelta(hours=args.limit_hours)
+    winner = parse_race_time(args.winner)
+    limit = parse_race_time(args.limit)
     stages = [
         ("START", start, True),
-        (f"RECORD PACE · {elapsed_label(record)}", start + record, False),
-        (f"CUTOFF · {elapsed_label(limit)}", start + limit, False),
+        (f"LAST YEAR WINNER - {elapsed_label(winner)}", start + winner, False),
+        (f"CUTOFF - {elapsed_label(limit)}", start + limit, False),
     ]
     frames = []
     for role, frame_time, is_start in stages:
