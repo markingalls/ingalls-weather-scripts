@@ -488,13 +488,13 @@ def next_saturday(today):
 
 
 def parse_args():
-    ap = argparse.ArgumentParser(description="Render the Crunchwrap Crawl race-day forecast at fixed hours through the race.")
+    ap = argparse.ArgumentParser(description="Render the Crunchwrap Crawl race-day forecast: start, last year's winner, and cutoff.")
     ap.add_argument("--forecast", default="forecast.json", help="from fetch_forecast.py")
     ap.add_argument("--date", help="Local race date, YYYY-MM-DD (default: the coming Saturday)")
     ap.add_argument("--start", default="08:00", help="Local start time, HH:MM")
-    ap.add_argument("--limit", default="12:00:00", help="Time limit, H:MM:SS -- labels the cutoff card")
-    ap.add_argument("--hours", type=int, nargs="+", default=[8, 12, 16, 20],
-                     help="Local hours (24h) for each card")
+    ap.add_argument("--winner", default="4:59:24",
+                     help="Last year's winning time, H:MM:SS -- the middle card")
+    ap.add_argument("--limit", default="12:00:00", help="Time limit, H:MM:SS -- the cutoff card")
     ap.add_argument("--output", default="crunchwrap_crawl_forecast.png")
     return ap.parse_args()
 
@@ -508,18 +508,16 @@ def main():
 
     sunrise, sunset = sun_times(race_day, data["lat"], data["lon"], local_tz)
     start = datetime.combine(race_day, dtime.fromisoformat(args.start), tzinfo=local_tz)
+    winner = parse_race_time(args.winner)
     limit = parse_race_time(args.limit)
+    stages = [
+        ("START", start, True),
+        (f"LAST YEAR WINNER - {elapsed_label(winner)}", start + winner, False),
+        (f"CUTOFF - {elapsed_label(limit)}", start + limit, False),
+    ]
     frames = []
-    for hour in args.hours:
-        frame_time = datetime.combine(race_day, dtime(hour), tzinfo=local_tz)
-        elapsed = frame_time - start
-        if elapsed == timedelta(0):
-            role = "START"
-        elif elapsed == limit:
-            role = f"CUTOFF - {elapsed_label(limit)}"
-        else:
-            role = f"RACE CLOCK {elapsed_label(elapsed)}"
-        frame = build_frame(data, frame_time, sunrise, sunset, is_start=elapsed == timedelta(0))
+    for role, frame_time, is_start in stages:
+        frame = build_frame(data, frame_time, sunrise, sunset, is_start)
         frame["role"] = role
         frames.append(frame)
 
@@ -542,7 +540,7 @@ def main():
 
     LEFT, RIGHT = 0.055, 0.965
     CARD_TOP, CARD_BOTTOM = 0.775, 0.135
-    GUTTER = 0.016
+    GUTTER = 0.022
     n = len(frames)
     card_w = (RIGHT - LEFT - (n - 1) * GUTTER) / n
 
@@ -572,26 +570,26 @@ def main():
             facecolor=CARD_FILL, edgecolor=CARD_EDGE, linewidth=1.0, zorder=2))
 
         ax.text(cx, ROLE_Y, frame["role"], ha="center", va="top",
-                 fontproperties=f_bold, fontsize=10, color=MAGENTA, zorder=3)
+                 fontproperties=f_bold, fontsize=12.5, color=MAGENTA, zorder=3)
         ax.text(cx, TIME_Y, clock_label(frame["time"]), ha="center", va="top",
-                 fontproperties=f_bold, fontsize=27, color=BG, zorder=3)
+                 fontproperties=f_bold, fontsize=30, color=BG, zorder=3)
         ax.text(cx, LIGHT_Y, frame["light"], ha="center", va="top",
                  fontproperties=f_med, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
         icon_text = ax.text(cx, ICON_Y, frame["glyph"], ha="center", va="center",
-                             fontproperties=ICON_FONT, fontsize=54, color=frame["glyph_color"], zorder=3)
+                             fontproperties=ICON_FONT, fontsize=60, color=frame["glyph_color"], zorder=3)
         # same fake-bold stroke as the 7-day -- the icon font has no bold weight
         icon_text.set_path_effects([pe.withStroke(linewidth=2.0, foreground=frame["glyph_color"])])
 
         ax.text(cx, COND_Y, frame["condition"], ha="center", va="center",
-                 fontproperties=f_reg, fontsize=11.5, color=INK, zorder=3)
+                 fontproperties=f_reg, fontsize=12.5, color=INK, zorder=3)
 
         temp_text = f"{frame['temp']}°" if frame["temp"] is not None else "—"
         ax.text(cx, TEMP_Y, temp_text, ha="center", va="center",
-                 fontproperties=f_bold, fontsize=36, color=INK, zorder=3)
+                 fontproperties=f_bold, fontsize=40, color=INK, zorder=3)
         if frame["feels_like"] is not None:
             ax.text(cx, FEELS_Y, f"Feels like {frame['feels_like']}°", ha="center", va="center",
-                     fontproperties=f_med, fontsize=11.5, color=INK_SECONDARY, zorder=3)
+                     fontproperties=f_med, fontsize=12.5, color=INK_SECONDARY, zorder=3)
 
         # precip chance (if any) then wind, packed into the two detail rows
         detail_ys = iter([DETAIL_1_Y, DETAIL_2_Y])
@@ -617,7 +615,7 @@ def main():
                  color=CARD_EDGE, linewidth=1.0, zorder=3)
         for tip, y in zip(frame["tips"], [TIP_1_Y, TIP_2_Y]):
             ax.text(cx, y, tip, ha="center", va="center",
-                     fontproperties=f_med, fontsize=10, color=MAGENTA if y == TIP_1_Y else INK_SECONDARY,
+                     fontproperties=f_med, fontsize=11.5, color=MAGENTA if y == TIP_1_Y else INK_SECONDARY,
                      zorder=3)
 
     # ---------- logo (top-left, round badge) + title / subtitle ----------
