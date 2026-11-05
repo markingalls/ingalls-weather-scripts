@@ -438,26 +438,27 @@ def draw_sauce_packet(ax, cx, cy, h, aspect, color, angle_deg=0):
 
 
 def draw_taco(ax, cx, cy, w, aspect):
-    """A hard-shell taco lying on its side: domed shell on top, with
-    lettuce, tomato, and cheese spilling out along the open edge below."""
+    """A hard-shell taco standing upright: curved shell below, with lettuce,
+    tomato, and cheese piled out of the open top. (cx, cy) is the middle of
+    the shell's open edge."""
     h = w * 0.55
-    # lettuce fringe -- a scalloped band just under the shell's open edge
+    # lettuce fringe -- a scalloped band just above the shell's open edge
     xs = [w * 0.49 * (i / 20 - 1) for i in range(41)]
-    fringe = ([(x, -0.10 * h - 0.06 * h * math.cos(x / w * 14 * math.pi)) for x in xs]
-              + [(w * 0.49, 0.02 * h), (-w * 0.49, 0.02 * h)])
+    fringe = ([(x, 0.22 * h + 0.09 * h * math.cos(x / w * 14 * math.pi)) for x in xs]
+              + [(w * 0.49, -0.02 * h), (-w * 0.49, -0.02 * h)])
     ax.add_patch(Polygon(_rotate(fringe, cx, cy, 0, aspect), closed=True,
                          facecolor=LETTUCE, edgecolor="none", zorder=1.9))
     for dx in (-0.30, -0.02, 0.26):
-        ax.add_patch(Ellipse((cx + dx * w * aspect, cy - 0.12 * h), 0.11 * w * aspect, 0.11 * w,
+        ax.add_patch(Ellipse((cx + dx * w * aspect, cy + 0.26 * h), 0.13 * w * aspect, 0.13 * w,
                              facecolor=TOMATO, edgecolor="none", zorder=1.95))
     for dx in (-0.16, 0.12, 0.38):
-        ax.add_patch(Rectangle((cx + dx * w * aspect, cy - 0.20 * h), 0.035 * w * aspect, 0.16 * h,
+        ax.add_patch(Rectangle((cx + dx * w * aspect, cy + 0.10 * h), 0.04 * w * aspect, 0.30 * h,
                                facecolor=CHEESE, edgecolor="none", zorder=1.97))
-    shell = [(w / 2 * math.cos(math.radians(t)), h * math.sin(math.radians(t))) for t in range(0, 181, 6)]
+    shell = [(w / 2 * math.cos(math.radians(t)), -h * math.sin(math.radians(t))) for t in range(0, 181, 6)]
     ax.add_patch(Polygon(_rotate(shell, cx, cy, 0, aspect), closed=True,
                          facecolor=TORTILLA, edgecolor=TORTILLA_DARK, linewidth=1.5, zorder=2))
-    # the shell's inner fold, a smaller arc inside the dome
-    inner = _rotate([(w * 0.36 * math.cos(math.radians(t)), h * 0.72 * math.sin(math.radians(t)))
+    # the shell's inner fold, a smaller arc inside the curve
+    inner = _rotate([(w * 0.36 * math.cos(math.radians(t)), -h * 0.72 * math.sin(math.radians(t)))
                      for t in range(10, 171, 8)], cx, cy, 0, aspect)
     ax.plot([x for x, _ in inner], [y for _, y in inner], color=TORTILLA_DARK, linewidth=1.2, zorder=2.05)
 
@@ -640,8 +641,8 @@ def main():
               fontproperties=f_reg, fontsize=12, color=SUB_INK)
 
     # ---------- attribution + tacos + finish line ----------
-    draw_taco(ax, LEFT + 0.035, 0.070, 0.075, aspect)
-    draw_taco(ax, RIGHT - 0.035, 0.070, 0.075, aspect)
+    draw_taco(ax, LEFT + 0.035, 0.092, 0.075, aspect)
+    draw_taco(ax, RIGHT - 0.035, 0.092, 0.075, aspect)
     draw_checkered_strip(ax, 0.0, 0.14, fig_w_in, fig_h_in)
     uses_metamesh = all(f["temp_source"] == "metamesh" for f in frames)
     sources = "NWS/ECMWF/MetaMesh" if uses_metamesh else "NWS/ECMWF"
