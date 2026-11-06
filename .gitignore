@@ -105,3 +105,8 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+# --- snow-level-chart ---
+# forecast_<site>.json is live data fetch_forecast.py regenerates every run,
+# and the rendered charts are outputs -- neither is source.
+snow-level-chart/forecast_*.json
+snow-level-chart/snow_level_*.png
