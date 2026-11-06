@@ -1,12 +1,11 @@
 """
 Fetches the WM-6 vertical temperature profile (temperature + geopotential on
-every pressure level from 1000 to 500 mb) for one site from WindBorne, plus
-the NWS gridpoint forecast's own snow level for the same point, and writes
-forecast_<site>.json. Run this before build_chart.py any time you want the
+every pressure level from 1000 to 500 mb) for one site from WindBorne and
+writes forecast_<site>.json. Run this before build_chart.py any time you want the
 chart to reflect the latest model run.
 
 Requires WB_API_KEY to be set in the environment. Get a key at
-https://app.windbornesystems.com/api_tokens. The NWS part needs no key.
+https://app.windbornesystems.com/api_tokens.
 """
 import argparse
 import json
@@ -17,9 +16,6 @@ import requests
 from sites import SITES
 
 API_URL = "https://api.windbornesystems.com/forecasts/v1/wm-6/point_forecast/interpolated"
-NWS_POINTS_URL = "https://api.weather.gov/points/{lat:.4f},{lon:.4f}"
-NWS_HEADERS = {"User-Agent": "ingalls-weather-scripts snow-level-chart",
-               "Accept": "application/geo+json"}
 
 # 1000-500 mb covers sea level to ~18,000 ft -- every snow level the
 # Cascades will ever see.
@@ -52,23 +48,6 @@ def flatten_level(resp, level):
     return out
 
 
-def fetch_nws_snow_level(lat, lon):
-    """NWS gridpoint snowLevel series (metres, validTime intervals). Returns
-    None rather than failing the whole fetch if api.weather.gov is down."""
-    try:
-        pt = requests.get(NWS_POINTS_URL.format(lat=lat, lon=lon), headers=NWS_HEADERS, timeout=30)
-        pt.raise_for_status()
-        props = pt.json()["properties"]
-        grid = requests.get(props["forecastGridData"], headers=NWS_HEADERS, timeout=30)
-        grid.raise_for_status()
-        sl = grid.json()["properties"]["snowLevel"]
-        return {"office": props["gridId"], "gridX": props["gridX"], "gridY": props["gridY"],
-                "uom": sl.get("uom"), "values": sl["values"]}
-    except (requests.RequestException, KeyError, ValueError) as e:
-        print(f"NOTE: NWS snow level unavailable ({e}) -- chart will show WM-6 only.")
-        return None
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--site", choices=sorted(SITES), required=True)
@@ -92,7 +71,7 @@ def main():
         levels[str(level)] = flatten_level(resp, level)
 
     data = {"site": args.site, "lat": lat, "lon": lon, **meta,
-            "levels": levels, "nws": fetch_nws_snow_level(lat, lon)}
+            "levels": levels}
 
     output = args.output or f"forecast_{args.site}.json"
     with open(output, "w") as f:

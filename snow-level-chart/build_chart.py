@@ -1,7 +1,6 @@
 import argparse
 import json
 import os
-import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -31,17 +30,15 @@ AXIS_COLOR = "#000000"
 SNOW_LINE = "#1d4f86"       # WM-6 snow level
 SNOW_FILL = "#1d4f86"       # tint above the snow level (where precip falls as snow)
 SNOW_FILL_ALPHA = 0.10
-NWS_LINE = "#c9531c"        # NWS gridpoint snow level, for comparison
 REF_LINE = INK              # dotted pass / town / ski-area lines
 
 # z-order layering, back to front: snow tint -> gridlines -> reference lines
-# -> NWS line -> WM-6 line -> reference labels.
+# -> snow level line -> reference labels.
 Z_FILL = 1
 Z_GRID = 2
 Z_REF = 3
-Z_NWS = 4
-Z_SNOW = 5
-Z_LABEL = 6
+Z_SNOW = 4
+Z_LABEL = 5
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 M_TO_FT = 3.28084
@@ -75,42 +72,12 @@ def parse_time(s):
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def parse_duration(s):
-    """ISO-8601 durations as NWS uses them, e.g. PT3H, P1D, P1DT6H."""
-    m = re.fullmatch(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?", s)
-    d, h, mi = (int(x) if x else 0 for x in m.groups())
-    return timedelta(days=d, hours=h, minutes=mi)
-
-
-def nws_series(nws, t0, t1):
-    """Step series (times, feet) from NWS validTime intervals, clipped to the
-    WM-6 window."""
-    if not nws:
-        return None, None
-    scale = M_TO_FT if nws.get("uom", "wmoUnit:m").endswith(":m") else 1.0
-    times, vals = [], []
-    for v in nws["values"]:
-        start_s, dur_s = v["validTime"].split("/")
-        start = parse_time(start_s)
-        end = start + parse_duration(dur_s)
-        if end <= t0 or start >= t1 or v["value"] is None:
-            continue
-        start, end = max(start, t0), min(end, t1)
-        ft = v["value"] * scale
-        times += [start, end]
-        vals += [ft, ft]
-    if not times:
-        return None, None
-    return times, np.array(vals)
-
-
 def parse_args():
     ap = argparse.ArgumentParser(description="Render a 5-day snow level chart for one site.")
     ap.add_argument("--site", choices=sorted(SITES), required=True)
     ap.add_argument("--forecast", default=None, help="Defaults to forecast_<site>.json")
     ap.add_argument("--output", default=None, help="Defaults to snow_level_<site>.png")
     ap.add_argument("--days", type=float, default=5)
-    ap.add_argument("--no-nws", action="store_true", help="Leave the NWS comparison line off")
     return ap.parse_args()
 
 
@@ -135,8 +102,6 @@ def main():
         snow_ft.append(snow_level_m(z, t) * M_TO_FT)
     snow_ft = np.array(snow_ft)
 
-    nws_t, nws_ft = (None, None) if args.no_nws else nws_series(fdata.get("nws"), t0, times[-1])
-
     init_time = parse_time(fdata["initialization_time"])
     lat, lon = fdata["lat"], fdata["lon"]
     ns, ew = ("N" if lat >= 0 else "S"), ("E" if lon >= 0 else "W")
@@ -150,7 +115,7 @@ def main():
     # ---------- y-axis: 0 up to the highest of data / reference lines,
     # rounded up to the next 1,000 ft with a little headroom ----------
     ref_max = max((r["elev_ft"] for r in site["refs"]), default=0)
-    data_max = max(float(np.max(snow_ft)), float(np.max(nws_ft)) if nws_ft is not None else 0)
+    data_max = float(np.max(snow_ft))
     y_top = np.ceil((max(ref_max, data_max) + 800) / 1000) * 1000
     ax.set_ylim(0, y_top)
 
@@ -162,17 +127,16 @@ def main():
     for ref in site["refs"]:
         ax.axhline(ref["elev_ft"], color=REF_LINE, linewidth=1.3, linestyle=(0, (1, 2.2)),
                    zorder=Z_REF)
-        # nudged a few points above the line so the label's backing box
+        # nudged a few points off the line so the label's backing box
         # doesn't hide the dotted line itself
+        below = ref.get("label_below", False)
         ax.annotate(f"{ref['label']} ({ref['elev_ft']:,} ft)",
                     xy=(0.008, ref["elev_ft"]), xycoords=ax.get_yaxis_transform(),
-                    xytext=(0, 3.5), textcoords="offset points", ha="left", va="bottom",
-                    fontproperties=f_med, fontsize=10, color=INK, zorder=Z_LABEL,
+                    xytext=(0, -3.5 if below else 3.5), textcoords="offset points",
+                    ha="left", va="top" if below else "bottom",
+                    fontproperties=f_med, fontsize=site.get("label_fontsize", 10),
+                    color=INK, zorder=Z_LABEL,
                     bbox=dict(boxstyle="square,pad=0.1", facecolor="white", edgecolor="none", alpha=0.8))
-
-    if nws_t is not None:
-        ax.plot(nws_t, nws_ft, color=NWS_LINE, linewidth=2.0, linestyle="--", dashes=(6, 3),
-                zorder=Z_NWS, label=f"NWS {fdata['nws']['office']} forecast")
 
     ax.plot(times, snow_ft, color=SNOW_LINE, linewidth=2.8, zorder=Z_SNOW,
             label="WeatherMesh-6 snow level")
@@ -210,12 +174,12 @@ def main():
 
     # ---------- legend (horizontal strip above the plot) ----------
     handles, labels = ax.get_legend_handles_labels()
-    order = ["WeatherMesh-6 snow level"] + [l for l in labels if l.startswith("NWS")] + ["Snow"]
+    order = ["WeatherMesh-6 snow level", "Snow"]
     by_label = dict(zip(labels, handles))
     leg = fig.legend([by_label[l] for l in order if l in by_label],
                      [("Snow above this level" if l == "Snow" else l) for l in order if l in by_label],
                      loc="lower left", bbox_to_anchor=(left_x, top_y + 0.012),
-                     bbox_transform=fig.transFigure, ncol=3, frameon=False,
+                     bbox_transform=fig.transFigure, ncol=2, frameon=False,
                      prop=f_reg, fontsize=10.5, handlelength=1.6, columnspacing=1.6)
     for text in leg.get_texts():
         text.set_color(INK_SECONDARY)
@@ -254,10 +218,7 @@ def main():
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     # ---------- attribution ----------
-    source = "WindBorne WeatherMesh-6"
-    if nws_t is not None:
-        source += f" / NWS {fdata['nws']['office']} gridpoint forecast"
-    fig.text(center_x, 0.02, f"{source} — Ingalls Weather",
+    fig.text(center_x, 0.02, "WindBorne WeatherMesh-6 — Ingalls Weather",
              fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
     plt.savefig(output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)

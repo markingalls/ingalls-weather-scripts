@@ -11,21 +11,20 @@ Two sites are built in (see `sites.py`):
 - **`hood`** — Mount Hood, with dotted lines at Government Camp (3,980 ft),
   Mt. Hood Meadows base (4,523 ft), and Timberline Lodge (5,960 ft).
 
-Each chart shows the WindBorne WeatherMesh-6 snow level (solid blue, with
-the area above it tinted as "snow"), and the NWS gridpoint forecast's own
-snow level (dashed orange) for comparison.
+Each chart shows the WindBorne WeatherMesh-6 snow level (solid blue), with
+the area above it tinted as "snow".
 
 ## Files
 
 - `sites.py` — site definitions: the point the model profile is pulled at,
-  the chart title, and the reference lines (label + elevation in feet). Add
-  a site here to chart somewhere new.
+  the chart title, and the reference lines (label + elevation in feet).
+  Optional `label_fontsize` per site and `label_below` per line control the
+  labels (Mount Hood uses both, since its three lines sit close together).
+  Add a site here to chart somewhere new.
 - `fetch_forecast.py` — pulls WM-6 temperature + geopotential on every
-  pressure level from 1000 to 500 mb (13 requests) for one site, plus the
-  NWS gridpoint `snowLevel` series, and writes `forecast_<site>.json`.
-  Requires `WB_API_KEY` (https://app.windbornesystems.com/api_tokens); the
-  NWS part needs no key and is skipped with a note if api.weather.gov is
-  down.
+  pressure level from 1000 to 500 mb (13 requests) for one site and writes
+  `forecast_<site>.json`. Requires `WB_API_KEY`
+  (https://app.windbornesystems.com/api_tokens).
 - `build_chart.py` — derives the snow level from the profile and renders
   `snow_level_<site>.png`.
 - `requirements.txt` / `setup.sh` — Python dependencies. Poppins needs
@@ -44,7 +43,6 @@ python3 fetch_forecast.py --site hood
 python3 build_chart.py --site hood
 
 # Options
-python3 build_chart.py --site hood --no-nws    # WM-6 line only
 python3 build_chart.py --site hood --days 3    # shorter window
 ```
 
@@ -71,11 +69,9 @@ cold air in a pass) doesn't drag the snow level down.
 - **This is a temperature-only snow level.** It doesn't include the cooling
   from melting and evaporation that heavy precipitation brings, and the
   profile comes from a ~25 km grid that can't resolve cold air pooled in a
-  pass. Expect it to run **high compared with the NWS** in dry or showery
-  warm periods, and to agree more closely during steady precipitation. The
-  NWS line is on the chart for that reason.
-- The NWS line is drawn as steps over each forecast interval, since that's
-  how the gridpoint data is published.
+  pass. Expect it to run high compared with the NWS snow level in dry or
+  showery warm periods, and to agree more closely during steady
+  precipitation.
 - Times on the x-axis are Pacific time (labelled ticks at local midnight).
 - The y-axis runs from 0 ft to the highest data or reference line, rounded
   up to the next 1,000 ft with some headroom.

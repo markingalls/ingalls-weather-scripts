@@ -49,9 +49,8 @@ workflows. Each project lives in its own directory with its own README.
   daily climatology (percentile shading and normal from xmACIS; record
   highs pooled across Tri-Cities-area stations).
 - [`snow-level-chart/`](snow-level-chart/) — generates a styled 5-day
-  snow level chart from the WindBorne WM-6 temperature profile, with the
-  NWS gridpoint snow level for comparison and dotted reference lines;
-  built-in sites for Snoqualmie Pass and Mount Hood.
+  snow level chart from the WindBorne WM-6 temperature profile, with dotted
+  reference lines; built-in sites for Snoqualmie Pass and Mount Hood.
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
