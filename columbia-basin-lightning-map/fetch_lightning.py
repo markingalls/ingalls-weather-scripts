@@ -54,6 +54,9 @@ LOOKBACK_HOURS = 24
 # (-114.07), not just "roughly Alberta's eastern border" -- and still
 # past full_bc's own east edge (-112.4).
 BBOX_PAD = 0.5
+
+# Files downloaded and held in memory at once -- see fetch loop below.
+BATCH_SIZE = 120
 LON_MIN, LON_MAX = -138.6 - BBOX_PAD, -108.0 + BBOX_PAD
 LAT_MIN, LAT_MAX = 40.5 - BBOX_PAD, 61.5 + BBOX_PAD
 
@@ -132,14 +135,20 @@ def fetch_last_24h(end=None):
     keys = list_keys_in_window(s3, start, end)
     print(f"Found {len(keys)} GLM-L2-LCFA files between {start.isoformat()} and {end.isoformat()}")
 
-    with ThreadPoolExecutor(max_workers=24) as ex:
-        blobs = list(ex.map(lambda k: download(s3, k), keys))
-
-    # netCDF4/HDF5 isn't thread-safe -- parse sequentially after the
-    # concurrent (I/O-bound) download pass above.
+    # Download and parse in fixed-size batches rather than downloading
+    # every file first: a full day is ~4,320 files, and holding all of
+    # them in memory at once got the process OOM-killed (SIGKILL) on the
+    # 2 GiB droplet. Each batch is downloaded concurrently (I/O-bound, so
+    # threads are safe), then parsed sequentially -- netCDF4/HDF5 isn't
+    # thread-safe -- and its raw bytes are dropped before the next batch.
     records = []
-    for key, blob in zip(keys, blobs):
-        records.extend(extract_flashes(key, blob))
+    with ThreadPoolExecutor(max_workers=24) as ex:
+        for i in range(0, len(keys), BATCH_SIZE):
+            batch = keys[i:i + BATCH_SIZE]
+            blobs = list(ex.map(lambda k: download(s3, k), batch))
+            for key, blob in zip(batch, blobs):
+                records.extend(extract_flashes(key, blob))
+            del blobs
 
     return records, start, end
 
