@@ -63,5 +63,10 @@ workflows. Each project lives in its own directory with its own README.
 ## Shared resources
 
 - [`maps/`](maps/) — reusable basemap data (coastlines, borders, counties,
-  roads) shared across mapping scripts.
+  roads) shared across mapping scripts, plus the shared geology color
+  table (`geology_classes.json`) and the USGS SGMC crosswalk into it
+  (`geology_sgmc.py`). Every geology map uses these, so rock classes
+  keep the same colors across counties and states. Run
+  `python3 geology_classes_preview.py` inside `maps/` to render a swatch
+  sheet of the whole table.
 - [`assets/`](assets/) — shared brand assets (logo, etc.).

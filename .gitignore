@@ -116,3 +116,6 @@ wallowa-earthquakes-map/wallowa_earthquakes*.png
 # rendered map image is an output -- neither is source.
 wallowa-geology-map/earthquake.json
 wallowa-geology-map/wallowa_geology*.png
+# --- maps/ ---
+# swatch sheet geology_classes_preview.py renders -- an output, not source.
+maps/geology_classes_preview.png

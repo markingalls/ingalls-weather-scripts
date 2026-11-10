@@ -14,7 +14,7 @@ The circle is styled and sized the same way as on
   faults to Wallowa County, tags each unit with a legend group, and writes
   `../maps/wallowa_county_geology.geojson` and
   `../maps/wallowa_county_faults.geojson`. Both are committed, so rerun it
-  only for a newer SGMC release or to change the grouping (`GROUPS`).
+  only for a newer SGMC release or a crosswalk change.
 - `fetch_earthquake.py` -- pulls the earthquake to mark from USGS ComCat
   and writes `earthquake.json`. It defaults to the most recent M3.0+ event
   in and around the county. Pass `--event-id` to choose a specific one.
@@ -43,9 +43,13 @@ python3 build_map.py              # render wallowa_geology.png
   smaller mapped faults aren't shown, and line positions can be off by
   hundreds of meters. For detailed work, use DOGAMI's larger-scale
   quadrangle maps.
-- **Grouping**: SGMC maps 24 units in the county. `GROUPS` in
-  `build_geology_layers.py` collapses them into the six legend classes.
-  The ages in the legend are approximate, for a general audience.
+- **Shared colors**: units are colored by the shared, state-agnostic
+  class table in [`../maps/geology_classes.json`](../maps/geology_classes.json)
+  (crosswalk: [`../maps/geology_sgmc.py`](../maps/geology_sgmc.py)), so
+  the same rock class gets the same color on any future county map in
+  Washington, Idaho, or elsewhere. `LABELS` in `build_map.py` only
+  rewords classes for local context (e.g. "Wallowa batholith granite").
+  It never changes a color.
 - **Geology is shaded inside Wallowa County only.** Neighboring
   counties are plain basemap, since each state's SGMC units don't match
   across the Idaho/Washington lines.

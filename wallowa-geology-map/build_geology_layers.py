@@ -4,7 +4,9 @@ One-time builder for the geology layers this map draws, written into
 
   ../maps/wallowa_county_geology.geojson -- geologic map units, clipped to
       Wallowa County (FIPS 41063), with each unit's SGMC code, name, age,
-      and the simplified legend group build_map.py colors it by
+      and its class in the shared color table (../maps/geology_classes.json,
+      assigned by ../maps/geology_sgmc.py -- the same crosswalk any other
+      state's map uses, so colors match across states)
   ../maps/wallowa_county_faults.geojson  -- faults (normal + thrust),
       clipped to the county, with SGMC's certain/approximate/concealed
       description
@@ -14,10 +16,11 @@ Source: USGS State Geologic Map Compilation (SGMC; Horton and others,
 and MacLeod's 1:500,000 Geologic Map of Oregon (1991). Downloaded from
 https://mrdata.usgs.gov/geology/state/ (public, no key).
 
-Only needs rerunning to pick up a newer SGMC release or change GROUPS.
+Only needs rerunning for a newer SGMC release or a crosswalk change.
 """
 import io
 import json
+import sys
 import zipfile
 
 import geopandas as gpd
@@ -29,34 +32,8 @@ SGMC_OR = "https://mrdata.usgs.gov/geology/state/shp/OR.zip"
 WALLOWA_FIPS = "41063"
 MAPS_DIR = "../maps"
 
-# SGMC unit code -> legend group. Groups are ordered youngest -> oldest in
-# build_map.py's legend. Everything mapped in Wallowa County is listed;
-# an unlisted code raises so a new SGMC release can't silently drop a unit.
-GROUPS = {
-    # Ice Age to today: glacial moraines (Wallowa Lake), river alluvium,
-    # fans, landslides, and Pleistocene lake/stream sediment.
-    "Qal": "surficial", "Qs": "surficial", "Qg": "surficial",
-    "Qf": "surficial", "Qls": "surficial",
-    # Columbia River Basalt Group above the Imnaha (Grande Ronde, Wanapum,
-    # Saddle Mountains), plus undivided CRB flows, Miocene sediment
-    # interbeds, and small younger vent deposits.
-    "Tcg": "crb", "Tcw": "crb", "Tcs": "crb", "Tc": "crb",
-    "Tlf": "crb", "Tvm": "crb", "QTvs": "crb",
-    # The oldest Columbia River Basalt flows, fed by the Chief Joseph dikes.
-    "Tci": "imnaha",
-    # Wallowa batholith and related intrusions.
-    "KJi": "granite", "JTRgd2": "granite",
-    # Wallowa terrane, island-arc volcanic rocks (Clover Creek Greenstone
-    # and similar).
-    "TRv": "arc_volcanic", "TRsv": "arc_volcanic", "TRPsv": "arc_volcanic",
-    "Psv": "arc_volcanic",
-    # Wallowa terrane, marine sedimentary rocks (Martin Bridge Limestone,
-    # Hurwal Formation, and similar).
-    "TRs": "marine_sed", "JTRs": "marine_sed", "Js2": "marine_sed",
-    "TRPZs2": "marine_sed",
-    "water": "water",
-}
-
+sys.path.insert(0, MAPS_DIR)
+from geology_sgmc import classify_state  # noqa: E402  shared, state-agnostic crosswalk
 
 def round_coords(geom_json, nd=4):
     def r(c):
@@ -84,6 +61,7 @@ def main():
     counties = gpd.read_file(f"{MAPS_DIR}/counties_wa_or_id.geojson")
     county = counties[counties["id"] == WALLOWA_FIPS].geometry.union_all()
 
+    classes = classify_state("/tmp/sgmc_or", "OR")
     units = pd.read_csv("/tmp/sgmc_or/OR_units.csv")
     units["unit_link"] = units["unit_link"].str.strip()
     meta = units.set_index("unit_link")[["unit_name", "unit_age"]].to_dict("index")
@@ -93,11 +71,9 @@ def main():
     feats = []
     for _, row in poly.iterrows():
         code = row.UNIT_LINK.replace("OR", "", 1).split(";")[0]
-        if code not in GROUPS:
-            raise SystemExit(f"unmapped SGMC unit {code} -- add it to GROUPS")
         m = meta.get(row.UNIT_LINK, {})
         feats.append({"type": "Feature",
-                      "properties": {"code": code, "group": GROUPS[code],
+                      "properties": {"code": code, "class": classes[row.UNIT_LINK],
                                      "name": m.get("unit_name"),
                                      "age": m.get("unit_age")},
                       "geometry": round_coords(mapping(row.geometry))})

@@ -21,21 +21,35 @@ f_bold = fm.FontProperties(fname=FONT_DIR + "Poppins-Bold.ttf")
 f_reg = fm.FontProperties(fname=FONT_DIR + "Poppins-Regular.ttf")
 f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
 
-# ---------- geology legend groups (youngest first) ----------
-# Keys match the "group" property build_geology_layers.py writes. Colors
-# loosely follow geologic-map convention (yellow = young deposits, tan/
-# brown = Tertiary volcanics, pink = granite, green = old volcanics, blue =
-# marine sedimentary), muted to sit with the house basemap palette.
-GEO_GROUPS = [
-    ("surficial", "Glacial, river & landslide deposits\n(Ice Age to today)", "#F3E7AE"),
-    ("crb", "Columbia River Basalt, Grande Ronde & younger\n(~16.5–6 million years ago)", "#D7B48E"),
-    ("imnaha", "Imnaha Basalt, oldest flood basalt\n(~17 million years ago)", "#A9764E"),
-    ("granite", "Wallowa batholith granite\n(Jurassic–Cretaceous, ~160–120 Ma)", "#E9A3A6"),
-    ("marine_sed", "Marine sediments incl. limestone\n(Wallowa terrane, Triassic–Jurassic)", "#9DB0DA"),
-    ("arc_volcanic", "Island-arc volcanic rocks\n(Wallowa terrane, Permian–Triassic)", "#8DB596"),
-]
-GEO_COLOR = {k: c for k, _, c in GEO_GROUPS}
-WATER_COLOR, WATER_EDGE = "#bcd6ec", "#7fa6c8"
+# ---------- geology classes (shared color table) ----------
+# Colors and legend order come from ../maps/geology_classes.json, the table
+# every geology map uses, so a class looks the same in every county and
+# state. Only the wording is local: LABELS rewords classes for Wallowa
+# County (named terranes/batholith, tighter local ages).
+import sys
+sys.path.insert(0, "../maps")
+from geology_sgmc import load_classes  # noqa: E402
+
+CLASSES = load_classes()
+CLASS_COLOR = {c["key"]: c["color"] for c in CLASSES}
+WATER_COLOR = CLASS_COLOR["water"]
+WATER_EDGE = next(c["edge"] for c in CLASSES if c["key"] == "water")
+
+LABELS = {
+    "surficial": ("Glacial, river & landslide deposits", "Ice Age to today"),
+    "cz_volcanic": ("Younger volcanic vents & ash beds", "~16–2 million years ago"),
+    "crb": ("Columbia River Basalt, Grande Ronde & younger", "~16.5–6 million years ago"),
+    "crb_imnaha": ("Imnaha Basalt, oldest flood basalt", "~17 million years ago"),
+    "plutonic": ("Wallowa batholith granite", "Jurassic–Cretaceous, ~160–120 Ma"),
+    "mz_pz_sedimentary": ("Marine sediments incl. limestone", "Wallowa terrane, Permian–Jurassic"),
+    "mz_pz_volcanic": ("Island-arc volcanic rocks", "Wallowa terrane, Triassic"),
+}
+
+
+def legend_label(c):
+    title, age = LABELS.get(c["key"], (c["label"], c.get("age")))
+    return f"{title}\n({age})" if age else title
+
 
 # ---------- quake styling (same as ../wallowa-earthquakes-map) ----------
 LATEST_COLOR = "#E0242B"
@@ -62,7 +76,7 @@ pc = ccrs.PlateCarree()
 FIG_W, FIG_H, DPI = 10, 12.5, 216
 fig = plt.figure(figsize=(FIG_W, FIG_H), dpi=DPI)
 fig.patch.set_facecolor("#f7f6f2")
-ax = fig.add_axes([0.04, 0.245, 0.92, 0.67], projection=proj)
+ax = fig.add_axes([0.06, 0.28, 0.88, 0.635], projection=proj)
 ax.set_anchor("N")  # map hugs the title; spare height goes to the legend
 ax.set_facecolor("white")
 ax.set_extent(EXTENT, crs=pc)
@@ -77,11 +91,11 @@ ax.add_geometries([shape(f["geometry"]) for f in land["features"]], crs=pc,
 
 # ---------- geology (Wallowa County only) ----------
 geo = json.load(open(f"{MAPS_DIR}/wallowa_county_geology.geojson"))
-by_group = {}
+by_class = {}
 for f in geo["features"]:
-    by_group.setdefault(f["properties"]["group"], []).append(shape(f["geometry"]))
-for key, geoms in by_group.items():
-    color = WATER_COLOR if key == "water" else GEO_COLOR[key]
+    by_class.setdefault(f["properties"]["class"], []).append(shape(f["geometry"]))
+for key, geoms in by_class.items():
+    color = CLASS_COLOR[key]
     ax.add_geometries(geoms, crs=pc, facecolor=color, edgecolor=color,
                        linewidth=0.2, zorder=2)
 
@@ -220,8 +234,11 @@ fig.text(left_x, subtitle_y,
           fontproperties=f_reg, fontsize=12, color="#5a584f")
 
 # ---------- legend ----------
-unit_handles = [Patch(facecolor=c, edgecolor="#8a877d", linewidth=0.5, label=lbl)
-                for _, lbl, c in GEO_GROUPS]
+# Only classes that actually appear on this map, in the shared table's
+# order; water is shown as "Lake" in the second legend block instead.
+unit_handles = [Patch(facecolor=c["color"], edgecolor="#8a877d", linewidth=0.5,
+                      label=legend_label(c))
+                for c in CLASSES if c["key"] in by_class and c["key"] != "water"]
 other_handles = [
     Line2D([0], [0], marker="o", color="none", markerfacecolor=LATEST_COLOR,
            markeredgecolor=LATEST_EDGE, markersize=marker_diameter(quake["mag"]),
@@ -237,7 +254,7 @@ other_handles = [
 leg_units = fig.legend(handles=unit_handles, loc="upper left", ncol=2,
                         bbox_to_anchor=(left_x, map_pos.y0 - 0.014),
                         bbox_transform=fig.transFigure, frameon=False, prop=f_reg,
-                        fontsize=9.5, labelspacing=0.7, handlelength=2.0,
+                        fontsize=9.5, labelspacing=0.45, handlelength=2.0,
                         handleheight=1.6, columnspacing=1.5, borderaxespad=0)
 fig.canvas.draw()
 inv = fig.transFigure.inverted()
@@ -245,7 +262,7 @@ units_bottom = inv.transform(leg_units.get_window_extent())[0][1]
 leg_other = fig.legend(handles=other_handles, loc="upper left", ncol=4,
                         bbox_to_anchor=(left_x, units_bottom - 0.012),
                         bbox_transform=fig.transFigure, frameon=False, prop=f_reg,
-                        fontsize=9.5, labelspacing=0.9, handlelength=2.4,
+                        fontsize=9.5, labelspacing=0.6, handlelength=2.4,
                         columnspacing=1.5, borderaxespad=0)
 
 # ---------- attribution (bottom of the canvas) ----------
