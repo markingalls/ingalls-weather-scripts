@@ -50,7 +50,7 @@ pc = ccrs.PlateCarree()
 
 fig = plt.figure(figsize=(10, 10.6), dpi=200)
 fig.patch.set_facecolor("#f7f6f2")
-ax = fig.add_axes([0.05, 0.085, 0.90, 0.80], projection=proj)
+ax = fig.add_axes([0.05, 0.10, 0.90, 0.785], projection=proj)
 ax.set_facecolor("white")
 ax.set_extent(EXTENT, crs=pc)
 
@@ -107,10 +107,24 @@ for region_file in ["washington_roads.geojson", "oregon_roads.geojson", "idaho_r
         elif hwy in TRUNK:
             trunk_geoms.append(shape(f["geometry"]))
 
+# Smaller US/state highways (OR-82, OR-3, OR-350 Imnaha Hwy, ...) from
+# Census TIGER -- see build_basemap_extras.py. Drawn under the OSM trunk/
+# motorway layers, which already cover the bigger routes.
+SECONDARY_COLOR = "#D9B78A"  # paler/thinner than trunk
+sec = json.load(open(f"{MAPS_DIR}/wallowa_area_secondary_roads.geojson"))
+sec_geoms = [shape(f["geometry"]) for f in sec["features"]]
+ax.add_geometries(sec_geoms, crs=pc, facecolor="none", edgecolor=SECONDARY_COLOR,
+                   linewidth=0.9, zorder=4.8)
+
 ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR,
                    linewidth=1.1, zorder=5)
 ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR,
                    linewidth=1.3, zorder=6)
+
+# ---------- Wallowa Lake (too small for Natural Earth's lakes) ----------
+wl = json.load(open(f"{MAPS_DIR}/wallowa_lake.geojson"))
+ax.add_geometries([shape(f["geometry"]) for f in wl["features"]], crs=pc,
+                   facecolor="#bcd6ec", edgecolor="#7fa6c8", linewidth=0.6, zorder=7)
 
 # ---------- city labels ----------
 cities = [
@@ -158,15 +172,6 @@ ax.scatter([latest["lon"]], [latest["lat"]], transform=pc,
            edgecolor=LATEST_EDGE, linewidths=1.2, zorder=11)
 
 latest_pt = datetime.fromisoformat(latest["time"]).astimezone(PACIFIC)
-callout = (f"M{latest['mag']:.1f}  ·  {latest_pt:%b %-d, %-I:%M %p %Z}\n"
-           f"{latest['place']}")
-ann = ax.annotate(callout, xy=(latest["lon"], latest["lat"]), xycoords=pc._as_mpl_transform(ax),
-                  xytext=(-34, -52), textcoords="offset points", ha="right", va="top", multialignment="left",
-                  fontproperties=f_med, fontsize=10.5, color=LATEST_EDGE, zorder=12,
-                  bbox=dict(boxstyle="round,pad=0.4", facecolor="white",
-                            edgecolor=LATEST_COLOR, linewidth=1.0, alpha=0.95),
-                  arrowprops=dict(arrowstyle="-", color=LATEST_EDGE, linewidth=1.0,
-                                  shrinkA=0, shrinkB=marker_diameter(latest["mag"]) / 2))
 
 # ---------- frame ----------
 ax.spines["geo"].set_edgecolor("black")
@@ -224,14 +229,14 @@ for m in (3, 4, 5, 6):
                markeredgecolor=PAST_EDGE, markersize=marker_diameter(m), alpha=0.55,
                label=f"M{m}"))
 leg = fig.legend(handles=legend_handles, loc="upper center", ncol=len(legend_handles),
-                  bbox_to_anchor=(center_x, map_pos.y0 - 0.012),
+                  bbox_to_anchor=(center_x, map_pos.y0 - 0.028),
                   bbox_transform=fig.transFigure,
                   frameon=False, prop=f_reg, fontsize=11,
                   handlelength=3.6, handletextpad=0.3, columnspacing=1.8, borderaxespad=0)
 
 # ---------- attribution ----------
 fig.text(center_x, 0.018,
-          "USGS ComCat / US Census (counties) / OpenStreetMap (roads) — Ingalls Weather",
+          "USGS ComCat / US Census (counties, TIGER roads + water) / OpenStreetMap (roads) — Ingalls Weather",
           fontproperties=f_reg, fontsize=9, color="#5a584f", ha="center")
 
 plt.savefig("wallowa_earthquakes.png",

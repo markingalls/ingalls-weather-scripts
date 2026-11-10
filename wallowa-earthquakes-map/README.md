@@ -4,8 +4,8 @@ A styled map of every M3.0+ earthquake on record in and around Wallowa
 County, OR (Walla Walla down to Baker City / Halfway, east across Hells
 Canyon to Riggins and New Meadows, ID), from the USGS ComCat catalog, for
 Ingalls Weather's Instagram. The most recent quake is drawn as a red
-circle with a callout; every earlier quake is gray. Circles are sized by
-magnitude.
+circle (its magnitude and date are in the legend); every earlier quake is
+gray. Circles are sized by magnitude.
 
 ## Files
 
@@ -15,6 +15,13 @@ magnitude.
   reflect the latest catalog.
 - `build_map.py` -- renders the map using `earthquakes.json` plus the
   static basemap files in `../maps/`. Writes `wallowa_earthquakes.png`.
+- `build_basemap_extras.py` -- one-time builder for two extra basemap
+  layers in `../maps/`: `wallowa_area_secondary_roads.geojson` (smaller
+  US/state highways like OR-82, OR-3, and the Imnaha Hwy -- the shared
+  OSM road files only carry motorway/trunk) and `wallowa_lake.geojson`
+  (too small for the Natural Earth lakes). Both come from US Census
+  TIGER/Line 2024 and are committed, so you only rerun this if the map
+  extent changes.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies
   (cartopy needs GDAL, which only installs via apt, not pip).
 
@@ -49,6 +56,11 @@ python3 build_map.py                           # render wallowa_earthquakes.png
 - **Domain**: `LON_MIN/LON_MAX/LAT_MIN/LAT_MAX` in `fetch_earthquakes.py`
   match `EXTENT` in `build_map.py` -- change both together. Wallowa County
   itself is tinted and outlined (FIPS 41063).
+- **Wallowa County's largest on record**: as of Nov 2026, the Nov 9
+  M4.3 (uw714136981) is the largest event in ComCat whose epicenter falls
+  inside the county polygon, at any magnitude, ahead of a 1984 M3.5 in
+  Hells Canyon and the 2014 M3.35 near Joseph. ComCat has no
+  pre-instrumental (intensity-only) events for the county.
 - **Highlight**: defaults to the most recent event in the catalog, which
   is what you want the morning after a quake. Use `--event-id` (the id at
   the end of the event's USGS URL) to highlight an older one.
