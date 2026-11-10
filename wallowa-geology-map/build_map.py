@@ -111,12 +111,22 @@ for region_file in ["washington_roads.geojson", "oregon_roads.geojson", "idaho_r
         elif hwy in TRUNK:
             trunk_geoms.append(shape(f["geometry"]))
 sec = json.load(open(f"{MAPS_DIR}/wallowa_area_secondary_roads.geojson"))
-ax.add_geometries([shape(f["geometry"]) for f in sec["features"]], crs=pc,
-                   facecolor="none", edgecolor=SECONDARY_COLOR, linewidth=0.9, zorder=4)
-ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR,
-                   linewidth=1.3, zorder=4.2)
-ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR,
-                   linewidth=1.5, zorder=4.3)
+sec_geoms = [shape(f["geometry"]) for f in sec["features"]]
+
+# All highways sit above the geology shading (zorder 2) and below the
+# faults (zorder 5). Each class gets a thin white glow -- a slightly wider
+# white line drawn just underneath -- so the pale highway colors stay
+# readable on the tan basalt and other unit colors.
+GLOW_COLOR, GLOW_EXTRA, GLOW_ALPHA = "white", 1.4, 0.85
+for geoms, color, lw, z in [
+    (sec_geoms, SECONDARY_COLOR, 0.9, 4.0),
+    (trunk_geoms, TRUNK_COLOR, 1.3, 4.2),
+    (motorway_geoms, MOTORWAY_COLOR, 1.5, 4.4),
+]:
+    ax.add_geometries(geoms, crs=pc, facecolor="none", edgecolor=GLOW_COLOR,
+                       linewidth=lw + GLOW_EXTRA, alpha=GLOW_ALPHA, zorder=z - 0.05)
+    ax.add_geometries(geoms, crs=pc, facecolor="none", edgecolor=color,
+                       linewidth=lw, zorder=z)
 
 # ---------- faults ----------
 faults = json.load(open(f"{MAPS_DIR}/wallowa_county_faults.geojson"))
