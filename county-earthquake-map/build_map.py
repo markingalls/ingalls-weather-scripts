@@ -49,14 +49,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, FancyBboxPatch
 from matplotlib.transforms import offset_copy
 import requests
 
 import cartopy.crs as ccrs
 from shapely.affinity import scale
 from shapely.geometry import shape, Point
-from shapely.ops import polylabel
+from shapely.ops import polylabel, unary_union
 from shapely.strtree import STRtree
 
 # ---------------------------------------------------------------------------
@@ -111,13 +111,54 @@ MAG_CLASSES = [
     (5.0, "5.0 – 5.9", "#df6a2c", "white"),
     (4.0, "4.0 – 4.9", "#f0a453", "#2b2a26"),
     (3.0, "3.0 – 3.9", "#f6d38f", "#2b2a26"),
-    (-9,  "Under 3.0", "#f8edcf", "#2b2a26"),
+    (2.0, "2.0 – 2.9", "#f9e6bb", "#2b2a26"),
+    (-9,  "Under 2.0", "#fdf6e6", "#2b2a26"),
 ]
 NO_DATA_COLOR = "#d9d6cc"
+
+# ---------------------------------------------------------------------------
+# Supplemental events from the Idaho Geological Survey's "Catalog of Idaho
+# Earthquakes, 1872-1993" (Information Circular 56,
+# https://idahogeology.org/product/I-56), for counties where ComCat has
+# nothing or a smaller maximum. They're instrumental locations from regional
+# networks (Montana Bureau of Mines, Bureau of Reclamation's Teton network,
+# INEL) that never made it into ComCat. Merged in at render time -- the
+# saved snapshot stays pure ComCat -- and each only replaces a county's
+# value if it's larger. Labeled with a dagger on the map.
+#
+# Deliberately NOT included: IGS's placement of the 1916-05-13 M5.3 at Boise
+# (Ada Co.) -- ComCat has the same event at 44.2N 116.5W (Washington Co.),
+# and that location is kept. Intensity-only felt reports with no magnitude
+# (Gooding/Twin Falls 1932, etc.) are also left out.
+# ---------------------------------------------------------------------------
+SUPPLEMENT_MARK = "\u2020"
+SUPPLEMENTAL_EVENTS = {
+    "16027": {"id": "igs-1989-05-30-canyon", "mag": 3.6, "mag_type": "ml (Butte W-A)",
+              "time": "1989-05-30T00:00:00+00:00", "place": "20 km WNW of Caldwell, ID",
+              "lon": -116.930, "lat": 43.762, "source": "IGS IC-56 (MBMG)"},
+    "16051": {"id": "igs-1989-10-10-jefferson", "mag": 2.3, "mag_type": "ml",
+              "time": "1989-10-10T00:00:00+00:00", "place": "Jefferson Co., ID",
+              "lon": -111.980, "lat": 43.680, "source": "IGS IC-56 (USBR Teton network)"},
+    "16065": {"id": "igs-1991-08-20-madison", "mag": 1.6, "mag_type": "ml",
+              "time": "1991-08-20T00:00:00+00:00", "place": "Madison Co., ID",
+              "lon": -111.402, "lat": 43.890, "source": "IGS IC-56 (INEL)"},
+}
+
+
+def apply_supplemental(maxima):
+    merged = dict(maxima)
+    for geoid, ev in SUPPLEMENTAL_EVENTS.items():
+        cur = merged.get(geoid)
+        if cur is None or ev["mag"] > cur["mag"]:
+            merged[geoid] = ev
+    return merged
 TOP_N_EVENTS = 8
 
 
 def mag_class(mag):
+    # Classify on the value as displayed (one decimal), so e.g. Walla
+    # Walla's 5.99 -- labeled "6.0" -- gets the 6.0+ color, not 5.x.
+    mag = round(mag, 1)
     for lo, label, fill, text_color in MAG_CLASSES:
         if mag >= lo:
             return label, fill, text_color
@@ -263,7 +304,8 @@ def build_map(maxima, counties, output_path, fetched_at):
     ax.set_extent(EXTENT, crs=pc)
 
     # ---------- basemap ----------
-    ax.add_geometries(load_geoms(LAND_FILE), crs=pc, facecolor="#e3e1da", edgecolor="none", zorder=1)
+    land_geoms = load_geoms(LAND_FILE)
+    ax.add_geometries(land_geoms, crs=pc, facecolor="#e3e1da", edgecolor="none", zorder=1)
 
     lake_geoms = load_geoms(STATES_LAKES_FILE, lambda p: "Lake" in p.get("featurecla", "")
                             and p.get("admin") in ("United States of America", "Canada"))
@@ -282,7 +324,15 @@ def build_map(maxima, counties, output_path, fetched_at):
 
     ax.add_geometries(lake_geoms, crs=pc, facecolor="white", edgecolor="#b9b6ac",
                       linewidth=0.5, zorder=2.5)
-    ax.add_geometries(load_geoms(ADMIN1_LINES_FILE), crs=pc, facecolor="none",
+    # State lines clipped to land: admin1_boundary_lines.json also carries
+    # each coastal state's offshore state-waters boundary (parallel to the
+    # coast, plus a stretch through the Strait/Puget Sound). Clipping to a
+    # hair-buffered land union keeps every real land border -- river borders
+    # like the Columbia/Snake are land in this layer -- and drops the water
+    # ones. The US/Canada line is admin0 and drawn unclipped below.
+    land_union = unary_union(land_geoms).buffer(0.01)
+    state_lines = [g.intersection(land_union) for g in load_geoms(ADMIN1_LINES_FILE)]
+    ax.add_geometries([g for g in state_lines if not g.is_empty], crs=pc, facecolor="none",
                       edgecolor="#3f3c35", linewidth=1.2, zorder=3)
     ax.add_geometries(load_geoms(ADMIN0_LINES_FILE), crs=pc, facecolor="none",
                       edgecolor="#2b2a26", linewidth=1.4, zorder=3.1)
@@ -306,7 +356,8 @@ def build_map(maxima, counties, output_path, fetched_at):
                      and abs(ev["lat"] - pt.y) < 0.10)
         label_tf = offset_copy(pc._as_mpl_transform(ax), fig=fig, x=0,
                                y=9 if star_hits else 0, units="points")
-        txt = ax.text(pt.x, pt.y, f"{ev['mag']:.1f}", transform=label_tf, ha="center", va="center",
+        mark = SUPPLEMENT_MARK if ev.get("source", "").startswith("IGS") else ""
+        txt = ax.text(pt.x, pt.y, f"{ev['mag']:.1f}{mark}", transform=label_tf, ha="center", va="center",
                       fontproperties=f_med, fontsize=7.6, color=text_color, zorder=6)
         txt.set_path_effects([pe.withStroke(linewidth=1.4, foreground=halo, alpha=0.45)])
 
@@ -336,8 +387,7 @@ def build_map(maxima, counties, output_path, fetched_at):
     # ---------- magnitude legend (lower-left, over the Pacific) ----------
     handles = []
     for lo, label, fill, _ in MAG_CLASSES:
-        if label in present_classes:
-            handles.append(Patch(facecolor=fill, edgecolor="#8f8b80", label=f"M {label}"))
+        handles.append(Patch(facecolor=fill, edgecolor="#8f8b80", label=f"M {label}"))
     if any(ev is None for ev in maxima.values()):
         handles.append(Patch(facecolor=NO_DATA_COLOR, edgecolor="#8f8b80", label="None in catalog"))
     leg = fig.legend(handles=handles, loc="lower left", title="Largest magnitude",
@@ -348,19 +398,43 @@ def build_map(maxima, counties, output_path, fetched_at):
     leg.get_title().set_fontsize(10.5)
     leg.get_frame().set_linewidth(0.8)
 
-    # ---------- top-events box (upper-right, over Montana) ----------
-    lines = []
-    for ev, c in ranked:
+    # ---------- top-events panel (upper-right, over BC/Montana) ----------
+    # One row per event: a magnitude chip in that event's own class color,
+    # the county in medium weight, and the event's name/year right-aligned
+    # in a quieter gray, on a white rounded card matching the legend.
+    # Sized to clear the Idaho panhandle's eastern edge.
+    row_h, header_h, pad = 0.031, 0.044, 0.012
+    panel_w = 0.248
+    panel_h = header_h + row_h * len(ranked) + pad
+    panel = fig.add_axes([right_x - 0.012 - panel_w, top_y - 0.012 - panel_h, panel_w, panel_h],
+                         zorder=20)
+    panel.set_xlim(0, 1)
+    panel.set_ylim(0, panel_h)
+    panel.axis("off")
+    panel.add_patch(FancyBboxPatch((0.004, 0.002), 0.992, panel_h - 0.004,
+                                   boxstyle="round,pad=0,rounding_size=0.012",
+                                   mutation_aspect=panel_h, facecolor="white",
+                                   edgecolor="#d8d5cc", linewidth=0.8))
+    y = panel_h - header_h / 2 - 0.002
+    panel.plot(0.06, y, marker="*", markersize=10, color="#ffd23f", mec="#2b2a26", mew=0.8)
+    panel.text(0.105, y, "Largest earthquakes on the map", fontproperties=f_med,
+               fontsize=9.6, color="#2b2a26", va="center")
+    panel.plot([0.04, 0.96], [panel_h - header_h + 0.004] * 2, color="#e6e3da", linewidth=0.8)
+    for i, (ev, c) in enumerate(ranked):
+        y = panel_h - header_h - row_h * (i + 0.5)
+        _, fill, text_color = mag_class(ev["mag"])
+        panel.add_patch(FancyBboxPatch((0.04, y - 0.0105), 0.12, 0.021,
+                                       boxstyle="round,pad=0,rounding_size=0.006",
+                                       mutation_aspect=panel_h, facecolor=fill,
+                                       edgecolor="none"))
+        panel.text(0.10, y, f"{ev['mag']:.1f}", fontproperties=f_med, fontsize=8.4,
+                   color=text_color, ha="center", va="center")
+        panel.text(0.195, y, f"{c['name']} Co., {c['state']}", fontproperties=f_med,
+                   fontsize=8.4, color="#2b2a26", va="center")
         year = datetime.fromisoformat(ev["time"]).year
         name = event_label(ev)
-        what = f"{name} ({year})" if name else f"{year}"
-        lines.append(f"M{ev['mag']:.1f}   {c['name']} Co., {c['state']}  –  {what}")
-    box_txt = fig.text(right_x - 0.012, top_y - 0.014,
-                       "$\\bigstar$  Largest events on the map\n" + "\n".join(lines),
-                       fontproperties=f_reg, fontsize=8.6, color="#2b2a26", ha="right", va="top", multialignment="left",
-                       linespacing=1.55, zorder=20,
-                       bbox=dict(boxstyle="round,pad=0.7", facecolor="white", edgecolor="#d8d5cc",
-                                 linewidth=0.8))
+        panel.text(0.96, y, f"{name} · {year}" if name else f"{year}", fontproperties=f_reg,
+                   fontsize=8.0, color="#7a776d", ha="right", va="center")
 
     # ---------- logo (bottom-right, ~8% of map width, ~22px inset) ----------
     if LOGO_FILE.exists():
@@ -381,7 +455,8 @@ def build_map(maxima, counties, output_path, fetched_at):
 
     # ---------- attribution ----------
     fig.text(center_x, map_pos.y0 - 0.035,
-             f"USGS ANSS ComCat (retrieved {fetched_at:%d %b %Y}) / US Census (counties) — Ingalls Weather",
+             f"USGS ANSS ComCat (retrieved {fetched_at:%d %b %Y})  •  {SUPPLEMENT_MARK} Idaho Geological Survey catalog  •  "
+             "US Census (counties) — Ingalls Weather",
              fontproperties=f_reg, fontsize=9, color="#5a584f", ha="center")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -414,7 +489,7 @@ def main():
         print(f"Saved snapshot to {snap_path}")
 
     out_path = args.out or (OUTPUT_DIR / f"county_max_earthquake_{fetched_at:%Y-%m-%d}.png")
-    build_map(maxima, counties, out_path, fetched_at)
+    build_map(apply_supplemental(maxima), counties, out_path, fetched_at)
 
 
 if __name__ == "__main__":
