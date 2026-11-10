@@ -99,11 +99,7 @@ MOTORWAY = {"motorway", "motorway_link"}
 TRUNK = {"trunk", "trunk_link"}
 MOTORWAY_COLOR = "#8FB8E0"  # pastel blue
 TRUNK_COLOR = "#F2B880"     # pastel orange
-# Smaller highways sit on top of colored geology here, so they need more
-# weight than on ../wallowa-earthquakes-map -- a dark warm gray reads on
-# every unit color. Kept solid and gray so it can't be mistaken for the
-# black dashed approximate faults.
-SECONDARY_COLOR = "#6f6a60"
+SECONDARY_COLOR = "#D9B78A"  # same as ../wallowa-earthquakes-map
 
 motorway_geoms, trunk_geoms = [], []
 for region_file in ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]:
@@ -116,7 +112,7 @@ for region_file in ["washington_roads.geojson", "oregon_roads.geojson", "idaho_r
             trunk_geoms.append(shape(f["geometry"]))
 sec = json.load(open(f"{MAPS_DIR}/wallowa_area_secondary_roads.geojson"))
 ax.add_geometries([shape(f["geometry"]) for f in sec["features"]], crs=pc,
-                   facecolor="none", edgecolor=SECONDARY_COLOR, linewidth=0.8, zorder=4)
+                   facecolor="none", edgecolor=SECONDARY_COLOR, linewidth=0.9, zorder=4)
 ax.add_geometries(trunk_geoms, crs=pc, facecolor="none", edgecolor=TRUNK_COLOR,
                    linewidth=1.3, zorder=4.2)
 ax.add_geometries(motorway_geoms, crs=pc, facecolor="none", edgecolor=MOTORWAY_COLOR,
@@ -142,10 +138,10 @@ ax.add_geometries([shape(f["geometry"]) for f in wl["features"]], crs=pc,
 
 # ---------- city labels ----------
 cities = [
-    ("Enterprise", -117.2785, 45.4263, "left"),
-    ("Joseph", -117.2296, 45.3543, "left"),
-    ("Lostine", -117.4277, 45.4904, "left"),
-    ("Wallowa", -117.5288, 45.5704, "left"),
+    ("Enterprise", -117.2785, 45.4263, "right"),
+    ("Joseph", -117.2296, 45.3543, "right"),
+    ("Lostine", -117.4277, 45.4904, "right"),
+    ("Wallowa", -117.5288, 45.5704, "right"),
     ("Imnaha", -116.8338, 45.5604, "right"),
     ("Troy", -117.4510, 45.9465, "right"),
     ("Elgin", -117.9177, 45.5649, "right"),
@@ -203,8 +199,7 @@ title_y = subtitle_y + 0.028
 fig.text(left_x, title_y, "Wallowa County Geology",
           fontproperties=f_bold, fontsize=22, color="#2b2a26")
 fig.text(left_x, subtitle_y,
-          f"With the M{quake['mag']:.1f} earthquake of {quake_pt:%b %-d, %Y} "
-          f"({quake['place']})",
+          f"Rock units, faults, and the M{quake['mag']:.1f} earthquake of {quake_pt:%b %-d}",
           fontproperties=f_reg, fontsize=12, color="#5a584f")
 
 # ---------- legend ----------
