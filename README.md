@@ -52,6 +52,10 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`wallowa-earthquakes-map/`](wallowa-earthquakes-map/) — map of every
+  M3.0+ earthquake on record in and around Wallowa County, OR from USGS
+  ComCat, with the most recent quake in red and circles sized by
+  magnitude.
 
 ## Shared resources
 

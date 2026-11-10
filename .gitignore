@@ -105,3 +105,9 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+# --- wallowa-earthquakes-map ---
+# earthquakes.json is live data fetch_earthquakes.py regenerates every run,
+# and the rendered map image is an output too -- neither is source, so
+# don't track them.
+wallowa-earthquakes-map/earthquakes.json
+wallowa-earthquakes-map/wallowa_earthquakes*.png
