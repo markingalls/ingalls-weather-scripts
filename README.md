@@ -52,6 +52,9 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`county-earthquake-map/`](county-earthquake-map/) — one-off map of
+  Washington, Oregon, and Idaho counties shaded by the largest earthquake
+  on record in each, from the USGS ComCat catalog.
 
 ## Shared resources
 
