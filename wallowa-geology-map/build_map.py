@@ -144,7 +144,7 @@ ax.add_geometries(wallowa_geoms, crs=pc, facecolor="none", edgecolor="#2b2a26",
                    linewidth=2.0, zorder=6)
 wl = json.load(open(f"{MAPS_DIR}/wallowa_lake.geojson"))
 ax.add_geometries([shape(f["geometry"]) for f in wl["features"]], crs=pc,
-                   facecolor=WATER_COLOR, edgecolor=WATER_EDGE, linewidth=0.6, zorder=6.5)
+                   facecolor=WATER_COLOR, edgecolor=WATER_EDGE, linewidth=0.6, zorder=3.5)  # under highways + faults
 
 # ---------- city labels ----------
 cities = [
