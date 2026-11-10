@@ -111,3 +111,8 @@ tpw-wm6-ensemble-map/output/*.png
 # don't track them.
 wallowa-earthquakes-map/earthquakes.json
 wallowa-earthquakes-map/wallowa_earthquakes*.png
+# --- wallowa-geology-map ---
+# earthquake.json is live data fetch_earthquake.py regenerates, and the
+# rendered map image is an output -- neither is source.
+wallowa-geology-map/earthquake.json
+wallowa-geology-map/wallowa_geology*.png

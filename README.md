@@ -56,6 +56,9 @@ workflows. Each project lives in its own directory with its own README.
   M3.0+ earthquake on record in and around Wallowa County, OR from USGS
   ComCat, with the most recent quake in red and circles sized by
   magnitude.
+- [`wallowa-geology-map/`](wallowa-geology-map/) — geologic map of
+  Wallowa County (USGS SGMC units and faults) with highways, cities, and
+  the most recent M3+ earthquake marked.
 
 ## Shared resources
 
