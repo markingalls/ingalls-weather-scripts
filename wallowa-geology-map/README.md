@@ -18,7 +18,8 @@ The circle is styled and sized the same way as on
 - `fetch_earthquake.py` -- pulls the earthquake to mark from USGS ComCat
   and writes `earthquake.json`. It defaults to the most recent M3.0+ event
   in and around the county. Pass `--event-id` to choose a specific one.
-- `build_map.py` -- renders `wallowa_geology.png`.
+- `build_map.py` -- renders `wallowa_geology.png` at exactly 2160 x 2700
+  px (4:5, Instagram's tallest feed shape; a clean 2x of 1080 x 1350).
 - `requirements.txt` / `setup.sh` -- Python + system dependencies.
 
 Smaller highways and Wallowa Lake come from the shared TIGER layers

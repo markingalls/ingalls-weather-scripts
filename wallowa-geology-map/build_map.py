@@ -47,7 +47,7 @@ def marker_diameter(mag):
 
 
 # ---------- extent / projection (Wallowa County + a small margin) ----------
-EXTENT = [-118.08, -116.36, 44.99, 46.09]
+EXTENT = [-118.03, -116.40, 44.99, 46.09]
 CENTER_LON, CENTER_LAT = -117.22, 45.54
 
 proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON,
@@ -55,9 +55,15 @@ proj = ccrs.NearsidePerspective(central_longitude=CENTER_LON,
                                  satellite_height=4_000_000)
 pc = ccrs.PlateCarree()
 
-fig = plt.figure(figsize=(10, 11.6), dpi=200)
+# Exactly 4:5 (Instagram's tallest feed shape): 10 x 12.5 in at 216 dpi =
+# 2160 x 2700 px, a clean 2x of Instagram's 1080 x 1350. Saved without
+# bbox_inches="tight" so the canvas stays exactly that size; everything
+# below is laid out in figure coordinates to fit inside it.
+FIG_W, FIG_H, DPI = 10, 12.5, 216
+fig = plt.figure(figsize=(FIG_W, FIG_H), dpi=DPI)
 fig.patch.set_facecolor("#f7f6f2")
-ax = fig.add_axes([0.05, 0.25, 0.90, 0.66], projection=proj)
+ax = fig.add_axes([0.04, 0.245, 0.92, 0.67], projection=proj)
+ax.set_anchor("N")  # map hugs the title; spare height goes to the legend
 ax.set_facecolor("white")
 ax.set_extent(EXTENT, crs=pc)
 
@@ -227,26 +233,30 @@ other_handles = [
     Line2D([0], [0], color=SECONDARY_COLOR, linewidth=1.2, label="State highway"),
     Patch(facecolor=WATER_COLOR, edgecolor=WATER_EDGE, linewidth=0.6, label="Lake"),
 ]
-leg_units = fig.legend(handles=unit_handles, loc="upper left",
+leg_units = fig.legend(handles=unit_handles, loc="upper left", ncol=2,
                         bbox_to_anchor=(left_x, map_pos.y0 - 0.014),
                         bbox_transform=fig.transFigure, frameon=False, prop=f_reg,
-                        fontsize=10, labelspacing=0.75, handlelength=2.0,
-                        handleheight=1.6, borderaxespad=0)
-leg_other = fig.legend(handles=other_handles, loc="upper left",
-                        bbox_to_anchor=(left_x + 0.53, map_pos.y0 - 0.014),
-                        bbox_transform=fig.transFigure, frameon=False, prop=f_reg,
-                        fontsize=10, labelspacing=1.05, handlelength=2.6,
-                        borderaxespad=0)
-
-# ---------- attribution (just under the taller of the two legend columns) ----------
+                        fontsize=9.5, labelspacing=0.7, handlelength=2.0,
+                        handleheight=1.6, columnspacing=1.5, borderaxespad=0)
 fig.canvas.draw()
 inv = fig.transFigure.inverted()
-leg_bottom = min(inv.transform(l.get_window_extent())[0][1] for l in (leg_units, leg_other))
-fig.text(center_x, leg_bottom - 0.025,
+units_bottom = inv.transform(leg_units.get_window_extent())[0][1]
+leg_other = fig.legend(handles=other_handles, loc="upper left", ncol=4,
+                        bbox_to_anchor=(left_x, units_bottom - 0.012),
+                        bbox_transform=fig.transFigure, frameon=False, prop=f_reg,
+                        fontsize=9.5, labelspacing=0.9, handlelength=2.4,
+                        columnspacing=1.5, borderaxespad=0)
+
+# ---------- attribution (bottom of the canvas) ----------
+fig.text(center_x, 0.012,
           "USGS State Geologic Map Compilation (Walker & MacLeod 1991) / USGS ComCat / "
           "US Census / OpenStreetMap — Ingalls Weather",
           fontproperties=f_reg, fontsize=8.5, color="#5a584f", ha="center")
 
-plt.savefig("wallowa_geology.png",
-            facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
+fig.canvas.draw()
+other_bottom = inv.transform(leg_other.get_window_extent())[0][1]
+if other_bottom < 0.03:
+    print(f"WARNING: legend runs into the attribution (bottom at {other_bottom:.3f})")
+
+plt.savefig("wallowa_geology.png", facecolor=fig.get_facecolor(), dpi=DPI)
 print("saved")
