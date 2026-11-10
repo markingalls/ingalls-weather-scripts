@@ -184,6 +184,7 @@ ax.scatter([quake["lon"]], [quake["lat"]], transform=pc,
 # ---------- frame ----------
 ax.spines["geo"].set_edgecolor("black")
 ax.spines["geo"].set_linewidth(1.6)
+ax.spines["geo"].set_zorder(100)  # frame draws over every map layer
 
 fig.canvas.draw()
 map_pos = ax.get_position()
