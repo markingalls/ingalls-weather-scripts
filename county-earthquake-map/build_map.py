@@ -37,6 +37,7 @@ admin0_boundary_lines.json. Logo: assets/ingalls_weather_logo.png.
 
 import argparse
 import json
+import math
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -53,7 +54,9 @@ from matplotlib.transforms import offset_copy
 import requests
 
 import cartopy.crs as ccrs
+from shapely.affinity import scale
 from shapely.geometry import shape, Point
+from shapely.ops import polylabel
 from shapely.strtree import STRtree
 
 # ---------------------------------------------------------------------------
@@ -214,6 +217,21 @@ def load_geoms(path, keep=lambda props: True):
             if f.get("geometry") and keep(f["properties"])]
 
 
+def label_point(geom):
+    """Visual center of a county for its label: the pole of inaccessibility
+    (point farthest from any edge) of its largest piece, so labels sit in
+    the middle of the open area instead of wherever representative_point()
+    happens to land (often hugging one edge, e.g. Walla Walla). Computed
+    with longitude scaled by cos(lat) so "farthest" is roughly in km, not
+    degrees, at this latitude."""
+    if geom.geom_type == "MultiPolygon":
+        geom = max(geom.geoms, key=lambda g: g.area)
+    kx = math.cos(math.radians(geom.centroid.y))
+    local = scale(geom, xfact=kx, yfact=1.0, origin=(0, 0))
+    pt = polylabel(local, tolerance=0.005)
+    return Point(pt.x / kx, pt.y)
+
+
 def event_label(ev):
     """Short name for the top-events box: USGS's own named-event title if
     it has one ("The 2001 Nisqually, Washington Earthquake" -> "Nisqually"),
@@ -270,8 +288,6 @@ def build_map(maxima, counties, output_path, fetched_at):
                       edgecolor="#2b2a26", linewidth=1.4, zorder=3.1)
 
     # ---------- per-county magnitude labels ----------
-    # Counties that get a top-event star have their label nudged up so the
-    # star (often near the representative point) doesn't sit on the number.
     ranked = sorted(((ev, c) for c in counties if (ev := maxima.get(c["geoid"]))),
                     key=lambda ec: -ec[0]["mag"])[:TOP_N_EVENTS]
     starred = {c["geoid"] for _, c in ranked}
@@ -280,10 +296,16 @@ def build_map(maxima, counties, output_path, fetched_at):
         if ev is None:
             continue
         _, _, text_color = mag_class(ev["mag"])
-        pt = c["geom"].representative_point()
+        pt = label_point(c["geom"])
         halo = "#2b2a26" if text_color == "white" else "white"
+        # Nudge up only if this county's star would actually sit on the
+        # number (within roughly a label's width/height of it); otherwise
+        # leave the label at the county's visual center.
+        star_hits = (c["geoid"] in starred
+                     and abs(ev["lon"] - pt.x) * math.cos(math.radians(pt.y)) < 0.22
+                     and abs(ev["lat"] - pt.y) < 0.10)
         label_tf = offset_copy(pc._as_mpl_transform(ax), fig=fig, x=0,
-                               y=9 if c["geoid"] in starred else 0, units="points")
+                               y=9 if star_hits else 0, units="points")
         txt = ax.text(pt.x, pt.y, f"{ev['mag']:.1f}", transform=label_tf, ha="center", va="center",
                       fontproperties=f_med, fontsize=7.6, color=text_color, zorder=6)
         txt.set_path_effects([pe.withStroke(linewidth=1.4, foreground=halo, alpha=0.45)])
@@ -308,7 +330,7 @@ def build_map(maxima, counties, output_path, fetched_at):
     fig.text(left_x, title_y, "Largest Recorded Earthquake by County",
              fontproperties=f_bold, fontsize=22, color="#2b2a26")
     fig.text(left_x, subtitle_y,
-             f"Washington, Oregon & Idaho  •  Max magnitude at epicenter, {min(years)}–{fetched_at:%Y}",
+             f"Pacific Northwest  •  Max magnitude at epicenter, {min(years)}–{fetched_at:%Y}",
              fontproperties=f_reg, fontsize=12, color="#5a584f")
 
     # ---------- magnitude legend (lower-left, over the Pacific) ----------
@@ -317,7 +339,7 @@ def build_map(maxima, counties, output_path, fetched_at):
         if label in present_classes:
             handles.append(Patch(facecolor=fill, edgecolor="#8f8b80", label=f"M {label}"))
     if any(ev is None for ev in maxima.values()):
-        handles.append(Patch(facecolor=NO_DATA_COLOR, edgecolor="#8f8b80", label="None on record"))
+        handles.append(Patch(facecolor=NO_DATA_COLOR, edgecolor="#8f8b80", label="None in catalog"))
     leg = fig.legend(handles=handles, loc="lower left", title="Largest magnitude",
                      bbox_to_anchor=(left_x + 0.012, map_pos.y0 + 0.012),
                      bbox_transform=fig.transFigure, frameon=True, facecolor="white",

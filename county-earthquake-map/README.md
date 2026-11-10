@@ -42,12 +42,16 @@ in a county is that county's maximum.
   bounding box with no magnitude floor, largest first (paging if the box
   overlaps busier neighbors), and take the first event actually inside the
   polygon.
-- Counties with nothing even after pass 2 are drawn in gray ("None on
-  record"). As of Nov 2026 that's 9 counties, mostly the Snake River Plain
-  and Treasure Valley in Idaho (Ada, Twin Falls, Jerome, Gooding,
-  Minidoka, Jefferson, Madison, Payette) plus Asotin, WA. That's a ComCat
-  coverage gap for small events in southern Idaho, not proof that no
-  earthquake has happened there.
+- Counties with nothing even after pass 2 are drawn in gray ("None in
+  catalog"). As of Nov 2026 that's 9 counties: Ada, Twin Falls, Jerome,
+  Gooding, Minidoka, Jefferson, Madison, and Payette in Idaho, plus Asotin,
+  WA. This was double-checked against ComCat directly, padding each
+  county's box 0.3 deg and dropping the `eventtype` filter. There really
+  are zero cataloged events inside those polygons, even though nearby
+  counties have plenty. Two reasons: most of them sit on the Snake River
+  Plain, a well-known seismically quiet zone ringed by the active "seismic
+  parabola" around it, and southern Idaho has sparse seismic network
+  coverage, so small quakes there mostly never make it into ComCat.
 
 ### Caveats
 
@@ -73,5 +77,8 @@ in a county is that county's maximum.
   `../columbia-basin-alerts-map/`. The extent is padded into the Pacific
   to fit the legend clear of SW Oregon, and into WY/MT to fit the logo
   clear of SE Idaho.
-- Counties with a star get their magnitude label nudged up 9pt so the
-  star doesn't cover it.
+- Magnitude labels sit at each county's pole of inaccessibility (the
+  point farthest from any edge, via `shapely.ops.polylabel`) rather than
+  `representative_point()`, which often hugged one edge (e.g. Walla
+  Walla). A label is nudged up 9pt only when its county's star would
+  otherwise sit on it.
