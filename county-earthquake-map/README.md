@@ -42,13 +42,29 @@ in a county is that county's maximum.
   bounding box with no magnitude floor, largest first (paging if the box
   overlaps busier neighbors), and take the first event actually inside the
   polygon.
-- Counties with nothing even after pass 2 are drawn in gray ("None in
-  catalog"). As of Nov 2026 that's 9 counties: Ada, Twin Falls, Jerome,
-  Gooding, Minidoka, Jefferson, Madison, and Payette in Idaho, plus Asotin,
-  WA. This was double-checked against ComCat directly, padding each
+- **Idaho Geological Survey supplement** (`SUPPLEMENTAL_EVENTS`): three
+  instrumental events from IGS's *Catalog of Idaho Earthquakes, 1872-1993*
+  ([IC-56](https://idahogeology.org/product/I-56)), recorded by regional
+  networks that never fed ComCat, are merged in at render time. Each one
+  replaces a county's value only if it's larger, and the saved snapshot
+  stays pure ComCat. These counties get a dagger (†) on their label:
+  - Canyon, M3.6, 1989-05-30, 20 km WNW of Caldwell (Montana Bureau of
+    Mines network). ComCat's max there is M2.2.
+  - Jefferson, M2.3, 1989-10-10 (Bureau of Reclamation Teton network).
+  - Madison, M1.6, 1991-08-20 (INEL network).
+
+  Left out on purpose: IGS places the 1916-05-13 M5.3 at Boise (Ada Co.),
+  but ComCat has the same event at 44.2N 116.5W (Washington Co.), and the
+  ComCat location is kept. Intensity-only felt reports with no magnitude
+  (Gooding and Twin Falls, 1932) are also left out.
+- Counties with nothing in either source are drawn in gray ("None in
+  catalog"). As of Nov 2026 that's 7 counties: Ada, Twin Falls, Jerome,
+  Gooding, Minidoka, and Payette in Idaho, plus Asotin, WA. PNSN's own
+  catalog was also checked for these: its only hits inside them are
+  events flagged as probable blasts. This was double-checked against ComCat directly, padding each
   county's box 0.3 deg and dropping the `eventtype` filter. There really
   are zero cataloged events inside those polygons, even though nearby
-  counties have plenty. Two reasons: most of them sit on the Snake River
+  counties have plenty. Two reasons: most of them are on or beside the Snake River
   Plain, a well-known seismically quiet zone ringed by the active "seismic
   parabola" around it, and southern Idaho has sparse seismic network
   coverage, so small quakes there mostly never make it into ComCat.
@@ -71,8 +87,17 @@ in a county is that county's maximum.
 
 ### Rendering
 
-- Whole-magnitude color bins (each step is ~32x the energy), with the top
-  bin split at 6.5 so the major events stand apart from the M6.0s.
+- Whole-magnitude color bins (each step is ~32x the energy) from "Under
+  2.0" up, with the top bin split at 6.5 so the major events stand apart
+  from the M6.0s. All bins always show in the legend. Classification uses
+  the magnitude rounded to one decimal, so e.g. Walla Walla's 5.99 (shown
+  as "6.0") is colored as 6.0+.
+- State lines are clipped to land, which drops the coastal states'
+  offshore state-waters boundaries (along the coast and through the
+  Strait/Puget Sound). The US/Canada border is drawn unclipped.
+- The top-events card lists each event with a magnitude chip in its class
+  color, the county, and the event's name/year. It's sized to stay clear
+  of the Idaho panhandle.
 - Same NearsidePerspective look and basemap colors as
   `../columbia-basin-alerts-map/`. The extent is padded into the Pacific
   to fit the legend clear of SW Oregon, and into WY/MT to fit the logo
