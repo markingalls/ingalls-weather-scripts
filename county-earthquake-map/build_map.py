@@ -273,19 +273,22 @@ def label_point(geom):
     return Point(pt.x / kx, pt.y)
 
 
+# Names for the top-events card, keyed by ComCat event id: an event gets a
+# name only if it has its own English Wikipedia article, and the name is
+# taken from that article's title. Checked Nov 2026. Others (1873 Curry Co.,
+# 1975 Oneida Co., 1999 Grays Harbor Co.) have no article, so they show
+# only the year.
+WIKIPEDIA_NAMES = {
+    "usp0001zbv": "Borah Peak",                 # 1983 Borah Peak earthquake
+    "uw10530748": "Nisqually",                  # 2001 Nisqually earthquake
+    "ushis18721215054000000": "North Cascades", # 1872 North Cascades earthquake
+    "uw10313838": "Klamath Falls",              # 1993 Klamath Falls earthquakes
+    "iscgem903747": "State Line",               # 1936 State Line earthquake
+}
+
+
 def event_label(ev):
-    """Short name for the top-events box: USGS's own named-event title if
-    it has one ("The 2001 Nisqually, Washington Earthquake" -> "Nisqually"),
-    else just the year."""
-    place = ev.get("place") or ""
-    if place.startswith("The ") and place.endswith(" Earthquake"):
-        core = place[4:-len(" Earthquake")]           # "2001 Nisqually, Washington"
-        core = core.split(",")[0]                       # "2001 Nisqually"
-        parts = core.split(" ", 1)
-        if len(parts) == 2 and parts[0].isdigit():
-            return parts[1]
-        return core
-    return None
+    return WIKIPEDIA_NAMES.get(ev.get("id"))
 
 
 def build_map(maxima, counties, output_path, fetched_at):

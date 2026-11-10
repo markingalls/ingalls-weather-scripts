@@ -78,8 +78,15 @@ in a county is that county's maximum.
   events (the 1872 Lake Chelan quake, the 1873 event USGS places at
   42.0N 124.2W on the OR/CA line and credits here to Curry Co.) come from
   felt reports, so their epicenters can be tens of km off and their
-  magnitudes are estimates. Curry's M6.9 in particular is an epicenter
-  sitting right on the state line.
+  magnitudes are estimates. Curry's M6.9 (1873-11-23) in particular: ComCat's
+  preferred origin (California Division of Mines and Geology) is 42.0N
+  124.2W, about 0.4 km north of the OR/CA line, rounded to a tenth of a
+  degree and inferred from damage reports. The heaviest damage was in
+  California's Smith River valley and at Crescent City (MMI VIII). USGS's
+  other origin for the same event (Stover & Coffman) is 42.0N 124.0W,
+  ML 6.7, which also falls in Curry. So it's "in Curry" only within
+  location uncertainty, and could as easily have been centered in Del
+  Norte Co., CA.
 - **Mixed magnitude types.** ComCat mixes Mw, ML, Md, mb, etc. The map
   uses each event's preferred magnitude as published.
 - **Offshore events don't count.** Cascadia subduction-zone and Blanco
@@ -96,7 +103,12 @@ in a county is that county's maximum.
   offshore state-waters boundaries (along the coast and through the
   Strait/Puget Sound). The US/Canada border is drawn unclipped.
 - The top-events card lists each event with a magnitude chip in its class
-  color, the county, and the event's name/year. It's sized to stay clear
+  color, the county, and the event's name/year. An event is named only if
+  it has its own English Wikipedia article, using that article's name
+  (`WIKIPEDIA_NAMES`, checked Nov 2026): Borah Peak (1983), Nisqually
+  (2001), North Cascades (1872), Klamath Falls (1993), State Line (1936).
+  The 1873 Curry Co., 1975 Oneida Co. and 1999 Grays Harbor Co. events
+  have no article, so they show only the year. It's sized to stay clear
   of the Idaho panhandle.
 - Same NearsidePerspective look and basemap colors as
   `../columbia-basin-alerts-map/`. The extent is padded into the Pacific
