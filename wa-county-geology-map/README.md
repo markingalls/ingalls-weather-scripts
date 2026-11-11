@@ -1,9 +1,9 @@
 # Washington County Geology Map
 
 A reusable, Instagram-ready (4:5, 2160 x 2700 px) geologic map for any
-Washington county. It shows rock units, faults, highways, county lines,
-and incorporated cities, all from Washington DNR's statewide 1:100,000
-geologic map. First used for Adams County.
+Washington county. It shows rock units, faults, anticlines and synclines, highways, county
+lines, nearby lakes and rivers, and incorporated cities. The geology comes
+from Washington DNR's statewide 1:100,000 geologic map. First used for Adams County.
 
 ## Files
 
@@ -11,10 +11,14 @@ geologic map. First used for Adams County.
   county into `data/` (not tracked):
   - DNR 1:100,000 map units, clipped to the county and tagged with a
     shared color class
-  - DNR faults
+  - DNR faults, plus anticlines and synclines (monoclines are left out)
+  - Census TIGER lakes, reservoirs and river reaches of 1.5 km² or more
+    around the county, for context
   - Census TIGER US/state highways for the smaller-highway layer
-  - TIGER incorporated places for city labels
-- `build_map.py --county NAME` -- renders `<county>_geology.png`. Pass
+  - TIGER incorporated places in and around the county for city labels
+- `build_map.py --county NAME` -- renders `<county>_geology.png`. The title reads "<County> Co., Washington
+  Geologic Map". Pass `--also-label "Moses Lake"` (repeatable) to label
+  a city outside the county that falls on the map. Pass
   `--no-detail` to draw detail classes (Columbia River Basalt formations,
   loess, flood deposits) in their parent class's color.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies.
@@ -26,7 +30,7 @@ Run from inside this directory:
 ```bash
 bash setup.sh                              # first time / fresh environment only
 python3 fetch_geology.py --county Adams
-python3 build_map.py --county Adams        # -> adams_geology.png
+python3 build_map.py --county Adams --also-label "Moses Lake"   # -> adams_geology.png
 ```
 
 ## Notes
@@ -50,6 +54,10 @@ python3 build_map.py --county Adams        # -> adams_geology.png
   the 4:5 canvas, and its extent is stretched around the county to fill
   that box. Wide counties like Adams get extra context north and south,
   tall ones east and west.
+- **Folds** are drawn in purple, with the standard symbol at each
+  segment's midpoint: arrows pointing away from the axis for an
+  anticline, toward it for a syncline. They're dashed where DNR marks
+  them concealed.
 - **City labels** are TIGER incorporated places and always sit to the
   right of the dot. Label collisions aren't handled; fine for rural
   counties, but check dense ones.

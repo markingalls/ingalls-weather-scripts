@@ -6,10 +6,15 @@ it to data/<county>_*.geojson:
       clipped to the county, each tagged with its class in the shared color
       table (../maps/geology_classes.json, via ../maps/geology_wadnr.py)
   <county>_faults.geojson  -- DNR 1:100,000 faults, clipped to the county
+  <county>_folds.geojson   -- DNR 1:100,000 anticlines and synclines,
+      clipped to the county
   <county>_roads.geojson   -- US Census TIGER primary/secondary roads
       (US/state highways) around the county, for the smaller-highway layer
-  <county>_places.geojson  -- incorporated cities/towns in the county
-      (TIGER places), for labels
+  <county>_water.geojson   -- larger lakes, reservoirs and river reaches in
+      and around the county (TIGER AREAWATER), for context
+  <county>_places.geojson  -- incorporated cities/towns in and around the
+      county (TIGER places), for labels; in_county marks the ones that get
+      labeled by default
 
 Sources (all public, no key):
   - WA DNR "100K Surface Geology WA GeMS" ArcGIS FeatureServer
@@ -33,10 +38,11 @@ from geology_wadnr import classify  # noqa: E402
 
 DNR = ("https://gis.dnr.wa.gov/site1/rest/services/Public_Geology/"
        "100K_Surface_Geology_WA_GeMS/FeatureServer")
-UNITS_LAYER, FAULTS_LAYER, DMU_TABLE = 11, 7, 13
+UNITS_LAYER, FOLDS_LAYER, FAULTS_LAYER, DMU_TABLE = 11, 6, 7, 13
 TIGER = "https://www2.census.gov/geo/tiger/TIGER2024"
 WA_FIPS = "53"
-CONTEXT_PAD = 0.6  # degrees of roads fetched around the county
+CONTEXT_PAD = 0.6  # degrees of roads/water/places fetched around the county
+MIN_WATER_M2 = 1_500_000  # only lakes/reservoirs/river reaches >= 1.5 km^2
 
 
 def slug(county):
@@ -153,6 +159,22 @@ def main():
                      "geometry": round_coords(mapping(g))})
     write(out, f"data/{name}_faults.geojson")
 
+    # ---- folds (anticlines + synclines; monoclines left out) ----
+    fold_feats = dnr_query(FOLDS_LAYER, env, "FOLDS_100K_TYPE,FOLDS_100K_IS_CONCEALED")
+    out = []
+    for f in fold_feats:
+        p = f["properties"]
+        if p["FOLDS_100K_TYPE"] not in ("Anticline", "Syncline"):
+            continue
+        g = shape(f["geometry"]).intersection(county)
+        if g.is_empty:
+            continue
+        out.append({"type": "Feature",
+                    "properties": {"type": p["FOLDS_100K_TYPE"].lower(),
+                                   "concealed": p["FOLDS_100K_IS_CONCEALED"] == "Y"},
+                    "geometry": round_coords(mapping(g))})
+    write(out, f"data/{name}_folds.geojson")
+
     # ---- smaller highways (TIGER) ----
     clip = box(x0 - CONTEXT_PAD, y0 - CONTEXT_PAD, x1 + CONTEXT_PAD, y1 + CONTEXT_PAD)
     roads = gpd.read_file(f"{TIGER}/PRISECROADS/tl_2024_{WA_FIPS}_prisecroads.zip")
@@ -162,14 +184,29 @@ def main():
            for r in roads.itertuples() if not r.geometry.intersection(clip).is_empty],
           f"data/{name}_roads.geojson")
 
+    # ---- big water bodies around the county (context; TIGER AREAWATER) ----
+    counties_all = gpd.read_file(f"{MAPS_DIR}/counties_wa_or_id.geojson")
+    near = counties_all[counties_all["id"].str.startswith(WA_FIPS) & counties_all.intersects(clip)]
+    out = []
+    for fips in sorted(near["id"]):
+        water = gpd.read_file(f"{TIGER}/AREAWATER/tl_2024_{fips}_areawater.zip")
+        water = water[(water.AWATER > MIN_WATER_M2) & water.intersects(clip)]
+        for w in water.itertuples():
+            g = w.geometry.intersection(clip).simplify(0.0003)
+            if not g.is_empty:
+                out.append({"type": "Feature", "properties": {"name": w.FULLNAME},
+                            "geometry": round_coords(mapping(g), 4)})
+    write(out, f"data/{name}_water.geojson")
+
     # ---- incorporated places (labels) ----
     places = gpd.read_file(f"{TIGER}/PLACE/tl_2024_{WA_FIPS}_place.zip")
     places = places[places.CLASSFP.str.startswith("C")]  # incorporated cities/towns
     out = []
     for p in places.itertuples():
         pt = p.geometry.representative_point()
-        if county.contains(pt):
-            out.append({"type": "Feature", "properties": {"name": p.NAME},
+        if clip.contains(pt):
+            out.append({"type": "Feature",
+                        "properties": {"name": p.NAME, "in_county": county.contains(pt)},
                         "geometry": mapping(pt)})
     write(out, f"data/{name}_places.geojson")
 

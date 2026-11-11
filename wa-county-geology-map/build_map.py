@@ -22,7 +22,8 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
 from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
+from matplotlib.legend_handler import HandlerBase
+from matplotlib.patches import FancyArrowPatch, Patch
 import cartopy.crs as ccrs
 import numpy as np
 from shapely.geometry import shape
@@ -49,6 +50,9 @@ TRUNK = {"trunk", "trunk_link"}
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
 ap.add_argument("--county", required=True)
+ap.add_argument("--also-label", action="append", default=[], metavar="CITY",
+                help='label an incorporated city outside the county that falls on the map, '
+                     'e.g. --also-label "Moses Lake" (repeatable)')
 ap.add_argument("--no-detail", action="store_true",
                 help="draw detail classes (CRB formations, loess, flood deposits) "
                      "in their parent class's color")
@@ -62,7 +66,9 @@ SHOW_DETAIL = set() if args.no_detail else {c["key"] for c in CLASSES if c.get("
 
 geo = json.load(open(f"data/{name}_geology.geojson"))
 faults = json.load(open(f"data/{name}_faults.geojson"))
+folds = json.load(open(f"data/{name}_folds.geojson"))
 roads2 = json.load(open(f"data/{name}_roads.geojson"))
+water_ctx = json.load(open(f"data/{name}_water.geojson"))
 places = json.load(open(f"data/{name}_places.geojson"))
 county = county_shape(args.county)
 
@@ -76,7 +82,7 @@ FIG_W, FIG_H, DPI = 10, 12.5, 216
 fig = plt.figure(figsize=(FIG_W, FIG_H), dpi=DPI)
 fig.patch.set_facecolor("#f7f6f2")
 LEFT, WIDTH = 0.06, 0.88
-MAP_TOP = 0.915
+MAP_TOP = 0.935
 
 # ---------- legends first (bottom-up), so the map can take what's left ----------
 unit_handles = [Patch(facecolor=c["color"], edgecolor="#8a877d", linewidth=0.5,
@@ -90,19 +96,50 @@ if has_solid:
 if has_dashed:
     other_handles.append(Line2D([0], [0], color="black", linewidth=1.1, linestyle=(0, (3, 2)),
                                 label="Fault, concealed"))
+FOLD_COLOR = "#6B3FA0"  # purple: reads on every unit color, distinct from black faults
+
+
+class FoldHandle:
+    def __init__(self, kind):
+        self.kind = kind
+
+
+class FoldHandler(HandlerBase):
+    """Legend swatch: a horizontal fold axis with the map's perpendicular
+    arrow pair at its center (out = anticline, in = syncline)."""
+    def create_artists(self, legend, orig, x0, y0, width, height, fontsize, trans):
+        cy, cx, arm = y0 + height / 2, x0 + width / 2, height * 0.95
+        arts = [Line2D([x0, x0 + width], [cy, cy], color=FOLD_COLOR, linewidth=1.2,
+                       transform=trans)]
+        for side in (1, -1):
+            tip, base = (cy + side * arm, cy) if orig.kind == "anticline" else (cy + side * 0.15 * arm, cy + side * arm)
+            arts.append(FancyArrowPatch((cx, base), (cx, tip), arrowstyle="-|>,head_length=3,head_width=2",
+                                        color=FOLD_COLOR, linewidth=1.0, shrinkA=0, shrinkB=0,
+                                        transform=trans))
+        return arts
+
+
+fold_types = {f["properties"]["type"] for f in folds["features"]}
+fold_handles, fold_labels = [], []
+for kind in ("anticline", "syncline"):
+    if kind in fold_types:
+        other_handles.append(FoldHandle(kind))
 other_handles += [
     Line2D([0], [0], color=MOTORWAY_COLOR, linewidth=2.2, label="Freeway"),
     Line2D([0], [0], color=TRUNK_COLOR, linewidth=2.2, label="Major highway"),
     Line2D([0], [0], color=SECONDARY_COLOR, linewidth=1.2, label="State highway"),
 ]
-if "water" in by_class:
+if "water" in by_class or water_ctx["features"]:
     other_handles.append(Patch(facecolor=BY_KEY["water"]["color"], edgecolor=BY_KEY["water"]["edge"],
                                linewidth=0.6, label="Lake / river"))
 
 inv = fig.transFigure.inverted()
-leg_other = fig.legend(handles=other_handles, loc="lower left", ncol=4,
+other_labels = [h.kind.title() if isinstance(h, FoldHandle) else h.get_label()
+                for h in other_handles]
+leg_other = fig.legend(other_handles, other_labels, loc="lower left", ncol=4,
+                       handler_map={FoldHandle: FoldHandler()},
                        bbox_to_anchor=(LEFT, 0.04), bbox_transform=fig.transFigure,
-                       frameon=False, prop=f_reg, fontsize=9.5, labelspacing=0.6,
+                       frameon=False, prop=f_reg, fontsize=9.5, labelspacing=0.9,
                        handlelength=2.4, columnspacing=1.5, borderaxespad=0)
 fig.canvas.draw()
 other_top = inv.transform(leg_other.get_window_extent())[1][1]
@@ -156,6 +193,11 @@ counties = json.load(open(f"{MAPS_DIR}/counties_wa_or_id.geojson"))
 ax.add_geometries([shape(f["geometry"]) for f in counties["features"]], crs=pc,
                   facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=3)
 
+# Big lakes/reservoirs/rivers around the county (TIGER) for context --
+# e.g. Moses Lake and Potholes Reservoir next to Adams County.
+ax.add_geometries([shape(f["geometry"]) for f in water_ctx["features"]], crs=pc,
+                  facecolor=BY_KEY["water"]["color"], edgecolor=BY_KEY["water"]["edge"],
+                  linewidth=0.5, zorder=3.4)
 if "water" in by_class:
     ax.add_geometries(by_class["water"], crs=pc, facecolor=BY_KEY["water"]["color"],
                       edgecolor=BY_KEY["water"]["edge"], linewidth=0.5, zorder=3.5)
@@ -184,12 +226,51 @@ ax.add_geometries(solid, crs=pc, facecolor="none", edgecolor="black", linewidth=
 ax.add_geometries(dashed, crs=pc, facecolor="none", edgecolor="black", linewidth=0.9,
                   linestyle=(0, (3, 2)), zorder=5)
 
+# ---------- folds: purple axis line (dashed where concealed/approximate),
+# with the standard symbol at its midpoint -- arrows pointing away from
+# the axis for an anticline, toward it for a syncline ----------
+def fold_symbol(line, kind):
+    xy = proj.transform_points(pc, *np.asarray(line.coords).T)[:, :2]
+    seg = np.diff(xy, axis=0)
+    seglen = np.hypot(*seg.T)
+    if seglen.sum() == 0:
+        return
+    i = int(np.searchsorted(np.cumsum(seglen), seglen.sum() / 2))
+    t = seg[i] / seglen[i]
+    mid = xy[i] + t * (seglen.sum() / 2 - (np.cumsum(seglen)[i] - seglen[i]))
+    normal = np.array([-t[1], t[0]])
+    arm = 0.011 * (ax.get_xlim()[1] - ax.get_xlim()[0])
+    for side in (1, -1):
+        tip, base = mid + side * normal * arm, mid
+        if kind == "syncline":
+            tip, base = base + side * normal * 0.15 * arm, mid + side * normal * arm
+        ax.annotate("", xy=tip, xytext=base, xycoords="data",
+                    arrowprops=dict(arrowstyle="-|>,head_length=0.35,head_width=0.2",
+                                    color=FOLD_COLOR, linewidth=1.0, shrinkA=0, shrinkB=0),
+                    zorder=5.6)
+
+
+for f in folds["features"]:
+    g = shape(f["geometry"])
+    ax.add_geometries([g], crs=pc, facecolor="none", edgecolor=FOLD_COLOR, linewidth=1.0,
+                      linestyle=(0, (3, 2)) if f["properties"]["concealed"] else "solid",
+                      zorder=5.5)
+    for part in getattr(g, "geoms", [g]):
+        if part.length > 0.03:  # skip slivers left by clipping at the county line
+            fold_symbol(part, f["properties"]["type"])
+
 # ---------- county outline ----------
 ax.add_geometries([county], crs=pc, facecolor="none", edgecolor="#2b2a26",
                   linewidth=2.0, zorder=6)
 
 # ---------- city labels (incorporated places, label to the right) ----------
+also = {n.lower() for n in args.also_label}
+missing = also - {f["properties"]["name"].lower() for f in places["features"]}
+if missing:
+    raise SystemExit(f"--also-label: no incorporated place on this map named {sorted(missing)}")
 for f in places["features"]:
+    if not (f["properties"]["in_county"] or f["properties"]["name"].lower() in also):
+        continue
     lon, lat = f["geometry"]["coordinates"]
     ax.plot(lon, lat, marker="o", markersize=4.5, color="black", markeredgecolor="white",
             markeredgewidth=0.8, transform=pc, zorder=8)
@@ -219,12 +300,9 @@ if os.path.exists(LOGO_PATH):
     logo_ax.imshow(logo_img)
     logo_ax.axis("off")
 
-# ---------- title / subtitle ----------
-subtitle_y = map_pos.y1 + 0.014
-fig.text(map_pos.x0, subtitle_y + 0.028, f"{title_name} County Geology",
+# ---------- title (single line) ----------
+fig.text(map_pos.x0, map_pos.y1 + 0.018, f"{title_name} Co., Washington Geologic Map",
          fontproperties=f_bold, fontsize=22, color="#2b2a26")
-fig.text(map_pos.x0, subtitle_y, "Rock units and faults",
-         fontproperties=f_reg, fontsize=12, color="#5a584f")
 
 # ---------- attribution ----------
 fig.text((map_pos.x0 + map_pos.x1) / 2, 0.012,
