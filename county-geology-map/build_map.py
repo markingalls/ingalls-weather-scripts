@@ -1,14 +1,15 @@
 """
 Renders a 4:5 (2160 x 2700 px, Instagram-ready) geologic map of one
-Washington county from the files fetch_geology.py wrote:
+Washington or Oregon county from the files fetch_geology.py wrote:
 
-    python3 build_map.py --county Adams      ->  adams_geology.png
+    python3 build_map.py --state WA --county Adams   ->  wa_adams_geology.png
+    python3 build_map.py --state OR --county Baker   ->  or_baker_geology.png
 
 Colors come from the shared table in ../maps/geology_classes.json, so a
 rock class looks the same here as on any other county's map (and on
-../wallowa-geology-map). DNR's 1:100,000 map splits the Columbia River
-Basalt into formations and separates loess from Ice Age flood deposits, so
-by default every detail class is shown; --no-detail draws them in their
+../wallowa-geology-map). Both WA DNR's and DOGAMI's maps split the Columbia
+River Basalt into formations and separate loess from Ice Age flood
+deposits, so by default every detail class is shown; --no-detail draws them in their
 parent class's color instead.
 """
 import argparse
@@ -32,7 +33,7 @@ from shapely.ops import unary_union
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
 from geology_sgmc import display_class, load_classes  # noqa: E402
-from fetch_geology import slug  # noqa: E402
+from fetch_geology import STATE_INFO, data_name  # noqa: E402
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -50,6 +51,7 @@ TRUNK = {"trunk", "trunk_link"}
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
+ap.add_argument("--state", required=True, type=str.upper, choices=sorted(STATE_INFO))
 ap.add_argument("--county", required=True)
 ap.add_argument("--also-label", action="append", default=[], metavar="CITY",
                 help='label an incorporated city outside the county that falls on the map, '
@@ -58,7 +60,8 @@ ap.add_argument("--no-detail", action="store_true",
                 help="draw detail classes (CRB formations, loess, flood deposits) "
                      "in their parent class's color")
 args = ap.parse_args()
-name = slug(args.county)
+name = data_name(args.state, args.county)
+state_name = STATE_INFO[args.state][1]
 title_name = args.county.strip().title()
 
 CLASSES = load_classes()
@@ -308,14 +311,17 @@ if os.path.exists(LOGO_PATH):
     logo_ax.axis("off")
 
 # ---------- title (single line) ----------
-fig.text(map_pos.x0, map_pos.y1 + 0.018, f"{title_name} Co., Washington Geologic Map",
+fig.text(map_pos.x0, map_pos.y1 + 0.018, f"{title_name} Co., {state_name} Geologic Map",
          fontproperties=f_bold, fontsize=22, color="#2b2a26")
 
 # ---------- attribution ----------
 sources = {f["properties"].get("source", "100k") for f in geo["features"]}
-dnr_credit = {frozenset({"100k"}): "Washington DNR 1:100,000 Geologic Map",
-              frozenset({"250k"}): "Washington DNR 1:250,000 Geologic Map"}.get(
-    frozenset(sources), "Washington DNR 1:100,000 & 1:250,000 Geologic Maps")
+if "ogdc7" in sources:
+    dnr_credit = "DOGAMI Oregon Geologic Data Compilation (OGDC-7)"
+else:
+    dnr_credit = {frozenset({"100k"}): "Washington DNR 1:100,000 Geologic Map",
+                  frozenset({"250k"}): "Washington DNR 1:250,000 Geologic Map"}.get(
+        frozenset(sources), "Washington DNR 1:100,000 & 1:250,000 Geologic Maps")
 fig.text((map_pos.x0 + map_pos.x1) / 2, 0.012,
          f"{dnr_credit} / US Census / OpenStreetMap — Ingalls Weather",
          fontproperties=f_reg, fontsize=8.5, color="#5a584f", ha="center")

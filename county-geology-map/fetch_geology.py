@@ -1,34 +1,41 @@
 """
-Fetches everything build_map.py needs for one Washington county and writes
-it to data/<county>_*.geojson:
+Fetches everything build_map.py needs for one Washington or Oregon county
+and writes it to data/<county>_*.geojson:
 
-  <county>_geology.geojson -- Washington DNR 1:100,000 geologic map units,
-      clipped to the county, each tagged with its class in the shared color
-      table (../maps/geology_classes.json, via ../maps/geology_wadnr.py)
-  <county>_faults.geojson  -- DNR 1:100,000 faults, clipped to the county
-  <county>_folds.geojson   -- DNR 1:100,000 anticlines and synclines,
-      clipped to the county
+  <county>_geology.geojson -- geologic map units, clipped to the county,
+      each tagged with its class in the shared color table
+      (../maps/geology_classes.json)
+  <county>_faults.geojson  -- faults, clipped to the county
+  <county>_folds.geojson   -- anticlines and synclines, clipped to the county
+  <county>_county.geojson / <county>_counties.geojson -- full-resolution
+      TIGER outline of the county, and of the counties around it
   <county>_roads.geojson   -- US Census TIGER primary/secondary roads
-      (US/state highways) around the county, for the smaller-highway layer
+      (US/state highways) around the county, in every neighboring state
   <county>_water.geojson   -- larger lakes, reservoirs and river reaches in
       and around the county (TIGER AREAWATER), for context
   <county>_places.geojson  -- incorporated cities/towns in and around the
       county (TIGER places), for labels; in_county marks the ones that get
       labeled by default
 
-Sources (all public, no key):
-  - WA DNR "100K Surface Geology WA GeMS" ArcGIS FeatureServer, patched
-    from DNR's "250k Surface Geology" MapServer wherever 100k polygons are
-    corrupted (detected automatically; see DEFECT_SEGMENT_M)
-  - US Census TIGER/Line 2024 (PRISECROADS, PLACE)
+Geology sources (all public, no key):
+  - Washington: WA DNR "100K Surface Geology WA GeMS" ArcGIS FeatureServer,
+    patched from DNR's "250k Surface Geology" MapServer wherever 100k
+    polygons are corrupted (detected automatically; see DEFECT_SEGMENT_M).
+    Crosswalk: ../maps/geology_wadnr.py
+  - Oregon: DOGAMI Oregon Geologic Data Compilation, release 7 (OGDC-7)
+    geodatabase, downloaded once (~100 MB) and cached in data/_cache/.
+    Crosswalk: ../maps/geology_ogdc.py
 
-Usage:  python3 fetch_geology.py --county Adams
+Usage:  python3 fetch_geology.py --state WA --county Adams
+        python3 fetch_geology.py --state OR --county Baker
 """
 import argparse
+import io
 import json
 import os
 import re
 import sys
+import zipfile
 
 import geopandas as gpd
 import numpy as np
@@ -38,7 +45,8 @@ from shapely.geometry import Point, box, mapping, shape
 
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
-from geology_wadnr import classify  # noqa: E402
+import geology_ogdc  # noqa: E402
+import geology_wadnr  # noqa: E402
 
 DNR = ("https://gis.dnr.wa.gov/site1/rest/services/Public_Geology/"
        "100K_Surface_Geology_WA_GeMS/FeatureServer")
@@ -56,14 +64,28 @@ DEFECT_SEGMENT_M = 5000
 # instead (consistent linework, no seams).
 WHOLE_250K_SHARE = 0.4
 TIGER = "https://www2.census.gov/geo/tiger/TIGER2024"
-WA_FIPS = "53"
-STATES = ["53", "41", "16"]  # WA, OR, ID -- neighbors for roads, water, county lines
+# --state -> (FIPS, name). Neighboring states' counties, roads, water and
+# places are pulled in too, from NEIGHBOR_STATES.
+STATE_INFO = {"WA": ("53", "Washington"), "OR": ("41", "Oregon")}
+NEIGHBOR_STATES = ["53", "41", "16", "06", "32"]  # WA, OR, ID, CA, NV
+
+OGDC_BUNDLE = "https://pubs.oregon.gov/dogami/dds/ogdc/ogdc-7/OGDC-7_publication-bundle.zip"
+OGDC_GDB = "data/_cache/OGDC7.gdb"
+OGDC_CRS = "EPSG:2994"  # Oregon Lambert (ft), the geodatabase's native CRS
+OGDC_NOT_FAULTS = re.compile(r"^contact|dike|key bed", re.I)
 CONTEXT_PAD = 0.6  # degrees of roads/water/places fetched around the county
 MIN_WATER_M2 = 1_500_000  # only lakes/reservoirs/river reaches >= 1.5 km^2
 
 
 def slug(county):
     return re.sub(r"[^a-z0-9]+", "_", county.lower()).strip("_")
+
+
+def data_name(state, county):
+    """File prefix: state + county (e.g. or_baker), so counties that share a
+    name across states (Columbia, Douglas, Grant, Lincoln...) never
+    overwrite each other."""
+    return f"{state.lower()}_{slug(county)}"
 
 
 def tiger_counties():
@@ -81,14 +103,15 @@ def tiger_counties():
         with open(path, "wb") as fh:
             fh.write(r.content)
     gdf = gpd.read_file(path)
-    return gdf[gdf.STATEFP.isin(STATES)].to_crs(4326)
+    return gdf[gdf.STATEFP.isin(NEIGHBOR_STATES)].to_crs(4326)
 
 
-def county_shape(county, counties=None):
+def county_shape(county, state, counties=None):
     counties = tiger_counties() if counties is None else counties
-    hit = counties[(counties.STATEFP == WA_FIPS) & (counties.NAME.str.lower() == county.lower())]
+    fips, state_name = STATE_INFO[state]
+    hit = counties[(counties.STATEFP == fips) & (counties.NAME.str.lower() == county.lower())]
     if hit.empty:
-        raise SystemExit(f"no Washington county named {county!r}")
+        raise SystemExit(f"no {state_name} county named {county!r}")
     return hit.geometry.iloc[0]
 
 
@@ -191,20 +214,8 @@ def write(features, path):
     print(f"wrote {path} ({len(features)} features)")
 
 
-def main():
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--county", required=True, help='Washington county name, e.g. "Adams"')
-    args = ap.parse_args()
-    name = slug(args.county)
-    os.makedirs("data", exist_ok=True)
-
-    counties = tiger_counties()
-    county = county_shape(args.county, counties)
-    x0, y0, x1, y1 = county.bounds
-    env = {"xmin": x0 - 0.02, "ymin": y0 - 0.02, "xmax": x1 + 0.02, "ymax": y1 + 0.02,
-           "spatialReference": {"wkid": 4326}}
-
+def geology_wa(county, env):
+    """Units, faults, folds for a Washington county from WA DNR."""
     # ---- geology units ----
     print("fetching DNR map units ...")
     dmu = dnr_dmu()
@@ -235,16 +246,16 @@ def main():
         sym = f["properties"]["MAP_UNIT_100K"]
         uname, age, desc = dmu.get(sym, ("", "", ""))
         out.append({"type": "Feature",
-                    "properties": {"code": sym, "class": classify(sym, uname, age, desc),
+                    "properties": {"code": sym, "class": geology_wadnr.classify(sym, uname, age, desc),
                                    "name": uname, "age": age, "source": "100k"},
                     "geometry": round_coords(mapping(g))})
     if patch is not None and not patch.is_empty:
         for g, sym, uname, age, desc in dnr_250k_units(env, patch):
             out.append({"type": "Feature",
-                        "properties": {"code": sym, "class": classify(sym, uname, age, desc),
+                        "properties": {"code": sym, "class": geology_wadnr.classify(sym, uname, age, desc),
                                        "name": uname, "age": age, "source": "250k"},
                         "geometry": round_coords(mapping(g))})
-    write(out, f"data/{name}_geology.geojson")
+    units = out
 
     # ---- faults ----
     fault_feats = dnr_query(FAULTS_LAYER, env, "FAULTS_100K_DESC,FAULTS_100K_IS_CONCEALED")
@@ -258,7 +269,7 @@ def main():
                      "properties": {"descript": p["FAULTS_100K_DESC"],
                                     "concealed": p["FAULTS_100K_IS_CONCEALED"] == "Y"},
                      "geometry": round_coords(mapping(g))})
-    write(out, f"data/{name}_faults.geojson")
+    faults = out
 
     # ---- folds (anticlines + synclines; monoclines left out) ----
     fold_feats = dnr_query(FOLDS_LAYER, env, "FOLDS_100K_TYPE,FOLDS_100K_IS_CONCEALED")
@@ -274,7 +285,95 @@ def main():
                     "properties": {"type": p["FOLDS_100K_TYPE"].lower(),
                                    "concealed": p["FOLDS_100K_IS_CONCEALED"] == "Y"},
                     "geometry": round_coords(mapping(g))})
-    write(out, f"data/{name}_folds.geojson")
+    folds = out
+
+    return units, faults, folds
+
+
+def geology_or(county):
+    """Units, faults, folds for an Oregon county from DOGAMI OGDC-7."""
+    if not os.path.exists(OGDC_GDB):
+        os.makedirs("data/_cache", exist_ok=True)
+        print("downloading DOGAMI OGDC-7 (one time, ~100 MB) ...")
+        r = requests.get(OGDC_BUNDLE, timeout=900)
+        r.raise_for_status()
+        with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+            for member in zf.namelist():
+                if member.startswith("Geodatabase/OGDC7.gdb/") and not member.endswith("/"):
+                    dest = os.path.join(OGDC_GDB, os.path.basename(member))
+                    os.makedirs(OGDC_GDB, exist_ok=True)
+                    with zf.open(member) as src, open(dest, "wb") as fh:
+                        fh.write(src.read())
+    county_native = gpd.GeoSeries([county], crs=4326).to_crs(OGDC_CRS)
+    bbox = tuple(county_native.total_bounds)
+
+    def read(layer):
+        gdf = gpd.read_file(OGDC_GDB, layer=layer, bbox=bbox)
+        return gdf[gdf.intersects(county_native.iloc[0])].to_crs(4326)
+
+    print("reading OGDC-7 map units ...")
+    units = []
+    for r in read("MapUnitPolys").itertuples():
+        g = r.geometry.buffer(0).intersection(county)
+        if g.is_empty or g.area == 0:
+            continue
+        cls = geology_ogdc.classify(r.ThematicRockType, r.ThematicAge, r.ThematicTerraneGroup,
+                                    r.ThematicFormation, r.MapUnitName)
+        units.append({"type": "Feature",
+                      "properties": {"code": r.MapUnit, "class": cls, "name": r.MapUnitName,
+                                     "age": r.ThematicAge, "source": "ogdc7"},
+                      "geometry": round_coords(mapping(g))})
+
+    faults = []
+    for r in read("ContactsAndFaults").itertuples():
+        if not r.Type or OGDC_NOT_FAULTS.search(r.Type):
+            continue
+        g = r.geometry.intersection(county)
+        if g.is_empty:
+            continue
+        concealed = r.IsConcealed == "Y" or "conceal" in str(r.LTYPE).lower()
+        faults.append({"type": "Feature",
+                       "properties": {"descript": r.Type, "concealed": concealed},
+                       "geometry": round_coords(mapping(g))})
+
+    folds = []
+    for r in read("GeologicLines").itertuples():
+        t = str(r.Type).lower()
+        kind = "anticline" if ("anticline" in t or "antiform" in t) else \
+               "syncline" if ("syncline" in t or "synform" in t) else None
+        if kind is None or "minor" in t:
+            continue
+        g = r.geometry.intersection(county)
+        if g.is_empty:
+            continue
+        concealed = r.IsConcealed == "Y" or "conceal" in str(r.LTYPE).lower()
+        folds.append({"type": "Feature", "properties": {"type": kind, "concealed": concealed},
+                      "geometry": round_coords(mapping(g))})
+    return units, faults, folds
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--state", required=True, type=str.upper, choices=sorted(STATE_INFO))
+    ap.add_argument("--county", required=True, help='county name, e.g. "Adams" or "Baker"')
+    args = ap.parse_args()
+    name = data_name(args.state, args.county)
+    os.makedirs("data", exist_ok=True)
+
+    counties = tiger_counties()
+    county = county_shape(args.county, args.state, counties)
+    x0, y0, x1, y1 = county.bounds
+    env = {"xmin": x0 - 0.02, "ymin": y0 - 0.02, "xmax": x1 + 0.02, "ymax": y1 + 0.02,
+           "spatialReference": {"wkid": 4326}}
+
+    if args.state == "WA":
+        units, faults, folds = geology_wa(county, env)
+    else:
+        units, faults, folds = geology_or(county)
+    write(units, f"data/{name}_geology.geojson")
+    write(faults, f"data/{name}_faults.geojson")
+    write(folds, f"data/{name}_folds.geojson")
 
     # ---- county + neighboring county/state boundaries (TIGER, full res) ----
     clip = box(x0 - CONTEXT_PAD, y0 - CONTEXT_PAD, x1 + CONTEXT_PAD, y1 + CONTEXT_PAD)
@@ -285,10 +384,11 @@ def main():
             "geometry": round_coords(mapping(c.geometry.simplify(0.0002)))}
            for c in near.itertuples()], f"data/{name}_counties.geojson")
 
-    # ---- smaller highways (TIGER), all three states so roads continue
-    # across the OR/ID lines ----
+    # ---- smaller highways (TIGER), every state on the map so roads
+    # continue across state lines ----
+    states_on_map = sorted(near.STATEFP.unique())
     out = []
-    for st in STATES:
+    for st in states_on_map:
         roads = gpd.read_file(f"{TIGER}/PRISECROADS/tl_2024_{st}_prisecroads.zip")
         roads = roads[roads.intersects(clip)]
         for r in roads.itertuples():
@@ -313,19 +413,20 @@ def main():
                             "geometry": mapping(g)})
     write(out, f"data/{name}_water.geojson")
 
-    # ---- incorporated places (labels) ----
-    places = gpd.read_file(f"{TIGER}/PLACE/tl_2024_{WA_FIPS}_place.zip")
-    places = places[places.CLASSFP.str.startswith("C")]  # incorporated cities/towns
+    # ---- incorporated places (labels), every state on the map ----
     out = []
-    for p in places.itertuples():
-        # Census's own internal point (INTPTLAT/LON) sits at the town
-        # center; a computed point-in-polygon can land anywhere inside a
-        # sprawling city limit (Moses Lake's fell south of I-90).
-        pt = Point(float(p.INTPTLON), float(p.INTPTLAT))
-        if clip.contains(pt):
-            out.append({"type": "Feature",
-                        "properties": {"name": p.NAME, "in_county": county.contains(pt)},
-                        "geometry": mapping(pt)})
+    for st in states_on_map:
+        places = gpd.read_file(f"{TIGER}/PLACE/tl_2024_{st}_place.zip")
+        places = places[places.CLASSFP.str.startswith("C")]  # incorporated cities/towns
+        for p in places.itertuples():
+            # Census's own internal point (INTPTLAT/LON) sits at the town
+            # center; a computed point-in-polygon can land anywhere inside a
+            # sprawling city limit (Moses Lake's fell south of I-90).
+            pt = Point(float(p.INTPTLON), float(p.INTPTLAT))
+            if clip.contains(pt):
+                out.append({"type": "Feature",
+                            "properties": {"name": p.NAME, "in_county": county.contains(pt)},
+                            "geometry": mapping(pt)})
     write(out, f"data/{name}_places.geojson")
 
 

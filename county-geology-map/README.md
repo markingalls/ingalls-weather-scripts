@@ -1,0 +1,101 @@
+# County Geology Map
+
+A reusable, Instagram-ready (4:5, 2160 x 2700 px) geologic map for any
+Washington or Oregon county. It shows rock units, faults, anticlines and
+synclines, highways, county lines, nearby lakes and rivers, and
+incorporated cities. Colors come from the shared table, so a rock class
+looks the same in every county and state. Used so far for Adams and
+Asotin counties, WA, and Baker County, OR.
+
+| State | Geology source | Crosswalk to shared colors |
+|---|---|---|
+| WA | Washington DNR 1:100,000 statewide map (live service), patched from DNR 1:250,000 where the 100k data is defective | [`../maps/geology_wadnr.py`](../maps/geology_wadnr.py) |
+| OR | DOGAMI Oregon Geologic Data Compilation, release 7 (OGDC-7) geodatabase, ~100 MB, downloaded once and cached | [`../maps/geology_ogdc.py`](../maps/geology_ogdc.py) |
+
+## Files
+
+- `fetch_geology.py --state WA|OR --county NAME` -- fetches what the map
+  needs for one county into `data/` (not tracked):
+  - map units, clipped to the county and tagged with a shared color class
+  - faults, plus anticlines and synclines (monoclines are left out)
+  - Census TIGER lakes, reservoirs and river reaches of 1.5 km² or more
+    around the county, for context
+  - Census TIGER US/state highways in every state on the map, so roads
+    continue across state lines
+  - TIGER incorporated places in and around the county for city labels
+  - full-resolution TIGER county boundaries for WA, OR, ID, CA and NV (the
+    county outline, neighboring county lines, and state lines)
+
+  Big downloads (the ~84 MB national TIGER county file and OGDC-7) are
+  cached in `data/_cache/` after the first run.
+- `build_map.py --state WA|OR --county NAME` -- renders
+  `<state>_<county>_geology.png`, titled "<County> Co., <State> Geologic
+  Map". Pass `--also-label "Moses Lake"` (repeatable) to label a city
+  outside the county that falls on the map. Pass `--no-detail` to draw
+  detail classes (Columbia River Basalt formations, loess, flood deposits)
+  in their parent class's color.
+- `requirements.txt` / `setup.sh` -- Python + system dependencies.
+
+## Usage
+
+Run from inside this directory:
+
+```bash
+bash setup.sh                                         # first time / fresh environment only
+python3 fetch_geology.py --state WA --county Adams
+python3 build_map.py --state WA --county Adams --also-label "Moses Lake"
+python3 fetch_geology.py --state OR --county Baker
+python3 build_map.py --state OR --county Baker
+```
+
+## Notes
+
+- **Washington source**: [Washington DNR 1:100,000 surface geology (GeMS)](https://gis.dnr.wa.gov/site1/rest/services/Public_Geology/100K_Surface_Geology_WA_GeMS/FeatureServer),
+  queried live: no key, and every feature in the county is fetched by
+  object id. This is far more detailed than the USGS SGMC compilation
+  for Washington, which lumps the whole Columbia River Basalt Group into
+  one unit.
+- **Oregon source**: [DOGAMI OGDC-7](https://pubs.oregon.gov/dogami/dds/p-OGDC-7.htm)
+  compiles the best available published mapping statewide, so detail
+  varies by area. In Baker County, a few mining districts were mapped in
+  much more detail, so their faults show up as dense clusters. Every
+  polygon has standardized statewide "thematic" fields (rock type, age,
+  terrane, formation), which the crosswalk reads. It classifies every
+  distinct OGDC-7 unit except one with no data. Faults are the
+  non-contact lines in `ContactsAndFaults`. Folds come from
+  `GeologicLines`, with minor folds left out.
+- **Colors** come from the shared table in
+  [`../maps/geology_classes.json`](../maps/geology_classes.json). DNR
+  units are sorted into it by
+  [`../maps/geology_wadnr.py`](../maps/geology_wadnr.py), which reads
+  DNR's map-unit symbol scheme (age prefix + lithology letters) and unit
+  names. It classifies all but 3 of about 1,850 DNR units statewide. An
+  unknown unit stops the fetch with an error rather than getting a wrong
+  color, so a new county either just works or tells you which rule to
+  add. Oregon maps use the same table via
+  [`../maps/geology_sgmc.py`](../maps/geology_sgmc.py).
+- **Defects in DNR's 1:100,000 data**: a few published 100k polygons are
+  corrupted. Around Clarkston and Asotin, for example, they show as
+  fan-shaped wedges converging on one point, and DNR's own map service
+  draws them the same way. `fetch_geology.py` flags any 100k polygon with
+  a straight edge longer than 5 km (real 1:100k contacts never run that
+  straight) and fills just that area from DNR's 1:250,000 map. If the
+  defects cover more than 40% of the county, it uses 1:250,000 for the
+  whole county instead, so there are no seams; Asotin County needs this,
+  at 64%. The credit line says which scale(s) were used. Adams County has
+  no defects.
+- **Layout**: the legend is built first. The map then takes the rest of
+  the 4:5 canvas, and its extent is stretched around the county to fill
+  that box. Wide counties like Adams get extra context north and south,
+  tall ones east and west.
+- **Folds** are drawn in purple, with the standard symbol at each
+  segment's midpoint: arrows pointing away from the axis for an
+  anticline, toward it for a syncline. They're dashed where DNR marks
+  them concealed.
+- **Boundaries**: the repo's shared `../maps/counties_wa_or_id.geojson`
+  is simplified and cuts corners along rivers at county scale. These maps
+  instead clip geology to, and outline, the full-resolution TIGER county,
+  so the line follows the Snake and Palouse rivers.
+- **City labels** are TIGER incorporated places and always sit to the
+  right of the dot. Label collisions aren't handled; fine for rural
+  counties, but check dense ones.
