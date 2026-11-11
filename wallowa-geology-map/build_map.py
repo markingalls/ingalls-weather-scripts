@@ -251,7 +251,7 @@ other_handles = [
     Line2D([0], [0], color="black", linewidth=1.2, label="Fault"),
     Line2D([0], [0], color="black", linewidth=1.1, linestyle=(0, (3, 2)),
            label="Fault, approximate or concealed"),
-    Line2D([0], [0], color=MOTORWAY_COLOR, linewidth=2.2, label="Interstate"),
+    Line2D([0], [0], color=MOTORWAY_COLOR, linewidth=2.2, label="Freeway"),
     Line2D([0], [0], color=TRUNK_COLOR, linewidth=2.2, label="Major highway"),
     Line2D([0], [0], color=SECONDARY_COLOR, linewidth=1.2, label="State highway"),
     Patch(facecolor=WATER_COLOR, edgecolor=WATER_EDGE, linewidth=0.6, label="Lake"),
