@@ -89,13 +89,16 @@ python3 run_all.py                                    # the whole series (~1.5 h
 - **Defects in DNR's 1:100,000 data**: a few published 100k polygons are
   corrupted. Around Clarkston and Asotin, for example, they show as
   fan-shaped wedges converging on one point, and DNR's own map service
-  draws them the same way. `fetch_geology.py` flags any 100k polygon with
-  a straight edge longer than 5 km (real 1:100k contacts never run that
-  straight) and fills just that area from DNR's 1:250,000 map. If the
-  defects cover more than 40% of the county, it uses 1:250,000 for the
-  whole county instead, so there are no seams; Asotin County needs this,
-  at 64%. The credit line says which scale(s) were used. Adams County has
-  no defects.
+  draws them the same way. `fetch_geology.py` finds straight segments
+  longer than 5 km that don't run along the state or national line (real
+  1:100k contacts never run that straight). It fills only the hull those
+  segments span, plus 500 m, from DNR's 1:250,000 map. The corrupted
+  polygons themselves can be huge (the Asotin fans belong to basalt
+  polygons reaching into Garfield and Columbia counties), so whole-polygon
+  replacement would swap out lots of clean data. If the patch would cover
+  more than 15% of a county, it uses 1:250,000 county-wide instead, so
+  there are no seams; Asotin County needs this. The credit line says
+  which scale(s) were used.
 - **Layout**: the legend is built first. The map then takes the rest of
   the 4:5 canvas, and its extent is stretched around the county to fill
   that box. Wide counties like Adams get extra context north and south,

@@ -42,7 +42,7 @@ import numpy as np
 import pandas as pd
 import requests
 from shapely.ops import unary_union
-from shapely.geometry import MultiPolygon, Point, Polygon, box, mapping, shape
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box, mapping, shape
 
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
@@ -60,11 +60,12 @@ UNITS_250K, DMU_250K = 8, 7
 # 100k layer has a few corrupted polygons (e.g. fan-shaped wedges around
 # Clarkston/Asotin) whose rings jump 5-7 km in one segment.
 DEFECT_SEGMENT_M = 5000
-BORDER_TOLERANCE_M = 1500  # straight edges within this of the state line are real
+BORDER_TOLERANCE_M = 1500
+DEFECT_PAD_DEG = 0.005  # ~500 m around the defect hull  # straight edges within this of the state line are real
 # Patch seams follow the corrupted polygons' straight edges; once the
 # defects cover this much of a county, draw the whole county from 1:250k
 # instead (consistent linework, no seams).
-WHOLE_250K_SHARE = 0.4
+WHOLE_250K_SHARE = 0.15
 TIGER = "https://www2.census.gov/geo/tiger/TIGER2024"
 # --state -> (FIPS, name). Neighboring states' counties, roads, water and
 # places are pulled in too, from NEIGHBOR_STATES.
@@ -176,12 +177,13 @@ def _dnr_dmu_fetch():
             return out
 
 
-def has_defect_segment(geom, border):
-    """True if any ring has a straight segment longer than DEFECT_SEGMENT_M
-    that doesn't run along `border` (the state/national boundary). DNR's
-    map is clipped to the state line, which really is straight for 100+ km
-    (46 N east of Wallula, 49 N, the Idaho line); everywhere else, a
-    kilometers-long straight contact is a data defect."""
+def defect_segments(geom, border):
+    """Straight segments longer than DEFECT_SEGMENT_M that don't run along
+    `border` (the state/national boundary). DNR's map is clipped to the
+    state line, which really is straight for 100+ km (46 N east of Wallula,
+    49 N, the Idaho line); everywhere else, a kilometers-long straight
+    contact is a data defect."""
+    out = []
     for poly in getattr(geom, "geoms", [geom]):
         for ring in [poly.exterior, *poly.interiors]:
             c = np.asarray(ring.coords)
@@ -190,10 +192,10 @@ def has_defect_segment(geom, border):
             dx = np.diff(c[:, 0]) * 111_320 * np.cos(np.radians(c[:-1, 1]))
             dy = np.diff(c[:, 1]) * 110_540
             for i in np.where(np.hypot(dx, dy) > DEFECT_SEGMENT_M)[0]:
-                mid = Point((c[i] + c[i + 1]) / 2)
-                if mid.distance(border) * 111_000 > BORDER_TOLERANCE_M:
-                    return True
-    return False
+                seg = LineString([c[i], c[i + 1]])
+                if seg.interpolate(0.5, normalized=True).distance(border) * 111_000 > BORDER_TOLERANCE_M:
+                    out.append(seg)
+    return out
 
 
 def dnr_250k_units(envelope, region):
@@ -267,15 +269,24 @@ def geology_wa(county, env, border):
     print("fetching DNR map units ...")
     dmu = dnr_dmu()
     unit_feats = dnr_query(UNITS_LAYER, env, "MAP_UNIT_100K")
-    good, defective = [], []
+    # Patch only where the defects are: the hull of each corrupted
+    # polygon's bad segments (the fan wedges), plus DEFECT_PAD. Corrupted
+    # polygons can be huge -- the Asotin fans belong to basalt polygons
+    # that reach well into Garfield and Columbia counties -- so replacing
+    # whole polygons would swap out large areas of clean 100k data.
+    good, hulls = [], []
     for f in unit_feats:
         raw = shape(f["geometry"]).buffer(0)
-        (defective if has_defect_segment(raw, border) else good).append((raw, f))
-    patch = unary_union([raw for raw, _ in defective]).intersection(county) if defective else None
+        good.append((raw, f))
+        segs = defect_segments(raw, border)
+        if segs:
+            hulls.append(unary_union(segs).convex_hull.buffer(DEFECT_PAD_DEG))
+    defective = hulls
+    patch = unary_union(hulls).intersection(county) if hulls else None
     if patch is not None and patch.area / county.area < 1e-5:
         patch = None  # defects only touch the county's edge -- nothing to patch
     if patch is not None and patch.area / county.area > WHOLE_250K_SHARE:
-        print(f"  defective 100k polygons cover {patch.area / county.area:.0%} of the county "
+        print(f"  defective 100k data covers {patch.area / county.area:.0%} of the county "
               "-- using DNR 1:250k for the whole county")
         patch = county
     elif patch is not None:
