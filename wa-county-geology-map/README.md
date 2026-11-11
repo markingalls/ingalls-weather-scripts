@@ -14,8 +14,12 @@ from Washington DNR's statewide 1:100,000 geologic map. First used for Adams Cou
   - DNR faults, plus anticlines and synclines (monoclines are left out)
   - Census TIGER lakes, reservoirs and river reaches of 1.5 km² or more
     around the county, for context
-  - Census TIGER US/state highways for the smaller-highway layer
+  - Census TIGER US/state highways in WA, OR and ID, so roads continue
+    across the state lines
   - TIGER incorporated places in and around the county for city labels
+  - full-resolution TIGER county boundaries for WA, OR and ID (the county
+    outline, neighboring county lines, and state lines). The ~84 MB
+    national file is cached in `data/_cache/` after the first run.
 - `build_map.py --county NAME` -- renders `<county>_geology.png`. The title reads "<County> Co., Washington
   Geologic Map". Pass `--also-label "Moses Lake"` (repeatable) to label
   a city outside the county that falls on the map. Pass
@@ -68,6 +72,10 @@ python3 build_map.py --county Adams --also-label "Moses Lake"   # -> adams_geolo
   segment's midpoint: arrows pointing away from the axis for an
   anticline, toward it for a syncline. They're dashed where DNR marks
   them concealed.
+- **Boundaries**: the repo's shared `../maps/counties_wa_or_id.geojson`
+  is simplified and cuts corners along rivers at county scale. These maps
+  instead clip geology to, and outline, the full-resolution TIGER county,
+  so the line follows the Snake and Palouse rivers.
 - **City labels** are TIGER incorporated places and always sit to the
   right of the dot. Label collisions aren't handled; fine for rural
   counties, but check dense ones.

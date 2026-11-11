@@ -27,11 +27,12 @@ from matplotlib.patches import FancyArrowPatch, Patch
 import cartopy.crs as ccrs
 import numpy as np
 from shapely.geometry import shape
+from shapely.ops import unary_union
 
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
 from geology_sgmc import display_class, load_classes  # noqa: E402
-from fetch_geology import county_shape, slug  # noqa: E402
+from fetch_geology import slug  # noqa: E402
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -70,7 +71,8 @@ folds = json.load(open(f"data/{name}_folds.geojson"))
 roads2 = json.load(open(f"data/{name}_roads.geojson"))
 water_ctx = json.load(open(f"data/{name}_water.geojson"))
 places = json.load(open(f"data/{name}_places.geojson"))
-county = county_shape(args.county)
+county = shape(json.load(open(f"data/{name}_county.geojson"))["features"][0]["geometry"])
+near_counties = json.load(open(f"data/{name}_counties.geojson"))["features"]
 
 by_class = {}
 for f in geo["features"]:
@@ -186,16 +188,20 @@ for key, geoms in by_class.items():
                       edgecolor=BY_KEY[key]["color"], linewidth=0.2, zorder=2)
 
 # ---------- states + counties ----------
-admin1_lines = json.load(open(f"{MAPS_DIR}/admin1_boundary_lines.json"))
-ax.add_geometries([shape(f["geometry"]) for f in admin1_lines["features"]], crs=pc,
-                  facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=3)
-counties = json.load(open(f"{MAPS_DIR}/counties_wa_or_id.geojson"))
-ax.add_geometries([shape(f["geometry"]) for f in counties["features"]], crs=pc,
+# Full-resolution TIGER boundaries (fetch_geology.py), so the county
+# outline and state lines follow the Snake/Columbia rather than cutting
+# corners. State lines = each state's dissolved counties' outline.
+ax.add_geometries([shape(f["geometry"]) for f in near_counties], crs=pc,
                   facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=3)
+by_state = {}
+for f in near_counties:
+    by_state.setdefault(f["properties"]["state"], []).append(shape(f["geometry"]).buffer(0))
+ax.add_geometries([unary_union(g).boundary for g in by_state.values()], crs=pc,
+                  facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=3.05)
 
 # Big lakes/reservoirs/rivers around the county (TIGER) for context --
 # e.g. Moses Lake and Potholes Reservoir next to Adams County.
-ax.add_geometries([shape(f["geometry"]) for f in water_ctx["features"]], crs=pc,
+ax.add_geometries([shape(f["geometry"]).buffer(0) for f in water_ctx["features"]], crs=pc,
                   facecolor=BY_KEY["water"]["color"], edgecolor=BY_KEY["water"]["edge"],
                   linewidth=0.5, zorder=3.4)
 if "water" in by_class:
@@ -204,13 +210,14 @@ if "water" in by_class:
 
 # ---------- highways: above geology, below faults, thin white glow ----------
 motorway_geoms, trunk_geoms = [], []
-d = json.load(open(f"{MAPS_DIR}/washington_roads.geojson"))
-for f in d["features"]:
-    hwy = f["properties"].get("highway")
-    if hwy in MOTORWAY:
-        motorway_geoms.append(shape(f["geometry"]))
-    elif hwy in TRUNK:
-        trunk_geoms.append(shape(f["geometry"]))
+for region_file in ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]:
+    d = json.load(open(f"{MAPS_DIR}/{region_file}"))
+    for f in d["features"]:
+        hwy = f["properties"].get("highway")
+        if hwy in MOTORWAY:
+            motorway_geoms.append(shape(f["geometry"]))
+        elif hwy in TRUNK:
+            trunk_geoms.append(shape(f["geometry"]))
 sec_geoms = [shape(f["geometry"]) for f in roads2["features"]]
 for geoms, color, lw, z in [(sec_geoms, SECONDARY_COLOR, 0.9, 4.0),
                             (trunk_geoms, TRUNK_COLOR, 1.3, 4.2),

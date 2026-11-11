@@ -57,6 +57,7 @@ DEFECT_SEGMENT_M = 5000
 WHOLE_250K_SHARE = 0.4
 TIGER = "https://www2.census.gov/geo/tiger/TIGER2024"
 WA_FIPS = "53"
+STATES = ["53", "41", "16"]  # WA, OR, ID -- neighbors for roads, water, county lines
 CONTEXT_PAD = 0.6  # degrees of roads/water/places fetched around the county
 MIN_WATER_M2 = 1_500_000  # only lakes/reservoirs/river reaches >= 1.5 km^2
 
@@ -65,12 +66,30 @@ def slug(county):
     return re.sub(r"[^a-z0-9]+", "_", county.lower()).strip("_")
 
 
-def county_shape(county):
-    gdf = gpd.read_file(f"{MAPS_DIR}/counties_wa_or_id.geojson")
-    hit = gdf[(gdf["id"].str.startswith(WA_FIPS)) & (gdf["name"].str.lower() == county.lower())]
+def tiger_counties():
+    """Full-resolution TIGER/Line county polygons for WA, OR and ID. The
+    national file is ~84 MB, so it's cached in data/_cache/ after the first
+    download. (The repo's shared ../maps/counties_wa_or_id.geojson is
+    simplified -- fine for regional maps, but it cuts corners along rivers
+    at county scale.)"""
+    path = "data/_cache/tl_2024_us_county.zip"
+    if not os.path.exists(path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        print("downloading TIGER counties (one time) ...")
+        r = requests.get(f"{TIGER}/COUNTY/tl_2024_us_county.zip", timeout=600)
+        r.raise_for_status()
+        with open(path, "wb") as fh:
+            fh.write(r.content)
+    gdf = gpd.read_file(path)
+    return gdf[gdf.STATEFP.isin(STATES)].to_crs(4326)
+
+
+def county_shape(county, counties=None):
+    counties = tiger_counties() if counties is None else counties
+    hit = counties[(counties.STATEFP == WA_FIPS) & (counties.NAME.str.lower() == county.lower())]
     if hit.empty:
         raise SystemExit(f"no Washington county named {county!r}")
-    return hit.geometry.union_all()
+    return hit.geometry.iloc[0]
 
 
 def dnr_query(layer, envelope, fields, service=DNR):
@@ -147,7 +166,7 @@ def dnr_250k_units(envelope, region):
     out = []
     for f in feats:
         g = shape(f["geometry"]).buffer(0).intersection(region)
-        if g.is_empty:
+        if g.is_empty or g.area == 0:
             continue
         unit = f["properties"]["MapUnit"]
         sym = re.sub(r"_[NS][EW]$", "", unit)
@@ -180,7 +199,8 @@ def main():
     name = slug(args.county)
     os.makedirs("data", exist_ok=True)
 
-    county = county_shape(args.county)
+    counties = tiger_counties()
+    county = county_shape(args.county, counties)
     x0, y0, x1, y1 = county.bounds
     env = {"xmin": x0 - 0.02, "ymin": y0 - 0.02, "xmax": x1 + 0.02, "ymax": y1 + 0.02,
            "spatialReference": {"wkid": 4326}}
@@ -210,7 +230,7 @@ def main():
         g = raw.intersection(county)
         if patch is not None:
             g = g.difference(patch)
-        if g.is_empty:
+        if g.is_empty or g.area == 0:  # clipping can leave zero-area slivers
             continue
         sym = f["properties"]["MAP_UNIT_100K"]
         uname, age, desc = dmu.get(sym, ("", "", ""))
@@ -256,27 +276,41 @@ def main():
                     "geometry": round_coords(mapping(g))})
     write(out, f"data/{name}_folds.geojson")
 
-    # ---- smaller highways (TIGER) ----
+    # ---- county + neighboring county/state boundaries (TIGER, full res) ----
     clip = box(x0 - CONTEXT_PAD, y0 - CONTEXT_PAD, x1 + CONTEXT_PAD, y1 + CONTEXT_PAD)
-    roads = gpd.read_file(f"{TIGER}/PRISECROADS/tl_2024_{WA_FIPS}_prisecroads.zip")
-    roads = roads[roads.intersects(clip)]
-    write([{"type": "Feature", "properties": {"name": r.FULLNAME, "mtfcc": r.MTFCC},
-            "geometry": round_coords(mapping(r.geometry.intersection(clip).simplify(0.0005)), 4)}
-           for r in roads.itertuples() if not r.geometry.intersection(clip).is_empty],
-          f"data/{name}_roads.geojson")
+    write([{"type": "Feature", "properties": {"name": args.county},
+            "geometry": round_coords(mapping(county))}], f"data/{name}_county.geojson")
+    near = counties[counties.intersects(clip)]
+    write([{"type": "Feature", "properties": {"geoid": c.GEOID, "state": c.STATEFP, "name": c.NAME},
+            "geometry": round_coords(mapping(c.geometry.simplify(0.0002)))}
+           for c in near.itertuples()], f"data/{name}_counties.geojson")
+
+    # ---- smaller highways (TIGER), all three states so roads continue
+    # across the OR/ID lines ----
+    out = []
+    for st in STATES:
+        roads = gpd.read_file(f"{TIGER}/PRISECROADS/tl_2024_{st}_prisecroads.zip")
+        roads = roads[roads.intersects(clip)]
+        for r in roads.itertuples():
+            g = r.geometry.intersection(clip)
+            if not g.is_empty:
+                out.append({"type": "Feature", "properties": {"name": r.FULLNAME, "mtfcc": r.MTFCC},
+                            "geometry": round_coords(mapping(g.simplify(0.0005)), 4)})
+    write(out, f"data/{name}_roads.geojson")
 
     # ---- big water bodies around the county (context; TIGER AREAWATER) ----
-    counties_all = gpd.read_file(f"{MAPS_DIR}/counties_wa_or_id.geojson")
-    near = counties_all[counties_all["id"].str.startswith(WA_FIPS) & counties_all.intersects(clip)]
     out = []
-    for fips in sorted(near["id"]):
+    for fips in sorted(near.GEOID):
         water = gpd.read_file(f"{TIGER}/AREAWATER/tl_2024_{fips}_areawater.zip")
         water = water[(water.AWATER > MIN_WATER_M2) & water.intersects(clip)]
         for w in water.itertuples():
             g = w.geometry.intersection(clip).simplify(0.0003)
+            # simplify + rounding can leave self-intersecting rings, which
+            # cartopy fills as the whole map; re-validate after rounding.
+            g = shape(round_coords(mapping(g), 4)).buffer(0) if not g.is_empty else g
             if not g.is_empty:
                 out.append({"type": "Feature", "properties": {"name": w.FULLNAME},
-                            "geometry": round_coords(mapping(g), 4)})
+                            "geometry": mapping(g)})
     write(out, f"data/{name}_water.geojson")
 
     # ---- incorporated places (labels) ----
