@@ -95,9 +95,9 @@ in a county is that county's maximum.
 
 ### Rendering
 
-- Half-magnitude color bins, 11 in all from "Under 2.0" to "6.5+", on one
-  cream-to-maroon ramp. Label text flips to white from M5.0 up. All bins
-  always show in the legend. Classification uses
+- Whole-magnitude color bins (each step is ~32x the energy) from "Under
+  2.0" up, with the top bin split at 6.5 so the major events stand apart
+  from the M6.0s. All bins always show in the legend. Classification uses
   the magnitude rounded to one decimal, so e.g. Walla Walla's 5.99 (shown
   as "6.0") is colored as 6.0+.
 - The attribution line credits both sources and notes that positions of

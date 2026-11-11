@@ -100,24 +100,20 @@ EXTENT = [-128.6, -108.9, 41.35, 49.45]
 CENTER_LON, CENTER_LAT = -118.75, 45.4
 
 # ---------------------------------------------------------------------------
-# Magnitude classes -- half-magnitude bins from "Under 2.0" to "6.5+", on
-# one cream -> amber -> orange -> red -> maroon ramp. Label text flips to
-# white from M5.0 up, where the fill gets dark enough to need it.
+# Magnitude classes -- whole-magnitude bins (each step is ~32x the energy)
+# from "Under 2.0" up, with the top bin split at 6.5 so the handful of truly
+# major events (Nisqually, Borah Peak, North Cascades, ...) stand apart
+# from the M6.0s.
 # (lower bound inclusive, label, fill, label-text color)
 # ---------------------------------------------------------------------------
-_DARK, _LIGHT = "#2b2a26", "white"
 MAG_CLASSES = [
-    (6.5, "6.5+",      "#7a1a1a", _LIGHT),
-    (6.0, "6.0 – 6.4", "#a8321d", _LIGHT),
-    (5.5, "5.5 – 5.9", "#c94e25", _LIGHT),
-    (5.0, "5.0 – 5.4", "#de6c32", _LIGHT),
-    (4.5, "4.5 – 4.9", "#e98a45", _DARK),
-    (4.0, "4.0 – 4.4", "#eea456", _DARK),
-    (3.5, "3.5 – 3.9", "#f2bb6a", _DARK),
-    (3.0, "3.0 – 3.4", "#f5cf86", _DARK),
-    (2.5, "2.5 – 2.9", "#f7dfa6", _DARK),
-    (2.0, "2.0 – 2.4", "#faecc8", _DARK),
-    (-9,  "Under 2.0", "#fdf6e6", _DARK),
+    (6.5, "6.5+",      "#7a1a1a", "white"),
+    (6.0, "6.0 – 6.4", "#b3311f", "white"),
+    (5.0, "5.0 – 5.9", "#df6a2c", "white"),
+    (4.0, "4.0 – 4.9", "#f0a453", "#2b2a26"),
+    (3.0, "3.0 – 3.9", "#f6d38f", "#2b2a26"),
+    (2.0, "2.0 – 2.9", "#f9e6bb", "#2b2a26"),
+    (-9,  "Under 2.0", "#fdf6e6", "#2b2a26"),
 ]
 NO_DATA_COLOR = "#d9d6cc"
 
@@ -399,10 +395,9 @@ def build_map(maxima, counties, output_path, fetched_at):
     leg = fig.legend(handles=handles, loc="lower left", title="Largest magnitude",
                      bbox_to_anchor=(left_x + 0.012, map_pos.y0 + 0.012),
                      bbox_transform=fig.transFigure, frameon=True, facecolor="white",
-                     edgecolor="#d8d5cc", framealpha=1.0, prop=f_reg, fontsize=9,
-                     title_fontproperties=f_med, borderpad=0.7, labelspacing=0.32,
-                     handleheight=0.9, handlelength=1.8)
-    leg.get_title().set_fontsize(10)
+                     edgecolor="#d8d5cc", framealpha=1.0, prop=f_reg, fontsize=10,
+                     title_fontproperties=f_med, borderpad=0.8)
+    leg.get_title().set_fontsize(10.5)
     leg.get_frame().set_linewidth(0.8)
 
     # ---------- top-events panel (upper-right, over BC/Montana) ----------
