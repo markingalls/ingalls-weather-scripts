@@ -100,19 +100,24 @@ EXTENT = [-128.6, -108.9, 41.35, 49.45]
 CENTER_LON, CENTER_LAT = -118.75, 45.4
 
 # ---------------------------------------------------------------------------
-# Magnitude classes -- whole-magnitude bins (each step is ~32x the energy),
-# with the top bin split at 6.5 so the handful of truly major events
-# (Nisqually, Borah Peak, 1872 Chelan, ...) stand apart from the M6.0s.
+# Magnitude classes -- half-magnitude bins from "Under 2.0" to "6.5+", on
+# one cream -> amber -> orange -> red -> maroon ramp. Label text flips to
+# white from M5.0 up, where the fill gets dark enough to need it.
 # (lower bound inclusive, label, fill, label-text color)
 # ---------------------------------------------------------------------------
+_DARK, _LIGHT = "#2b2a26", "white"
 MAG_CLASSES = [
-    (6.5, "6.5+",      "#7a1a1a", "white"),
-    (6.0, "6.0 – 6.4", "#b3311f", "white"),
-    (5.0, "5.0 – 5.9", "#df6a2c", "white"),
-    (4.0, "4.0 – 4.9", "#f0a453", "#2b2a26"),
-    (3.0, "3.0 – 3.9", "#f6d38f", "#2b2a26"),
-    (2.0, "2.0 – 2.9", "#f9e6bb", "#2b2a26"),
-    (-9,  "Under 2.0", "#fdf6e6", "#2b2a26"),
+    (6.5, "6.5+",      "#7a1a1a", _LIGHT),
+    (6.0, "6.0 – 6.4", "#a8321d", _LIGHT),
+    (5.5, "5.5 – 5.9", "#c94e25", _LIGHT),
+    (5.0, "5.0 – 5.4", "#de6c32", _LIGHT),
+    (4.5, "4.5 – 4.9", "#e98a45", _DARK),
+    (4.0, "4.0 – 4.4", "#eea456", _DARK),
+    (3.5, "3.5 – 3.9", "#f2bb6a", _DARK),
+    (3.0, "3.0 – 3.4", "#f5cf86", _DARK),
+    (2.5, "2.5 – 2.9", "#f7dfa6", _DARK),
+    (2.0, "2.0 – 2.4", "#faecc8", _DARK),
+    (-9,  "Under 2.0", "#fdf6e6", _DARK),
 ]
 NO_DATA_COLOR = "#d9d6cc"
 
@@ -124,14 +129,13 @@ NO_DATA_COLOR = "#d9d6cc"
 # networks (Montana Bureau of Mines, Bureau of Reclamation's Teton network,
 # INEL) that never made it into ComCat. Merged in at render time -- the
 # saved snapshot stays pure ComCat -- and each only replaces a county's
-# value if it's larger. Labeled with a dagger on the map.
+# value if it's larger. Credited in the map's attribution line.
 #
 # Deliberately NOT included: IGS's placement of the 1916-05-13 M5.3 at Boise
 # (Ada Co.) -- ComCat has the same event at 44.2N 116.5W (Washington Co.),
 # and that location is kept. Intensity-only felt reports with no magnitude
 # (Gooding/Twin Falls 1932, etc.) are also left out.
 # ---------------------------------------------------------------------------
-SUPPLEMENT_MARK = "\u2020"
 SUPPLEMENTAL_EVENTS = {
     "16027": {"id": "igs-1989-05-30-canyon", "mag": 3.6, "mag_type": "ml (Butte W-A)",
               "time": "1989-05-30T00:00:00+00:00", "place": "20 km WNW of Caldwell, ID",
@@ -359,8 +363,7 @@ def build_map(maxima, counties, output_path, fetched_at):
                      and abs(ev["lat"] - pt.y) < 0.10)
         label_tf = offset_copy(pc._as_mpl_transform(ax), fig=fig, x=0,
                                y=9 if star_hits else 0, units="points")
-        mark = SUPPLEMENT_MARK if ev.get("source", "").startswith("IGS") else ""
-        txt = ax.text(pt.x, pt.y, f"{ev['mag']:.1f}{mark}", transform=label_tf, ha="center", va="center",
+        txt = ax.text(pt.x, pt.y, f"{ev['mag']:.1f}", transform=label_tf, ha="center", va="center",
                       fontproperties=f_med, fontsize=7.6, color=text_color, zorder=6)
         txt.set_path_effects([pe.withStroke(linewidth=1.4, foreground=halo, alpha=0.45)])
 
@@ -396,9 +399,10 @@ def build_map(maxima, counties, output_path, fetched_at):
     leg = fig.legend(handles=handles, loc="lower left", title="Largest magnitude",
                      bbox_to_anchor=(left_x + 0.012, map_pos.y0 + 0.012),
                      bbox_transform=fig.transFigure, frameon=True, facecolor="white",
-                     edgecolor="#d8d5cc", framealpha=1.0, prop=f_reg, fontsize=10,
-                     title_fontproperties=f_med, borderpad=0.8)
-    leg.get_title().set_fontsize(10.5)
+                     edgecolor="#d8d5cc", framealpha=1.0, prop=f_reg, fontsize=9,
+                     title_fontproperties=f_med, borderpad=0.7, labelspacing=0.32,
+                     handleheight=0.9, handlelength=1.8)
+    leg.get_title().set_fontsize(10)
     leg.get_frame().set_linewidth(0.8)
 
     # ---------- top-events panel (upper-right, over BC/Montana) ----------
@@ -458,8 +462,8 @@ def build_map(maxima, counties, output_path, fetched_at):
 
     # ---------- attribution ----------
     fig.text(center_x, map_pos.y0 - 0.035,
-             f"USGS ANSS ComCat (retrieved {fetched_at:%d %b %Y})  •  {SUPPLEMENT_MARK} Idaho Geological Survey catalog  •  "
-             "US Census (counties) — Ingalls Weather",
+             "USGS ComCat & Idaho Geological Survey  •  Positions of older earthquakes are approximate"
+             "  —  Ingalls Weather",
              fontproperties=f_reg, fontsize=9, color="#5a584f", ha="center")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

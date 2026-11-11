@@ -47,7 +47,8 @@ in a county is that county's maximum.
   ([IC-56](https://idahogeology.org/product/I-56)), recorded by regional
   networks that never fed ComCat, are merged in at render time. Each one
   replaces a county's value only if it's larger, and the saved snapshot
-  stays pure ComCat. These counties get a dagger (†) on their label:
+  stays pure ComCat. IGS is credited in the map's attribution line; the
+  labels themselves aren't marked:
   - Canyon, M3.6, 1989-05-30, 20 km WNW of Caldwell (Montana Bureau of
     Mines network). ComCat's max there is M2.2.
   - Jefferson, M2.3, 1989-10-10 (Bureau of Reclamation Teton network).
@@ -94,11 +95,13 @@ in a county is that county's maximum.
 
 ### Rendering
 
-- Whole-magnitude color bins (each step is ~32x the energy) from "Under
-  2.0" up, with the top bin split at 6.5 so the major events stand apart
-  from the M6.0s. All bins always show in the legend. Classification uses
+- Half-magnitude color bins, 11 in all from "Under 2.0" to "6.5+", on one
+  cream-to-maroon ramp. Label text flips to white from M5.0 up. All bins
+  always show in the legend. Classification uses
   the magnitude rounded to one decimal, so e.g. Walla Walla's 5.99 (shown
   as "6.0") is colored as 6.0+.
+- The attribution line credits both sources and notes that positions of
+  older (pre-instrumental) earthquakes are approximate.
 - State lines are clipped to land, which drops the coastal states'
   offshore state-waters boundaries (along the coast and through the
   Strait/Puget Sound). The US/Canada border is drawn unclipped.
