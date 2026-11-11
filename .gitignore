@@ -119,3 +119,8 @@ wallowa-geology-map/wallowa_geology*.png
 # --- maps/ ---
 # swatch sheet geology_classes_preview.py renders -- an output, not source.
 maps/geology_classes_preview.png
+# --- wa-county-geology-map ---
+# data/ is live data fetch_geology.py regenerates per county, and the
+# rendered maps are outputs -- neither is source.
+wa-county-geology-map/data/
+wa-county-geology-map/*_geology.png

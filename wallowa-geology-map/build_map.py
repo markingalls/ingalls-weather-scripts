@@ -28,9 +28,13 @@ f_med = fm.FontProperties(fname=FONT_DIR + "Poppins-Medium.ttf")
 # County (named terranes/batholith, tighter local ages).
 import sys
 sys.path.insert(0, "../maps")
-from geology_sgmc import load_classes  # noqa: E402
+from geology_sgmc import display_class, load_classes  # noqa: E402
 
 CLASSES = load_classes()
+# Oregon's SGMC map also splits Grande Ronde / Wanapum / Saddle Mountains,
+# but at this county's scale only Imnaha is worth its own legend entry;
+# the other formations draw in the parent Columbia River Basalt color.
+SHOW_DETAIL = {"crb_imnaha"}
 CLASS_COLOR = {c["key"]: c["color"] for c in CLASSES}
 WATER_COLOR = CLASS_COLOR["water"]
 WATER_EDGE = next(c["edge"] for c in CLASSES if c["key"] == "water")
@@ -93,7 +97,8 @@ ax.add_geometries([shape(f["geometry"]) for f in land["features"]], crs=pc,
 geo = json.load(open(f"{MAPS_DIR}/wallowa_county_geology.geojson"))
 by_class = {}
 for f in geo["features"]:
-    by_class.setdefault(f["properties"]["class"], []).append(shape(f["geometry"]))
+    key = display_class(f["properties"]["class"], CLASSES, SHOW_DETAIL)
+    by_class.setdefault(key, []).append(shape(f["geometry"]))
 for key, geoms in by_class.items():
     color = CLASS_COLOR[key]
     ax.add_geometries(geoms, crs=pc, facecolor=color, edgecolor=color,

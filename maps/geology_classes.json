@@ -1,18 +1,119 @@
 {
- "_comment": "Shared geologic map color table for every Ingalls Weather geology map, in any state. Each map unit from any source is crosswalked into ONE of these classes (see geology_sgmc.py for the USGS SGMC crosswalk), so a class has the same color on every map. Order = legend order (water first, then roughly youngest to oldest). 'parent' marks a detail class that a source can only sometimes distinguish (e.g. Imnaha Basalt is mapped separately in Oregon but lumped into the CRB in Washington); its color is a darker shade of the parent's so the two read as one family. Maps may reword a label for local context (e.g. 'Wallowa batholith granite'), but never recolor a class.",
+ "_comment": "Shared geologic map color table for every Ingalls Weather geology map, in any state. Each map unit from any source is crosswalked into ONE of these classes (see geology_sgmc.py for the USGS SGMC crosswalk), so a class has the same color on every map. Order = legend order (water first, then roughly youngest to oldest). 'parent' marks a detail class that a source can only sometimes distinguish (e.g. Imnaha Basalt is mapped separately in Oregon but lumped into the CRB in Washington); its color is a darker shade of the parent's so the two read as one family. A map may also choose not to split a detail class, in which case it is drawn in its parent's color (so the parent color always means 'this family, not split further'). Maps may reword a label for local context (e.g. 'Wallowa batholith granite'), but never recolor a class.",
  "classes": [
-  {"key": "water",             "label": "Lake",                                          "color": "#BCD6EC", "edge": "#7FA6C8"},
-  {"key": "ice",               "label": "Glacier / permanent ice",                       "color": "#F4F8FB", "edge": "#A9C3D9"},
-  {"key": "surficial",         "label": "Glacial, river, landslide & wind deposits",     "age": "Ice Age to today",            "color": "#F3E7AE"},
-  {"key": "cz_sedimentary",    "label": "Younger sedimentary rocks",                     "age": "~66 million years ago to Ice Age", "color": "#E3C46E"},
-  {"key": "cz_volcanic",       "label": "Younger volcanic rocks (Cascades & others)",    "age": "~66 million years ago to today", "color": "#E99A55"},
-  {"key": "crb",               "label": "Columbia River Basalt",                         "age": "~17–6 million years ago",     "color": "#D7B48E"},
-  {"key": "crb_imnaha",        "label": "Imnaha Basalt, oldest Columbia River Basalt",   "age": "~17 million years ago",       "color": "#A9764E", "parent": "crb"},
-  {"key": "plutonic",          "label": "Granite & other intrusive rocks",               "age": "any age",                     "color": "#E9A3A6"},
-  {"key": "mz_pz_sedimentary", "label": "Older sedimentary rocks, incl. limestone",      "age": "~540–66 million years ago",   "color": "#9DB0DA"},
-  {"key": "mz_pz_volcanic",    "label": "Older volcanic rocks",                          "age": "~540–66 million years ago",   "color": "#8DB596"},
-  {"key": "metamorphic",       "label": "Metamorphic rocks (schist, gneiss, quartzite)", "age": "any age",                     "color": "#B9A2CF"},
-  {"key": "ultramafic",        "label": "Ultramafic rocks (serpentinite, peridotite)",   "age": "any age",                     "color": "#4F8A78"},
-  {"key": "precambrian",       "label": "Precambrian rocks",                             "age": "older than ~540 million years", "color": "#8E8AA8"}
+  {
+   "key": "water",
+   "label": "Lake",
+   "color": "#BCD6EC",
+   "edge": "#7FA6C8"
+  },
+  {
+   "key": "ice",
+   "label": "Glacier / permanent ice",
+   "color": "#F4F8FB",
+   "edge": "#A9C3D9"
+  },
+  {
+   "key": "surficial",
+   "label": "Glacial, river, landslide & wind deposits",
+   "age": "Ice Age to today",
+   "color": "#F3E7AE"
+  },
+  {
+   "key": "surficial_loess",
+   "label": "Wind-blown silt (loess)",
+   "age": "Ice Age to today",
+   "color": "#F8F1D6",
+   "parent": "surficial"
+  },
+  {
+   "key": "surficial_flood",
+   "label": "Ice Age flood deposits",
+   "age": "~2.6 million to ~15,000 years ago",
+   "color": "#E5CB78",
+   "parent": "surficial"
+  },
+  {
+   "key": "cz_sedimentary",
+   "label": "Younger sedimentary rocks",
+   "age": "~66 million years ago to Ice Age",
+   "color": "#C4A15A"
+  },
+  {
+   "key": "cz_volcanic",
+   "label": "Younger volcanic rocks (Cascades & others)",
+   "age": "~66 million years ago to today",
+   "color": "#E99A55"
+  },
+  {
+   "key": "crb",
+   "label": "Columbia River Basalt",
+   "age": "~17–6 million years ago",
+   "color": "#D7B48E"
+  },
+  {
+   "key": "crb_saddle_mtns",
+   "label": "Saddle Mountains Basalt (Columbia River Basalt)",
+   "age": "~15–6 million years ago",
+   "color": "#E6CCA8",
+   "parent": "crb"
+  },
+  {
+   "key": "crb_wanapum",
+   "label": "Wanapum Basalt (Columbia River Basalt)",
+   "age": "~15.6–14.5 million years ago",
+   "color": "#CDA47C",
+   "parent": "crb"
+  },
+  {
+   "key": "crb_grande_ronde",
+   "label": "Grande Ronde Basalt (Columbia River Basalt)",
+   "age": "~16.6–15.6 million years ago",
+   "color": "#BE9168",
+   "parent": "crb"
+  },
+  {
+   "key": "crb_imnaha",
+   "label": "Imnaha Basalt (oldest Columbia River Basalt)",
+   "age": "~17 million years ago",
+   "color": "#A9764E",
+   "parent": "crb"
+  },
+  {
+   "key": "plutonic",
+   "label": "Granite & other intrusive rocks",
+   "age": "any age",
+   "color": "#E9A3A6"
+  },
+  {
+   "key": "mz_pz_sedimentary",
+   "label": "Older sedimentary rocks, incl. limestone",
+   "age": "~540–66 million years ago",
+   "color": "#9DB0DA"
+  },
+  {
+   "key": "mz_pz_volcanic",
+   "label": "Older volcanic rocks",
+   "age": "~540–66 million years ago",
+   "color": "#8DB596"
+  },
+  {
+   "key": "metamorphic",
+   "label": "Metamorphic rocks (schist, gneiss, quartzite)",
+   "age": "any age",
+   "color": "#B9A2CF"
+  },
+  {
+   "key": "ultramafic",
+   "label": "Ultramafic rocks (serpentinite, peridotite)",
+   "age": "any age",
+   "color": "#4F8A78"
+  },
+  {
+   "key": "precambrian",
+   "label": "Precambrian rocks",
+   "age": "older than ~540 million years",
+   "color": "#8E8AA8"
+  }
  ]
 }

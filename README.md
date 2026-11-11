@@ -59,13 +59,16 @@ workflows. Each project lives in its own directory with its own README.
 - [`wallowa-geology-map/`](wallowa-geology-map/) — geologic map of
   Wallowa County (USGS SGMC units and faults) with highways, cities, and
   the most recent M3+ earthquake marked.
+- [`wa-county-geology-map/`](wa-county-geology-map/) — reusable 4:5
+  geologic map for any Washington county from WA DNR's 1:100,000
+  geologic map (`--county Adams`), using the shared geology colors.
 
 ## Shared resources
 
 - [`maps/`](maps/) — reusable basemap data (coastlines, borders, counties,
   roads) shared across mapping scripts, plus the shared geology color
-  table (`geology_classes.json`) and the USGS SGMC crosswalk into it
-  (`geology_sgmc.py`). Every geology map uses these, so rock classes
+  table (`geology_classes.json`) and the crosswalks into it from USGS
+  SGMC (`geology_sgmc.py`) and WA DNR 1:100k (`geology_wadnr.py`). Every geology map uses these, so rock classes
   keep the same colors across counties and states. Run
   `python3 geology_classes_preview.py` inside `maps/` to render a swatch
   sheet of the whole table.

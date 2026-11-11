@@ -43,6 +43,11 @@ UNIT_OVERRIDES = {
 CRB_NAME = re.compile(r"Columbia River Basalt|Grande Ronde|Wanapum|Saddle Mountains"
                       r"|Picture Gorge|Columbia Plateau", re.I)
 IMNAHA_NAME = re.compile(r"Imnaha Basalt", re.I)
+CRB_FORMATIONS = [
+    ("crb_saddle_mtns", re.compile(r"Saddle Mountains? Basalt", re.I)),
+    ("crb_wanapum", re.compile(r"Wanapum Basalt", re.I)),
+    ("crb_grande_ronde", re.compile(r"Grande Ronde Basalt", re.I)),
+]
 ULTRAMAFIC = re.compile(r"serpentin|peridotit|dunite|ultramafic|harzburgite", re.I)
 
 # Oldest era named in an SGMC age string wins ("Permian to Triassic" ->
@@ -72,6 +77,13 @@ def load_classes():
         return json.load(fh)["classes"]
 
 
+def display_class(key, classes, show_detail):
+    """The class a map actually draws `key` as: itself, or -- if it's a
+    detail class the map chose not to split -- its parent."""
+    parent = next((c.get("parent") for c in classes if c["key"] == key), None)
+    return key if parent is None or key in show_detail else parent
+
+
 def era_of(age):
     age = age or ""
     for era, pat in ERA_WORDS:
@@ -87,6 +99,9 @@ def classify_unit(unit_link, name, age, liths):
     name = name or ""
     if IMNAHA_NAME.search(name):
         return "crb_imnaha"
+    for key, pat in CRB_FORMATIONS:
+        if pat.search(name):
+            return key
     if CRB_NAME.search(name):
         return "crb"
 
