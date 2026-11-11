@@ -30,7 +30,7 @@ import sys
 
 import geopandas as gpd
 import requests
-from shapely.geometry import box, mapping, shape
+from shapely.geometry import Point, box, mapping, shape
 
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
@@ -203,7 +203,10 @@ def main():
     places = places[places.CLASSFP.str.startswith("C")]  # incorporated cities/towns
     out = []
     for p in places.itertuples():
-        pt = p.geometry.representative_point()
+        # Census's own internal point (INTPTLAT/LON) sits at the town
+        # center; a computed point-in-polygon can land anywhere inside a
+        # sprawling city limit (Moses Lake's fell south of I-90).
+        pt = Point(float(p.INTPTLON), float(p.INTPTLAT))
         if clip.contains(pt):
             out.append({"type": "Feature",
                         "properties": {"name": p.NAME, "in_county": county.contains(pt)},
