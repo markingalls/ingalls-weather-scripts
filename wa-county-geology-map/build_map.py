@@ -305,8 +305,12 @@ fig.text(map_pos.x0, map_pos.y1 + 0.018, f"{title_name} Co., Washington Geologic
          fontproperties=f_bold, fontsize=22, color="#2b2a26")
 
 # ---------- attribution ----------
+sources = {f["properties"].get("source", "100k") for f in geo["features"]}
+dnr_credit = {frozenset({"100k"}): "Washington DNR 1:100,000 Geologic Map",
+              frozenset({"250k"}): "Washington DNR 1:250,000 Geologic Map"}.get(
+    frozenset(sources), "Washington DNR 1:100,000 & 1:250,000 Geologic Maps")
 fig.text((map_pos.x0 + map_pos.x1) / 2, 0.012,
-         "Washington DNR 1:100,000 Geologic Map / US Census / OpenStreetMap — Ingalls Weather",
+         f"{dnr_credit} / US Census / OpenStreetMap — Ingalls Weather",
          fontproperties=f_reg, fontsize=8.5, color="#5a584f", ha="center")
 
 out = f"{name}_geology.png"

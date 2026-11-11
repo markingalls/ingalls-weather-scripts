@@ -50,6 +50,16 @@ python3 build_map.py --county Adams --also-label "Moses Lake"   # -> adams_geolo
   color, so a new county either just works or tells you which rule to
   add. Oregon maps use the same table via
   [`../maps/geology_sgmc.py`](../maps/geology_sgmc.py).
+- **Defects in DNR's 1:100,000 data**: a few published 100k polygons are
+  corrupted. Around Clarkston and Asotin, for example, they show as
+  fan-shaped wedges converging on one point, and DNR's own map service
+  draws them the same way. `fetch_geology.py` flags any 100k polygon with
+  a straight edge longer than 5 km (real 1:100k contacts never run that
+  straight) and fills just that area from DNR's 1:250,000 map. If the
+  defects cover more than 40% of the county, it uses 1:250,000 for the
+  whole county instead, so there are no seams; Asotin County needs this,
+  at 64%. The credit line says which scale(s) were used. Adams County has
+  no defects.
 - **Layout**: the legend is built first. The map then takes the rest of
   the 4:5 canvas, and its extent is stretched around the county to fill
   that box. Wide counties like Adams get extra context north and south,
