@@ -394,7 +394,8 @@ def main():
         for r in roads.itertuples():
             g = r.geometry.intersection(clip)
             if not g.is_empty:
-                out.append({"type": "Feature", "properties": {"name": r.FULLNAME, "mtfcc": r.MTFCC},
+                out.append({"type": "Feature", "properties": {"name": r.FULLNAME, "mtfcc": r.MTFCC,
+                                                              "rttyp": r.RTTYP},
                             "geometry": round_coords(mapping(g.simplify(0.0005)), 4)})
     write(out, f"data/{name}_roads.geojson")
 

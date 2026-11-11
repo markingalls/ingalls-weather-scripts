@@ -46,8 +46,6 @@ MOTORWAY_COLOR = "#8FB8E0"
 TRUNK_COLOR = "#F2B880"
 SECONDARY_COLOR = "#D9B78A"
 GLOW_EXTRA, GLOW_ALPHA = 1.4, 0.85
-MOTORWAY = {"motorway", "motorway_link"}
-TRUNK = {"trunk", "trunk_link"}
 
 ap = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -212,16 +210,16 @@ if "water" in by_class:
                       edgecolor=BY_KEY["water"]["edge"], linewidth=0.5, zorder=3.5)
 
 # ---------- highways: above geology, below faults, thin white glow ----------
-motorway_geoms, trunk_geoms = [], []
-for region_file in ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]:
-    d = json.load(open(f"{MAPS_DIR}/{region_file}"))
-    for f in d["features"]:
-        hwy = f["properties"].get("highway")
-        if hwy in MOTORWAY:
-            motorway_geoms.append(shape(f["geometry"]))
-        elif hwy in TRUNK:
-            trunk_geoms.append(shape(f["geometry"]))
-sec_geoms = [shape(f["geometry"]) for f in roads2["features"]]
+# All three classes come from Census TIGER route types, which cover every
+# state on the map: Interstate (I) -> freeway, US route (U) -> major
+# highway, everything else (state, named, county) -> state highway. The
+# repo's shared OSM road files are cut to the Columbia Basin domain, so
+# using them here made I-84 vanish east of 117.3 W (near Huntington, OR).
+motorway_geoms, trunk_geoms, sec_geoms = [], [], []
+for f in roads2["features"]:
+    kind = f["properties"].get("rttyp")
+    (motorway_geoms if kind == "I" else trunk_geoms if kind == "U" else sec_geoms).append(
+        shape(f["geometry"]))
 for geoms, color, lw, z in [(sec_geoms, SECONDARY_COLOR, 0.9, 4.0),
                             (trunk_geoms, TRUNK_COLOR, 1.3, 4.2),
                             (motorway_geoms, MOTORWAY_COLOR, 1.5, 4.4)]:
@@ -323,7 +321,7 @@ else:
                   frozenset({"250k"}): "Washington DNR 1:250,000 Geologic Map"}.get(
         frozenset(sources), "Washington DNR 1:100,000 & 1:250,000 Geologic Maps")
 fig.text((map_pos.x0 + map_pos.x1) / 2, 0.012,
-         f"{dnr_credit} / US Census / OpenStreetMap — Ingalls Weather",
+         f"{dnr_credit} / US Census — Ingalls Weather",
          fontproperties=f_reg, fontsize=8.5, color="#5a584f", ha="center")
 
 out = f"{name}_geology.png"

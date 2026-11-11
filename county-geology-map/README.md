@@ -20,8 +20,12 @@ Asotin counties, WA, and Baker County, OR.
   - faults, plus anticlines and synclines (monoclines are left out)
   - Census TIGER lakes, reservoirs and river reaches of 1.5 km² or more
     around the county, for context
-  - Census TIGER US/state highways in every state on the map, so roads
-    continue across state lines
+  - Census TIGER highways in every state on the map, so roads continue
+    across state lines. The TIGER route type sets the legend class:
+    Interstate = Freeway, US route = Major highway, everything else =
+    State highway. The repo's shared OpenStreetMap road files aren't used
+    here, because they're cut to the Columbia Basin domain; I-84 used to
+    vanish east of 117.3°W near Huntington, OR.
   - TIGER incorporated places in and around the county for city labels
   - full-resolution TIGER county boundaries for WA, OR, ID, CA and NV (the
     county outline, neighboring county lines, and state lines)
