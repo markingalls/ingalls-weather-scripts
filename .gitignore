@@ -124,3 +124,4 @@ maps/geology_classes_preview.png
 # rendered maps are outputs -- neither is source.
 county-geology-map/data/
 county-geology-map/*_geology.png
+county-geology-map/series/

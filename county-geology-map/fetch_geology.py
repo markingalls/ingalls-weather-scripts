@@ -39,9 +39,10 @@ import zipfile
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import requests
 from shapely.ops import unary_union
-from shapely.geometry import Point, box, mapping, shape
+from shapely.geometry import MultiPolygon, Point, Polygon, box, mapping, shape
 
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
@@ -59,6 +60,7 @@ UNITS_250K, DMU_250K = 8, 7
 # 100k layer has a few corrupted polygons (e.g. fan-shaped wedges around
 # Clarkston/Asotin) whose rings jump 5-7 km in one segment.
 DEFECT_SEGMENT_M = 5000
+BORDER_TOLERANCE_M = 1500  # straight edges within this of the state line are real
 # Patch seams follow the corrupted polygons' straight edges; once the
 # defects cover this much of a county, draw the whole county from 1:250k
 # instead (consistent linework, no seams).
@@ -88,21 +90,27 @@ def data_name(state, county):
     return f"{state.lower()}_{slug(county)}"
 
 
+def cached(url):
+    """Download `url` once into data/_cache/ and return the local path.
+    Statewide TIGER files are shared by every county in a batch run."""
+    path = os.path.join("data/_cache", os.path.basename(url))
+    if not os.path.exists(path):
+        os.makedirs("data/_cache", exist_ok=True)
+        r = requests.get(url, timeout=900)
+        r.raise_for_status()
+        with open(path + ".part", "wb") as fh:
+            fh.write(r.content)
+        os.replace(path + ".part", path)
+    return path
+
+
 def tiger_counties():
     """Full-resolution TIGER/Line county polygons for WA, OR and ID. The
     national file is ~84 MB, so it's cached in data/_cache/ after the first
     download. (The repo's shared ../maps/counties_wa_or_id.geojson is
     simplified -- fine for regional maps, but it cuts corners along rivers
     at county scale.)"""
-    path = "data/_cache/tl_2024_us_county.zip"
-    if not os.path.exists(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        print("downloading TIGER counties (one time) ...")
-        r = requests.get(f"{TIGER}/COUNTY/tl_2024_us_county.zip", timeout=600)
-        r.raise_for_status()
-        with open(path, "wb") as fh:
-            fh.write(r.content)
-    gdf = gpd.read_file(path)
+    gdf = gpd.read_file(cached(f"{TIGER}/COUNTY/tl_2024_us_county.zip"))
     return gdf[gdf.STATEFP.isin(NEIGHBOR_STATES)].to_crs(4326)
 
 
@@ -139,7 +147,18 @@ def dnr_query(layer, envelope, fields, service=DNR):
 
 
 def dnr_dmu():
-    """Description of Map Units: symbol -> (name, age, description)."""
+    """Description of Map Units: symbol -> (name, age, description).
+    Statewide (~1,900 rows), so cached in data/_cache/ for batch runs."""
+    path = "data/_cache/dnr_100k_dmu.json"
+    if os.path.exists(path):
+        return {k: tuple(v) for k, v in json.load(open(path)).items()}
+    out = _dnr_dmu_fetch()
+    os.makedirs("data/_cache", exist_ok=True)
+    json.dump(out, open(path, "w"))
+    return out
+
+
+def _dnr_dmu_fetch():
     out, offset = {}, 0
     while True:
         r = requests.get(f"{DNR}/{DMU_TABLE}/query", params={
@@ -157,18 +176,24 @@ def dnr_dmu():
             return out
 
 
-def longest_segment_m(geom):
-    """Longest straight segment in any ring, in meters (local flat-earth
-    scaling is plenty for a 5 km threshold)."""
-    best = 0.0
+def has_defect_segment(geom, border):
+    """True if any ring has a straight segment longer than DEFECT_SEGMENT_M
+    that doesn't run along `border` (the state/national boundary). DNR's
+    map is clipped to the state line, which really is straight for 100+ km
+    (46 N east of Wallula, 49 N, the Idaho line); everywhere else, a
+    kilometers-long straight contact is a data defect."""
     for poly in getattr(geom, "geoms", [geom]):
         for ring in [poly.exterior, *poly.interiors]:
             c = np.asarray(ring.coords)
+            if len(c) < 2:
+                continue
             dx = np.diff(c[:, 0]) * 111_320 * np.cos(np.radians(c[:-1, 1]))
             dy = np.diff(c[:, 1]) * 110_540
-            if len(dx):
-                best = max(best, float(np.hypot(dx, dy).max()))
-    return best
+            for i in np.where(np.hypot(dx, dy) > DEFECT_SEGMENT_M)[0]:
+                mid = Point((c[i] + c[i + 1]) / 2)
+                if mid.distance(border) * 111_000 > BORDER_TOLERANCE_M:
+                    return True
+    return False
 
 
 def dnr_250k_units(envelope, region):
@@ -207,15 +232,37 @@ def round_coords(geom_json, nd=5):
     return geom_json
 
 
+def clean_polygon(g, min_area=1e-9):
+    """Make a polygon safe for cartopy. Rounding can make rings
+    self-intersect, and DNR data has zero-area sliver parts; cartopy fills
+    either as the *whole map* (King and Okanogan counties came out solid
+    blue). Fix validity, then drop parts and holes under ~10 m^2."""
+    g = g.buffer(0)
+    parts = []
+    for p in getattr(g, "geoms", [g]):
+        if p.geom_type != "Polygon" or p.area <= min_area:
+            continue
+        parts.append(Polygon(p.exterior, [h for h in p.interiors if Polygon(h).area > min_area]))
+    if not parts:
+        return Polygon()
+    return MultiPolygon(parts) if len(parts) > 1 else parts[0]
+
+
 def write(features, path):
+    for f in features:
+        if f["geometry"]["type"] in ("Polygon", "MultiPolygon", "GeometryCollection"):
+            f["geometry"] = mapping(clean_polygon(shape(f["geometry"])))
+    features = [f for f in features if not shape(f["geometry"]).is_empty]
     with open(path, "w") as fh:
         json.dump({"type": "FeatureCollection", "features": features}, fh,
                   separators=(",", ":"))
     print(f"wrote {path} ({len(features)} features)")
 
 
-def geology_wa(county, env):
-    """Units, faults, folds for a Washington county from WA DNR."""
+def geology_wa(county, env, border):
+    """Units, faults, folds for a Washington county from WA DNR. `border`
+    is Washington's outline (for telling the straight state line apart
+    from defective straight contacts)."""
     # ---- geology units ----
     print("fetching DNR map units ...")
     dmu = dnr_dmu()
@@ -223,7 +270,7 @@ def geology_wa(county, env):
     good, defective = [], []
     for f in unit_feats:
         raw = shape(f["geometry"]).buffer(0)
-        (defective if longest_segment_m(raw) > DEFECT_SEGMENT_M else good).append((raw, f))
+        (defective if has_defect_segment(raw, border) else good).append((raw, f))
     patch = unary_union([raw for raw, _ in defective]).intersection(county) if defective else None
     if patch is not None and patch.area / county.area < 1e-5:
         patch = None  # defects only touch the county's edge -- nothing to patch
@@ -352,6 +399,71 @@ def geology_or(county):
     return units, faults, folds
 
 
+OSM_FILES = ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]
+OSM_SNAP_DEG = 0.0008  # ~70 m: how close a TIGER road must be to "be" an OSM road
+COUNTY_WATER_M2 = 250_000  # lakes/rivers/bays >= 0.25 km^2 are cut out of the county's land
+
+
+def osm_roads(clip):
+    """The repo's OSM freeway (motorway) and expressway (trunk) lines in
+    `clip`. These extracts only cover parts of WA/OR/ID (roughly the
+    Columbia Basin and I-5 corridor), so they refine TIGER rather than
+    replace it -- see classify_roads."""
+    motorway, trunk = [], []
+    for fn in OSM_FILES:
+        for f in json.load(open(f"{MAPS_DIR}/{fn}"))["features"]:
+            hwy = f["properties"].get("highway")
+            if hwy not in ("motorway", "trunk"):
+                continue
+            g = shape(f["geometry"])
+            if g.intersects(clip):
+                (motorway if hwy == "motorway" else trunk).append(g.intersection(clip))
+    return unary_union(motorway), unary_union(trunk)
+
+
+def classify_roads(roads, clip):
+    """Split TIGER primary/secondary roads into freeway / major / state.
+
+    TIGER covers every state, and its MTFCC S1100 ("primary road":
+    divided, limited access, with interchanges) catches non-Interstate
+    freeways -- SR 520, SR 167, the Bend Parkway, OR 22 at Salem. Where the
+    repo's OSM extract has data it's the authority: an S1100 stretch that
+    OSM maps as a trunk (expressway with at-grade crossings) is demoted to
+    major highway, and an OSM motorway TIGER missed is added as freeway.
+    Major highway = US routes (TIGER RTTYP U); everything else is state."""
+    motorway, trunk = osm_roads(clip)
+    mw_buf = motorway.buffer(OSM_SNAP_DEG) if not motorway.is_empty else None
+    tr_buf = trunk.buffer(OSM_SNAP_DEG) if not trunk.is_empty else None
+    out = {"freeway": [], "major": [], "state": []}
+    for r in roads.itertuples():
+        g = r.geometry.intersection(clip)
+        if g.is_empty:
+            continue
+        if r.MTFCC == "S1100":
+            demote = g.intersection(tr_buf) if tr_buf is not None else None
+            if demote is not None and mw_buf is not None:
+                demote = demote.difference(mw_buf)
+            if demote is not None and not demote.is_empty and demote.length > 0:
+                out["major"].append(demote)
+                g = g.difference(tr_buf if mw_buf is None else tr_buf.difference(mw_buf))
+            if not g.is_empty:
+                out["freeway"].append(g)
+        elif r.RTTYP == "U":
+            out["major"].append(g)
+        else:
+            out["state"].append(g)
+    if not motorway.is_empty:
+        out["freeway"].append(motorway)
+    feats = []
+    for cls, geoms in out.items():
+        for g in geoms:
+            g = g.simplify(0.0003)
+            if not g.is_empty:
+                feats.append({"type": "Feature", "properties": {"class": cls},
+                              "geometry": round_coords(mapping(g), 4)})
+    return feats
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -363,61 +475,77 @@ def main():
 
     counties = tiger_counties()
     county = county_shape(args.county, args.state, counties)
+    fips = STATE_INFO[args.state][0]
+    geoid = counties[(counties.STATEFP == fips) &
+                     (counties.NAME.str.lower() == args.county.lower())].GEOID.iloc[0]
     x0, y0, x1, y1 = county.bounds
     env = {"xmin": x0 - 0.02, "ymin": y0 - 0.02, "xmax": x1 + 0.02, "ymax": y1 + 0.02,
            "spatialReference": {"wkid": 4326}}
-
-    if args.state == "WA":
-        units, faults, folds = geology_wa(county, env)
-    else:
-        units, faults, folds = geology_or(county)
-    write(units, f"data/{name}_geology.geojson")
-    write(faults, f"data/{name}_faults.geojson")
-    write(folds, f"data/{name}_folds.geojson")
-
-    # ---- county + neighboring county/state boundaries (TIGER, full res) ----
     clip = box(x0 - CONTEXT_PAD, y0 - CONTEXT_PAD, x1 + CONTEXT_PAD, y1 + CONTEXT_PAD)
-    write([{"type": "Feature", "properties": {"name": args.county},
-            "geometry": round_coords(mapping(county))}], f"data/{name}_county.geojson")
     near = counties[counties.intersects(clip)]
-    write([{"type": "Feature", "properties": {"geoid": c.GEOID, "state": c.STATEFP, "name": c.NAME},
-            "geometry": round_coords(mapping(c.geometry.simplify(0.0002)))}
-           for c in near.itertuples()], f"data/{name}_counties.geojson")
-
-    # ---- smaller highways (TIGER), every state on the map so roads
-    # continue across state lines ----
     states_on_map = sorted(near.STATEFP.unique())
-    out = []
-    for st in states_on_map:
-        roads = gpd.read_file(f"{TIGER}/PRISECROADS/tl_2024_{st}_prisecroads.zip")
-        roads = roads[roads.intersects(clip)]
-        for r in roads.itertuples():
-            g = r.geometry.intersection(clip)
-            if not g.is_empty:
-                out.append({"type": "Feature", "properties": {"name": r.FULLNAME, "mtfcc": r.MTFCC,
-                                                              "rttyp": r.RTTYP},
-                            "geometry": round_coords(mapping(g.simplify(0.0005)), 4)})
-    write(out, f"data/{name}_roads.geojson")
 
-    # ---- big water bodies around the county (context; TIGER AREAWATER) ----
-    out = []
-    for fips in sorted(near.GEOID):
-        water = gpd.read_file(f"{TIGER}/AREAWATER/tl_2024_{fips}_areawater.zip")
-        water = water[(water.AWATER > MIN_WATER_M2) & water.intersects(clip)]
+    # ---- water: the county's own (cut out of its land) + big water around ----
+    water_out, county_water = [], []
+    for g_id in sorted(near.GEOID):
+        water = gpd.read_file(cached(f"{TIGER}/AREAWATER/tl_2024_{g_id}_areawater.zip"))
+        own = g_id == geoid
+        water = water[(water.AWATER > (COUNTY_WATER_M2 if own else MIN_WATER_M2))
+                      & water.intersects(clip)]
         for w in water.itertuples():
+            if own:
+                county_water.append(w.geometry)
             g = w.geometry.intersection(clip).simplify(0.0003)
             # simplify + rounding can leave self-intersecting rings, which
             # cartopy fills as the whole map; re-validate after rounding.
             g = shape(round_coords(mapping(g), 4)).buffer(0) if not g.is_empty else g
             if not g.is_empty:
-                out.append({"type": "Feature", "properties": {"name": w.FULLNAME},
-                            "geometry": mapping(g)})
-    write(out, f"data/{name}_water.geojson")
+                water_out.append({"type": "Feature", "properties": {"name": w.FULLNAME},
+                                  "geometry": mapping(g)})
+    write(water_out, f"data/{name}_water.geojson")
+
+    # County land: the TIGER county reaches 3 nmi offshore and to mid-river,
+    # so geology is clipped to (and the outline drawn around) its land.
+    land = county.difference(unary_union(county_water).buffer(0)) if county_water else county
+    land = land.buffer(0)
+    # The black county outline only gives up *edge* water -- the Sound, the
+    # ocean, a border river -- i.e. water running along the legal boundary.
+    # Rivers and lakes inside the county (or merely crossing its
+    # line) stay inside the outline instead of slicing it into pieces.
+    # "Along the line" = > 1 km of shared edge AND >= 20% of the water
+    # body's perimeter: the Columbia's pieces on Multnomah's line score
+    # 30-45%, the Willamette (whose mouth touches it) only 4%.
+    edge_water = [w for w in county_water
+                  if (lambda shared: shared * 111_000 > 1000 and shared >= 0.2 * w.length)(
+                      w.intersection(county.boundary).length)]
+    outline = county.difference(unary_union(edge_water).buffer(0)).buffer(0) if edge_water else county
+    write([{"type": "Feature", "properties": {"name": args.county, "role": "land"},
+            "geometry": round_coords(mapping(land))},
+           {"type": "Feature", "properties": {"name": args.county, "role": "outline"},
+            "geometry": round_coords(mapping(outline))}], f"data/{name}_county.geojson")
+    write([{"type": "Feature", "properties": {"geoid": c.GEOID, "state": c.STATEFP, "name": c.NAME},
+            "geometry": round_coords(mapping(c.geometry.simplify(0.0002)))}
+           for c in near.itertuples()], f"data/{name}_counties.geojson")
+
+    # ---- geology ----
+    if args.state == "WA":
+        wa_outline = unary_union(counties[counties.STATEFP == STATE_INFO["WA"][0]].geometry).boundary
+        units, faults, folds = geology_wa(land, env, wa_outline)
+    else:
+        units, faults, folds = geology_or(land)
+    write(units, f"data/{name}_geology.geojson")
+    write(faults, f"data/{name}_faults.geojson")
+    write(folds, f"data/{name}_folds.geojson")
+
+    # ---- highways (TIGER in every state on the map, refined by repo OSM) ----
+    roads = pd.concat([gpd.read_file(cached(f"{TIGER}/PRISECROADS/tl_2024_{st}_prisecroads.zip"))
+                       for st in states_on_map])
+    write(classify_roads(roads[roads.intersects(clip)], clip), f"data/{name}_roads.geojson")
 
     # ---- incorporated places (labels), every state on the map ----
     out = []
     for st in states_on_map:
-        places = gpd.read_file(f"{TIGER}/PLACE/tl_2024_{st}_place.zip")
+        places = gpd.read_file(cached(f"{TIGER}/PLACE/tl_2024_{st}_place.zip"))
         places = places[places.CLASSFP.str.startswith("C")]  # incorporated cities/towns
         for p in places.itertuples():
             # Census's own internal point (INTPTLAT/LON) sits at the town
@@ -426,7 +554,8 @@ def main():
             pt = Point(float(p.INTPTLON), float(p.INTPTLAT))
             if clip.contains(pt):
                 out.append({"type": "Feature",
-                            "properties": {"name": p.NAME, "in_county": county.contains(pt)},
+                            "properties": {"name": p.NAME, "in_county": county.contains(pt),
+                                           "aland_km2": round(p.ALAND / 1e6, 2)},
                             "geometry": mapping(pt)})
     write(out, f"data/{name}_places.geojson")
 

@@ -29,7 +29,8 @@ CRB = [
 METAMORPHIC = {"og", "bg", "mg", "mi", "hm", "hmc", "am", "sc", "sh", "q", "mb", "gn"}
 LOW_GRADE_SED = {"mt", "mm", "ms", "ph", "ar", "mc"}   # argillite/phyllite/metawacke
 METAVOLCANIC = {"mv"}
-SEDIMENTARY_PREFIX = ("c", "m", "n", "s", "bx", "e")  # continental/marine/nearshore...
+# 'w' = wacke / arenite (e.g. COw, Carboniferous-Ordovician chert-quartz arenite)
+SEDIMENTARY_PREFIX = ("c", "m", "n", "s", "bx", "e", "w")  # continental/marine/nearshore...
 SURFICIAL_PREFIX = ("a", "g", "l", "ls", "d", "o", "t", "p", "w", "f")
 
 SYMBOL = re.compile(r"^((?:p[A-Z]|PLM|PL|PM|PZ|MZ|PA|CZ|TR|[A-Z])+)([a-z]*)")
@@ -54,6 +55,10 @@ def classify(symbol, name, age, description=""):
     era = "mesozoic" if age.lower().startswith("pre-") else era_of(age)
     text = f"{name} {description}"
 
+    # Units with no age/lithology code in DNR's symbol (statewide only a
+    # handful): tectonic zones / breccias of older rock -> metamorphic.
+    if re.search(r"tectonic zone|tectonic breccia", name, re.I) or symbol == "bx":
+        return "metamorphic"
     if lith == "u" or re.search(r"\bserpentinite\b|peridotite|harzburgite|dunite", name, re.I):
         return "ultramafic"
     if lith.startswith("i"):

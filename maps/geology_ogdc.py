@@ -37,6 +37,8 @@ def classify(rock_type, age, terrane, formation, name=""):
 
     if re.fullmatch(r"(open )?water|lakes?|reservoir", name.strip(), re.I):
         return "water"
+    if re.fullmatch(r"snow( and ice)?|ice|glaciers?|glacial ice", name.strip(), re.I):
+        return "ice"
     if terrane == "Columbia River Basalt Group":
         return CRB_FORMATIONS.get(formation, "crb")
     if ULTRAMAFIC.search(name):
@@ -47,7 +49,7 @@ def classify(rock_type, age, terrane, formation, name=""):
     young = bool(CENOZOIC.fullmatch(oldest))
     quaternary = oldest in QUATERNARY_ONLY or (oldest == "Pleistocene")
 
-    if rock == "sediments":
+    if rock == "sediments" or (rock == "no data" and "surficial" in terrane.lower()):
         if formation == "Loess" or re.search(r"\bloess\b", name, re.I):
             return "surficial_loess"
         if re.search(r"flood", formation, re.I):

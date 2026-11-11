@@ -27,13 +27,13 @@ from matplotlib.legend_handler import HandlerBase
 from matplotlib.patches import FancyArrowPatch, Patch
 import cartopy.crs as ccrs
 import numpy as np
-from shapely.geometry import shape
+from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
 
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
 from geology_sgmc import display_class, load_classes  # noqa: E402
-from fetch_geology import STATE_INFO, data_name  # noqa: E402
+from fetch_geology import STATE_INFO, clean_polygon, data_name  # noqa: E402
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -54,6 +54,7 @@ ap.add_argument("--county", required=True)
 ap.add_argument("--also-label", action="append", default=[], metavar="CITY",
                 help='label an incorporated city outside the county that falls on the map, '
                      'e.g. --also-label "Moses Lake" (repeatable)')
+ap.add_argument("--out", help="output PNG path (default <state>_<county>_geology.png)")
 ap.add_argument("--no-detail", action="store_true",
                 help="draw detail classes (CRB formations, loess, flood deposits) "
                      "in their parent class's color")
@@ -72,13 +73,15 @@ folds = json.load(open(f"data/{name}_folds.geojson"))
 roads2 = json.load(open(f"data/{name}_roads.geojson"))
 water_ctx = json.load(open(f"data/{name}_water.geojson"))
 places = json.load(open(f"data/{name}_places.geojson"))
-county = shape(json.load(open(f"data/{name}_county.geojson"))["features"][0]["geometry"])
+_cf = {f["properties"].get("role", "land"): clean_polygon(shape(f["geometry"]))
+       for f in json.load(open(f"data/{name}_county.geojson"))["features"]}
+county = _cf.get("outline", _cf["land"])  # shoreline-following outline (see fetch_geology)
 near_counties = json.load(open(f"data/{name}_counties.geojson"))["features"]
 
 by_class = {}
 for f in geo["features"]:
     k = display_class(f["properties"]["class"], CLASSES, SHOW_DETAIL)
-    by_class.setdefault(k, []).append(shape(f["geometry"]))
+    by_class.setdefault(k, []).append(clean_polygon(shape(f["geometry"])))  # see fetch_geology
 
 # ---------- figure: exactly 4:5 ----------
 FIG_W, FIG_H, DPI = 10, 12.5, 216
@@ -134,24 +137,51 @@ other_handles += [
 ]
 if "water" in by_class or water_ctx["features"]:
     other_handles.append(Patch(facecolor=BY_KEY["water"]["color"], edgecolor=BY_KEY["water"]["edge"],
-                               linewidth=0.6, label="Lake / river"))
+                               linewidth=0.6, label="Water"))
 
 inv = fig.transFigure.inverted()
 other_labels = [h.kind.title() if isinstance(h, FoldHandle) else h.get_label()
                 for h in other_handles]
-leg_other = fig.legend(other_handles, other_labels, loc="lower left", ncol=4,
+
+# Legend layouts, roomiest first: (font size, unit columns, key columns).
+# Both blocks are centered under the map. The first layout that leaves the
+# map at least MIN_MAP_FRAC of the canvas height and fits the width wins;
+# counties with many rock classes get a smaller, wider legend.
+LEGEND_LAYOUTS = [(9.5, 2, 4), (9, 2, 4), (8.5, 2, 5), (8.5, 3, 5), (8, 3, 5),
+                  (7.5, 3, 5), (7, 3, 6), (6.5, 3, 6)]
+MIN_MAP_FRAC = 0.56
+MAX_LEGEND_W = 0.96
+
+
+def place_legends(font, unit_cols, key_cols):
+    # matplotlib ignores `fontsize` when `prop` is given, so size a copy.
+    prop = f_reg.copy()
+    prop.set_size(font)
+    leg_o = fig.legend(other_handles, other_labels, loc="lower center", ncol=key_cols,
                        handler_map={FoldHandle: FoldHandler()},
-                       bbox_to_anchor=(LEFT, 0.04), bbox_transform=fig.transFigure,
-                       frameon=False, prop=f_reg, fontsize=9.5, labelspacing=0.9,
+                       bbox_to_anchor=(0.5, 0.04), bbox_transform=fig.transFigure,
+                       frameon=False, prop=prop, labelspacing=0.9,
                        handlelength=2.4, columnspacing=1.5, borderaxespad=0)
-fig.canvas.draw()
-other_top = inv.transform(leg_other.get_window_extent())[1][1]
-leg_units = fig.legend(handles=unit_handles, loc="lower left", ncol=2,
-                       bbox_to_anchor=(LEFT, other_top + 0.015), bbox_transform=fig.transFigure,
-                       frameon=False, prop=f_reg, fontsize=9.5, labelspacing=0.45,
+    fig.canvas.draw()
+    o_box = inv.transform(leg_o.get_window_extent())
+    leg_u = fig.legend(handles=unit_handles, loc="lower center", ncol=unit_cols,
+                       bbox_to_anchor=(0.5, o_box[1][1] + 0.015), bbox_transform=fig.transFigure,
+                       frameon=False, prop=prop, labelspacing=0.45,
                        handlelength=2.0, handleheight=1.6, columnspacing=1.5, borderaxespad=0)
-fig.canvas.draw()
-legend_top = inv.transform(leg_units.get_window_extent())[1][1]
+    fig.canvas.draw()
+    u_box = inv.transform(leg_u.get_window_extent())
+    width = max(o_box[1][0] - o_box[0][0], u_box[1][0] - u_box[0][0])
+    return leg_o, leg_u, u_box[1][1], width
+
+
+for font, unit_cols, key_cols in LEGEND_LAYOUTS:
+    leg_other, leg_units, legend_top, legend_w = place_legends(font, unit_cols, key_cols)
+    if MAP_TOP - (legend_top + 0.022) >= MIN_MAP_FRAC and legend_w <= MAX_LEGEND_W:
+        break
+    leg_other.remove()
+    leg_units.remove()
+else:
+    leg_other, leg_units, legend_top, legend_w = place_legends(font, unit_cols, key_cols)
 
 # ---------- map box and extent: county + margin, stretched to fill the box ----------
 map_bottom = legend_top + 0.022
@@ -173,13 +203,20 @@ proj = ccrs.NearsidePerspective(central_longitude=cx, central_latitude=cy,
 pc = ccrs.PlateCarree()
 ax = fig.add_axes([LEFT, map_bottom, WIDTH, MAP_TOP - map_bottom], projection=proj)
 ax.set_anchor("N")
-ax.set_facecolor("white")
+# Ocean/Sound show through as water: the map background is the water
+# color; land is Natural Earth (for Canada) plus the full-res TIGER
+# counties around the county, with TIGER water (incl. the ocean within
+# 3 nmi, Puget Sound, big rivers) drawn back on top.
+ax.set_facecolor(BY_KEY["water"]["color"])
 ax.set_extent(EXTENT, crs=pc)
+LAND_COLOR = "#e3e1da"
 
 # ---------- land ----------
 land = json.load(open(f"{MAPS_DIR}/land_slim.json"))
 ax.add_geometries([shape(f["geometry"]) for f in land["features"]], crs=pc,
-                  facecolor="#e3e1da", edgecolor="none", zorder=1)
+                  facecolor=LAND_COLOR, edgecolor="none", zorder=1)
+ax.add_geometries([clean_polygon(shape(f["geometry"])) for f in near_counties], crs=pc,
+                  facecolor=LAND_COLOR, edgecolor="none", zorder=1.05)
 
 # ---------- geology (county only) ----------
 for key, geoms in by_class.items():
@@ -202,7 +239,13 @@ ax.add_geometries([unary_union(g).boundary for g in by_state.values()], crs=pc,
 
 # Big lakes/reservoirs/rivers around the county (TIGER) for context --
 # e.g. Moses Lake and Potholes Reservoir next to Adams County.
-ax.add_geometries([shape(f["geometry"]).buffer(0) for f in water_ctx["features"]], crs=pc,
+# Big water (ocean, Sound, estuaries > 20 km^2) gets no edge line: its
+# outer edge is the 3-nmi county limit, which would draw a stray line
+# offshore. Smaller lakes/rivers keep a thin edge so they read.
+_water = [clean_polygon(shape(f["geometry"])) for f in water_ctx["features"]]
+_big = [g for g in _water if g.area > 0.002]
+ax.add_geometries(_big, crs=pc, facecolor=BY_KEY["water"]["color"], edgecolor="none", zorder=3.4)
+ax.add_geometries([g for g in _water if g.area <= 0.002], crs=pc,
                   facecolor=BY_KEY["water"]["color"], edgecolor=BY_KEY["water"]["edge"],
                   linewidth=0.5, zorder=3.4)
 if "water" in by_class:
@@ -210,15 +253,13 @@ if "water" in by_class:
                       edgecolor=BY_KEY["water"]["edge"], linewidth=0.5, zorder=3.5)
 
 # ---------- highways: above geology, below faults, thin white glow ----------
-# All three classes come from Census TIGER route types, which cover every
-# state on the map: Interstate (I) -> freeway, US route (U) -> major
-# highway, everything else (state, named, county) -> state highway. The
-# repo's shared OSM road files are cut to the Columbia Basin domain, so
-# using them here made I-84 vanish east of 117.3 W (near Huntington, OR).
+# Classes were set by fetch_geology.classify_roads: TIGER primary roads
+# (any limited-access freeway, Interstate or not) refined by the repo's
+# OSM extract where it has data; US routes = major; the rest = state.
 motorway_geoms, trunk_geoms, sec_geoms = [], [], []
 for f in roads2["features"]:
-    kind = f["properties"].get("rttyp")
-    (motorway_geoms if kind == "I" else trunk_geoms if kind == "U" else sec_geoms).append(
+    cls = f["properties"]["class"]
+    (motorway_geoms if cls == "freeway" else trunk_geoms if cls == "major" else sec_geoms).append(
         shape(f["geometry"]))
 for geoms, color, lw, z in [(sec_geoms, SECONDARY_COLOR, 0.9, 4.0),
                             (trunk_geoms, TRUNK_COLOR, 1.3, 4.2),
@@ -268,24 +309,74 @@ for f in folds["features"]:
             fold_symbol(part, f["properties"]["type"])
 
 # ---------- county outline ----------
-ax.add_geometries([county], crs=pc, facecolor="none", edgecolor="#2b2a26",
+# The county's land (shoreline, not the 3-nmi/mid-river legal line);
+# exterior rings only, so lakes cut out of it don't get a black outline.
+# Fragments under 0.2% of the county (islets in reservoirs) are skipped --
+# outlined, they read as stray city dots; real islands are far bigger.
+parts = list(getattr(county, "geoms", [county]))
+outline = [LineString(p.exterior.coords) for p in parts if p.area > 0.002 * county.area]
+ax.add_geometries(outline, crs=pc, facecolor="none", edgecolor="#2b2a26",
                   linewidth=2.0, zorder=6)
 
-# ---------- city labels (incorporated places, label to the right) ----------
+# ---------- city labels ----------
+# Incorporated places in the county, biggest (by land area) first, then a
+# few notable nearby cities outside it (>= NEARBY_MIN_KM2) for context, plus
+# any --also-label. Each label tries right/left/above/below its dot and is
+# dropped if it would overlap another label or dot, the logo corner, or the
+# frame -- so dense counties stay readable.
+NEARBY_MIN_KM2, MAX_IN_COUNTY, MAX_NEARBY = 15, 18, 4
 also = {n.lower() for n in args.also_label}
 missing = also - {f["properties"]["name"].lower() for f in places["features"]}
 if missing:
     raise SystemExit(f"--also-label: no incorporated place on this map named {sorted(missing)}")
-for f in places["features"]:
-    if not (f["properties"]["in_county"] or f["properties"]["name"].lower() in also):
-        continue
+
+
+def in_view(f):
     lon, lat = f["geometry"]["coordinates"]
-    ax.plot(lon, lat, marker="o", markersize=4.5, color="black", markeredgecolor="white",
-            markeredgewidth=0.8, transform=pc, zorder=8)
-    txt = ax.text(lon + 0.012 * (EXTENT[1] - EXTENT[0]), lat, f["properties"]["name"],
-                  transform=pc, ha="left", va="center", fontproperties=f_med,
-                  fontsize=11, color="black", zorder=9)
-    txt.set_path_effects([pe.withStroke(linewidth=2.4, foreground="white", alpha=0.85)])
+    return EXTENT[0] < lon < EXTENT[1] and EXTENT[2] < lat < EXTENT[3]
+
+
+by_size = sorted((f for f in places["features"] if in_view(f)),
+                 key=lambda f: -f["properties"].get("aland_km2", 0))
+forced = [f for f in by_size if f["properties"]["name"].lower() in also]
+inside = [f for f in by_size if f["properties"]["in_county"] and f not in forced][:MAX_IN_COUNTY]
+nearby = [f for f in by_size if not f["properties"]["in_county"] and f not in forced
+          and f["properties"].get("aland_km2", 0) >= NEARBY_MIN_KM2][:MAX_NEARBY]
+
+fig.canvas.draw()
+renderer = fig.canvas.get_renderer()
+ax_box = ax.get_window_extent(renderer)
+logo_zone = (ax_box.x1 - 0.16 * ax_box.width, ax_box.y0, ax_box.x1, ax_box.y0 + 0.16 * ax_box.width)
+taken = [logo_zone]
+dx_deg = 0.012 * (EXTENT[1] - EXTENT[0])
+dy_deg = 0.022 * (EXTENT[3] - EXTENT[2])
+
+
+def overlaps(b1, b2, pad=3):
+    return not (b1[2] + pad < b2[0] or b2[2] + pad < b1[0] or b1[3] + pad < b2[1] or b2[3] + pad < b1[1])
+
+
+for f in forced + inside + nearby:
+    lon, lat = f["geometry"]["coordinates"]
+    dot_xy = ax.transData.transform(proj.transform_point(lon, lat, pc))
+    dot = (dot_xy[0] - 4, dot_xy[1] - 4, dot_xy[0] + 4, dot_xy[1] + 4)
+    if any(overlaps(dot, t, 0) for t in taken):
+        continue
+    for ddx, ddy, ha, va in [(dx_deg, 0, "left", "center"), (-dx_deg, 0, "right", "center"),
+                             (0, dy_deg, "center", "bottom"), (0, -dy_deg, "center", "top")]:
+        txt = ax.text(lon + ddx, lat + ddy, f["properties"]["name"], transform=pc, ha=ha, va=va,
+                      fontproperties=f_med, fontsize=11, color="black", zorder=9)
+        bb = txt.get_window_extent(renderer)
+        box = (bb.x0, bb.y0, bb.x1, bb.y1)
+        inside_frame = (box[0] > ax_box.x0 + 4 and box[2] < ax_box.x1 - 4 and
+                        box[1] > ax_box.y0 + 4 and box[3] < ax_box.y1 - 4)
+        if inside_frame and not any(overlaps(box, t) for t in taken) and not overlaps(box, dot):
+            txt.set_path_effects([pe.withStroke(linewidth=2.4, foreground="white", alpha=0.85)])
+            ax.plot(lon, lat, marker="o", markersize=4.5, color="black", markeredgecolor="white",
+                    markeredgewidth=0.8, transform=pc, zorder=8)
+            taken += [box, dot]
+            break
+        txt.remove()
 
 # ---------- frame (above everything) ----------
 ax.spines["geo"].set_edgecolor("black")
@@ -324,6 +415,7 @@ fig.text((map_pos.x0 + map_pos.x1) / 2, 0.012,
          f"{dnr_credit} / US Census — Ingalls Weather",
          fontproperties=f_reg, fontsize=8.5, color="#5a584f", ha="center")
 
-out = f"{name}_geology.png"
+out = args.out or f"{name}_geology.png"
+os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
 plt.savefig(out, facecolor=fig.get_facecolor(), dpi=DPI)
 print(f"saved {out}")
