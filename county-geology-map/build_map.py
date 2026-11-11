@@ -26,6 +26,7 @@ from matplotlib.lines import Line2D
 from matplotlib.legend_handler import HandlerBase
 from matplotlib.patches import FancyArrowPatch, Patch
 import cartopy.crs as ccrs
+import geopandas as gpd
 import numpy as np
 from shapely.geometry import LineString, shape
 from shapely.ops import unary_union
@@ -33,7 +34,9 @@ from shapely.ops import unary_union
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
 from geology_sgmc import display_class, load_classes  # noqa: E402
-from fetch_geology import STATE_INFO, clean_polygon, data_name  # noqa: E402
+from fetch_geology import STATE_INFO, cached, clean_polygon, data_name  # noqa: E402
+
+CB_COUNTIES = "https://www2.census.gov/geo/tiger/GENZ2024/shp/cb_2024_us_county_500k.zip"
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -215,7 +218,13 @@ LAND_COLOR = "#e3e1da"
 land = json.load(open(f"{MAPS_DIR}/land_slim.json"))
 ax.add_geometries([shape(f["geometry"]) for f in land["features"]], crs=pc,
                   facecolor=LAND_COLOR, edgecolor="none", zorder=1)
-ax.add_geometries([clean_polygon(shape(f["geometry"])) for f in near_counties], crs=pc,
+# Neighboring land from Census's shoreline-clipped cartographic counties
+# (1:500k): the legal TIGER counties run 3 nmi out to sea, and where the
+# TIGER ocean polygon doesn't cover all of that band it showed as a gray
+# strip offshore (Jefferson, Grays Harbor, Pacific...).
+_cb = gpd.read_file(cached(CB_COUNTIES),
+                    bbox=(EXTENT[0] - 0.2, EXTENT[2] - 0.2, EXTENT[1] + 0.2, EXTENT[3] + 0.2))
+ax.add_geometries([clean_polygon(g) for g in _cb.to_crs(4326).geometry], crs=pc,
                   facecolor=LAND_COLOR, edgecolor="none", zorder=1.05)
 
 # ---------- geology (county only) ----------
@@ -229,12 +238,17 @@ for key, geoms in by_class.items():
 # Full-resolution TIGER boundaries (fetch_geology.py), so the county
 # outline and state lines follow the Snake/Columbia rather than cutting
 # corners. State lines = each state's dissolved counties' outline.
-ax.add_geometries([shape(f["geometry"]) for f in near_counties], crs=pc,
+# Lines are clipped to (shoreline) land, so the legal 3-nmi offshore and
+# mid-river boundaries don't draw stray lines across open water.
+_land_mask = unary_union([clean_polygon(g) for g in _cb.to_crs(4326).geometry]).buffer(0.003)
+_county_lines = [shape(f["geometry"]).boundary.intersection(_land_mask) for f in near_counties]
+ax.add_geometries([g for g in _county_lines if not g.is_empty], crs=pc,
                   facecolor="none", edgecolor="#b9b6ac", linewidth=0.7, zorder=3)
 by_state = {}
 for f in near_counties:
     by_state.setdefault(f["properties"]["state"], []).append(shape(f["geometry"]).buffer(0))
-ax.add_geometries([unary_union(g).boundary for g in by_state.values()], crs=pc,
+_state_lines = [unary_union(g).boundary.intersection(_land_mask) for g in by_state.values()]
+ax.add_geometries([g for g in _state_lines if not g.is_empty], crs=pc,
                   facecolor="none", edgecolor="#9a978c", linewidth=1.1, zorder=3.05)
 
 # Big lakes/reservoirs/rivers around the county (TIGER) for context --
