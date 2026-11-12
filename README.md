@@ -48,6 +48,10 @@ workflows. Each project lives in its own directory with its own README.
   (xmACIS) and 7 days forecast (WindBorne MetaMesh), against 1991-2020
   daily climatology (percentile shading and normal from xmACIS; record
   highs pooled across Tri-Cities-area stations).
+- [`rrfs-wind-cross-section/`](rrfs-wind-cross-section/) — styled
+  vertical cross section of NOAA RRFS winds from the ground to 700 mb
+  along a line (defaults to Irrigon to Tollgate, OR), shaded with the
+  Tempest station wind chart's color table, with barbs and terrain.
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest

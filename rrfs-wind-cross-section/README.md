@@ -1,0 +1,49 @@
+# RRFS Low-Level Wind Cross Section
+
+Generates a styled vertical cross section of NOAA RRFS (3 km CONUS) winds
+along a straight line between two points, from the ground up to the 700 mb
+surface. Defaults to **Irrigon, OR → Tollgate, OR** (Columbia Basin floor up
+the west slope of the Blue Mountains).
+
+- **Shading:** wind speed (mph), using the same color table as the Tempest
+  station wind chart (`tempest-wind-chart/build_chart.py`'s
+  `WIND_COLOR_TABLE`).
+- **Barbs:** wind direction and speed (kt), rotated from RRFS's
+  grid-relative winds to true north.
+- **Terrain:** RRFS model terrain, filled; vertical scale is exaggerated
+  (~20×, printed in the footer). Nearby towns are labeled at their
+  along-section position.
+
+## Files
+
+- `fetch_cross_section.py` — finds the newest RRFS cycle on NOMADS that
+  covers the requested valid time (default: the next 02z), byte-ranges just
+  the needed GRIB messages (HGT/UGRD/VGRD at 1000–700 mb every 25 mb, plus
+  surface height/pressure and 10 m wind), samples them along the line, and
+  writes `cross_section.json`.
+- `build_chart.py` — renders `cross_section.json` to
+  `rrfs_wind_cross_section_<YYYYMMDD>_<HH>z.png`.
+- `requirements.txt` / `setup.sh` — Python deps and the Poppins font.
+
+## Usage
+
+```bash
+bash setup.sh                                   # first time only
+python3 fetch_cross_section.py                  # next 02z, newest run
+python3 build_chart.py
+
+python3 fetch_cross_section.py --valid 2026-11-13T02 --run 2026-11-12T12
+python3 fetch_cross_section.py --start '{"label":"Pasco","lat":46.2396,"lon":-119.1006}' \
+                               --end   '{"label":"Dayton","lat":46.3207,"lon":-117.9772}'
+```
+
+## Notes
+
+- RRFS's old AWS prefix (`noaa-rrfs-pds/rrfs_a/`) is empty now that RRFS is
+  operational, so data comes straight from
+  `nomads.ncep.noaa.gov/pub/data/nccf/com/rrfs/prod/`. Use HTTP/1.1 if you
+  curl it by hand — NOMADS's padded `Content-Length` header breaks HTTP/2.
+- Pressure levels below the model ground are dropped; the lowest point in
+  each column is the 10 m wind.
+- `NEARBY_TOWNS` in the fetcher only lists towns near the default line; add
+  your own for other sections.
