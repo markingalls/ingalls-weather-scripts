@@ -261,13 +261,12 @@ def main():
             zorder=Z_INVERSION, path_effects=[pe.withStroke(linewidth=4.2, foreground="white")])
     ok = np.where(np.isfinite(inv_ft))[0]
     if len(ok):
-        # Label on a solid white tag above the line, a fifth of the way in,
+        # Bold, white-haloed label above the line, a fifth of the way in,
         # over the Basin -- clear of the end labels and the barb columns.
         j = ok[len(ok) // 5]
-        ax.text(x_mi[j], inv_ft[j] + 260, "Inversion top", ha="center", va="bottom",
-                fontproperties=f_med, fontsize=10.5, color=INVERSION_COLOR, zorder=Z_LABEL,
-                bbox=dict(boxstyle="round,pad=0.3,rounding_size=0.4", facecolor="white",
-                          edgecolor=INVERSION_COLOR, linewidth=0.8, alpha=0.95))
+        ax.text(x_mi[j], inv_ft[j] + 200, "Inversion top", ha="center", va="bottom",
+                fontproperties=f_bold, fontsize=11, color=INVERSION_COLOR, zorder=Z_LABEL,
+                path_effects=[pe.withStroke(linewidth=3.5, foreground="white")])
 
     # ---------- wind barbs (knots, meteorological convention) ----------
     bx = np.arange(BARB_SPACING_MI / 2, x_mi[-1], BARB_SPACING_MI)
