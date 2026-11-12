@@ -26,6 +26,7 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.patches import FancyArrowPatch
 from matplotlib.path import Path as MplPath
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
 # ---------- fonts ----------
 FONT_DIR = "/usr/share/fonts/truetype/google-fonts/"
@@ -41,7 +42,7 @@ GRID_COLOR = "#000000"
 AXIS_COLOR = "#000000"
 TERRAIN_FILL = "#4a3b2a"     # dark earth brown, reads against every wind color
 TERRAIN_EDGE = "#1f1810"
-ARROW_COLOR = "#111111"
+ARROW_COLOR = "white"
 HALO = [pe.withStroke(linewidth=3, foreground="white")]
 
 Z_SHADE = 1
@@ -88,6 +89,7 @@ DOWNSLOPE_START_INSET_MI = 2.5  # arrow starts this far in from the mountain end
 DOWNSLOPE_STOP_BEFORE_MI = 1.0  # ...and stops this far short of the inversion rise
 DOWNSLOPE_SEARCH_FT = 3000      # jet-core search depth above ground/inversion
 DOWNSLOPE_RISE_FT = 300         # inversion-top rise that marks the arrow's end
+DOWNSLOPE_SMOOTH_SIGMA = 10     # Gaussian sigma, in samples (~4.5 km), on the core height
 LABEL_STRIP_FT = 900     # below-sea-level ground strip holding town labels
 TOWN_MIN_SEP_MI = 6.0
 END_LABEL_WIDTH_MI = 6.0  # rough width of the Irrigon/Tollgate corner labels
@@ -221,11 +223,10 @@ def downslope_path(x_mi, z_ft, sfc_ft, inv_ft, speed_mph):
         sp = np.where(win, np.nan_to_num(speed_mph[:, j], nan=-1), -1)
         core.append(z_ft[int(np.argmax(sp))])
     # The column-by-column core height is stair-stepped (25 ft regrid,
-    # 25 mb source levels), so draw a smooth quadratic fit through it
-    # rather than the raw trace -- this is a schematic arrow, not a contour.
+    # 25 mb source levels), so Gaussian-smooth it -- enough to remove the
+    # steps but keep the jet's real bends as it follows the slope down.
     xs = x_mi[cols]
-    fit = np.polyval(np.polyfit(xs, np.array(core, dtype=float), 2), xs)
-    return xs, fit
+    return xs, gaussian_filter1d(np.array(core, dtype=float), DOWNSLOPE_SMOOTH_SIGMA, mode="nearest")
 
 
 def smooth_nan(y, n):
@@ -319,8 +320,7 @@ def main():
         arrow = FancyArrowPatch(path=MplPath(np.column_stack([px, pz])),
                                 arrowstyle="-|>,head_length=9,head_width=6",
                                 color=ARROW_COLOR, linewidth=3.6, zorder=Z_ARROW,
-                                capstyle="round", joinstyle="round",
-                                path_effects=[pe.withStroke(linewidth=7, foreground="white")])
+                                capstyle="round", joinstyle="round")
         ax.add_patch(arrow)
 
     # ---------- terrain ----------
