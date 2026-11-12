@@ -50,14 +50,19 @@ N_SAMPLES = 241  # points along the section (~0.45 km apart over ~110 km)
 
 # Towns near (not necessarily on) the line, labeled along the bottom of the
 # chart at their along-section position if they fall within
-# TOWN_MAX_OFFSET_KM of it.
+# TOWN_MAX_OFFSET_KM of it (or their own "max_offset_km"). Listed in label
+# priority order: build_chart.py drops a lower-priority label that would
+# collide with a higher-priority one (e.g. Adams gives way to Pendleton).
 NEARBY_TOWNS = [
+    # Pendleton sits ~11 mi south of the line, but it's the area's anchor
+    # town, so it gets a wider allowance than the rest.
+    {"label": "Pendleton", "lat": 45.6721, "lon": -118.7886, "max_offset_km": 25.0},
     {"label": "Hermiston", "lat": 45.8404, "lon": -119.2895},
     {"label": "Stanfield", "lat": 45.7804, "lon": -119.2164},
     {"label": "Echo", "lat": 45.7426, "lon": -119.1942},
-    {"label": "Adams", "lat": 45.7671, "lon": -118.5619},
     {"label": "Athena", "lat": 45.8118, "lon": -118.4908},
     {"label": "Weston", "lat": 45.8143, "lon": -118.4233},
+    {"label": "Adams", "lat": 45.7671, "lon": -118.5619},
 ]
 TOWN_MAX_OFFSET_KM = 9.0
 
@@ -257,10 +262,12 @@ def main():
         v10 = fetch_field(sfc_url, sfc_rows, "VGRD", "10 m above ground", work)
         ue, ve = earth_relative(u10.values, v10.values, u10)
         out["u10_ms"] = sampler(ue).round(2).tolist()
+        out["t2m_c"] = (sampler(fetch_field(sfc_url, sfc_rows, "TMP", "2 m above ground", work).values)
+                        - 273.15).round(2).tolist()
         out["v10_ms"] = sampler(ve).round(2).tolist()
 
         out["levels_mb"] = LEVELS_MB
-        out["height_m"], out["u_ms"], out["v_ms"] = [], [], []
+        out["height_m"], out["u_ms"], out["v_ms"], out["t_c"] = [], [], [], []
         for lev in LEVELS_MB:
             level = f"{lev} mb"
             print(f"  {level}")
@@ -268,7 +275,9 @@ def main():
             u = fetch_field(prs_url, prs_rows, "UGRD", level, work)
             v = fetch_field(prs_url, prs_rows, "VGRD", level, work)
             ue, ve = earth_relative(u.values, v.values, u)
+            t = fetch_field(prs_url, prs_rows, "TMP", level, work)
             out["height_m"].append(sampler(h.values).round(1).tolist())
+            out["t_c"].append((sampler(t.values) - 273.15).round(2).tolist())
             out["u_ms"].append(sampler(ue).round(2).tolist())
             out["v_ms"].append(sampler(ve).round(2).tolist())
 
@@ -280,7 +289,7 @@ def main():
         tx, ty = local_xy(np.array(t["lat"]), np.array(t["lon"]), lat0, lon0)
         d = np.hypot(lx - tx, ly - ty)
         i = int(d.argmin())
-        if d[i] <= TOWN_MAX_OFFSET_KM and 0 < i < N_SAMPLES - 1:
+        if d[i] <= t.get("max_offset_km", TOWN_MAX_OFFSET_KM) and 0 < i < N_SAMPLES - 1:
             towns.append({"label": t["label"], "distance_km": round(float(dist_km[i]), 2)})
     out["towns"] = towns
 

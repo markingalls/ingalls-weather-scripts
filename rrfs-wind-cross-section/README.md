@@ -10,6 +10,10 @@ the west slope of the Blue Mountains).
   `WIND_COLOR_TABLE`).
 - **Barbs:** wind direction and speed (kt), rotated from RRFS's
   grid-relative winds to true north.
+- **Dashed line:** top of the low-level inversion -- the top of the warm
+  layer above the ground (at least 1 °C warmer than 2 m, including any
+  near-isothermal cap within 0.5 °C of the warmest point), lightly smoothed
+  along the section. Gaps mean no inversion in that column.
 - **Terrain:** RRFS model terrain, filled; vertical scale is exaggerated
   (~20×, printed in the footer). Nearby towns are labeled at their
   along-section position.
@@ -18,8 +22,8 @@ the west slope of the Blue Mountains).
 
 - `fetch_cross_section.py` — finds the newest RRFS cycle on NOMADS that
   covers the requested valid time (default: the next 02z), byte-ranges just
-  the needed GRIB messages (HGT/UGRD/VGRD at 1000–700 mb every 25 mb, plus
-  surface height/pressure and 10 m wind), samples them along the line, and
+  the needed GRIB messages (HGT/UGRD/VGRD/TMP at 1000–700 mb every 25 mb, plus
+  surface height/pressure, 2 m temperature and 10 m wind), samples them along the line, and
   writes `cross_section.json`.
 - `build_chart.py` — renders `cross_section.json` to
   `rrfs_wind_cross_section_<YYYYMMDD>_<HH>z.png`.
@@ -45,5 +49,7 @@ python3 fetch_cross_section.py --start '{"label":"Pasco","lat":46.2396,"lon":-11
   curl it by hand — NOMADS's padded `Content-Length` header breaks HTTP/2.
 - Pressure levels below the model ground are dropped; the lowest point in
   each column is the 10 m wind.
-- `NEARBY_TOWNS` in the fetcher only lists towns near the default line; add
-  your own for other sections.
+- `NEARBY_TOWNS` in the fetcher only lists towns near the default line, in
+  label priority order; a lower-priority label that has no room (e.g. Adams
+  vs. Pendleton) is dropped. Pendleton is ~11 mi off the line but gets a
+  wider allowance via `max_offset_km`. Add your own for other sections.

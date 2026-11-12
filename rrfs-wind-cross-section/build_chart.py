@@ -45,8 +45,9 @@ HALO = [pe.withStroke(linewidth=3, foreground="white")]
 Z_SHADE = 1
 Z_ISOBAR = 2
 Z_BARBS = 3
-Z_TERRAIN = 4
-Z_LABEL = 5
+Z_INVERSION = 4
+Z_TERRAIN = 5
+Z_LABEL = 6
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
@@ -85,6 +86,12 @@ BARB_SPACING_MI = 4.0
 BARB_SPACING_FT = 1000
 LABEL_STRIP_FT = 900     # below-sea-level ground strip holding town labels
 TOWN_MIN_SEP_MI = 6.0
+END_LABEL_WIDTH_MI = 6.0  # rough width of the Irrigon/Tollgate corner labels
+
+INVERSION_COLOR = "#0b3d91"   # dark blue, same as hrrr-smoke-chart's second line
+INVERSION_MIN_STRENGTH_C = 1.0  # warm layer must be this much warmer than 2 m
+INVERSION_TOP_TOL_C = 0.5       # near-isothermal cap counts as part of the inversion
+INVERSION_SMOOTH_PTS = 9        # ~4 km running mean along the section
 
 
 def interp_color(value, table):
@@ -145,6 +152,54 @@ def regrid_columns(d, z_ft):
     return U, V
 
 
+def inversion_top_ft(d):
+    """Top of the low-level inversion in each column, ft MSL (NaN where
+    there isn't one). Each column's profile is the 2 m temperature plus
+    every pressure level above ground, interpolated to 10 m steps. The
+    inversion is the warm layer above the ground: its warmest point must be
+    at least INVERSION_MIN_STRENGTH_C warmer than 2 m, and its top is the
+    highest height (below the next cooling-with-height layer) still within
+    INVERSION_TOP_TOL_C of that warmest temperature -- so a near-isothermal
+    cap on top of the warm nose counts toward the depth, as it would on a
+    sounding. Only the lowest warm layer counts: the search stops at the
+    first height where the profile has cooled 2 C below the warmest point."""
+    sfc = np.array(d["surface_height_m"])
+    hgt = np.array(d["height_m"])
+    tmp = np.array(d["t_c"])
+    t2 = np.array(d["t2m_c"])
+    out = np.full(len(sfc), np.nan)
+    for j in range(len(sfc)):
+        above = hgt[:, j] > sfc[j] + 2
+        zc = np.concatenate([[sfc[j] + 2], hgt[above, j]])
+        tc = np.concatenate([[t2[j]], tmp[above, j]])
+        z = np.arange(zc[0], zc[-1], 10.0)
+        t = np.interp(z, zc, tc)
+        run_max, i_max, i_end = -np.inf, 0, len(t)
+        for i, ti in enumerate(t):
+            if ti > run_max:
+                run_max, i_max = ti, i
+            elif run_max - ti > 2.0:
+                i_end = i
+                break
+        if run_max - t2[j] < INVERSION_MIN_STRENGTH_C:
+            continue
+        seg = t[i_max:i_end]
+        top = i_max + np.where(seg >= run_max - INVERSION_TOP_TOL_C)[0].max()
+        out[j] = z[top] * M_TO_FT
+    return out
+
+
+def smooth_nan(y, n):
+    """Centered running mean that leaves NaN gaps (no-inversion columns) as
+    gaps instead of smearing them."""
+    out = np.full_like(y, np.nan)
+    h = n // 2
+    for i in range(len(y)):
+        if np.isfinite(y[i]):
+            out[i] = np.nanmean(y[max(0, i - h):i + h + 1])
+    return out
+
+
 def main():
     args = parse_args()
     d = json.load(open(args.data))
@@ -172,18 +227,18 @@ def main():
     mesh = ax.pcolormesh(x_mi, z_ft, np.ma.masked_invalid(speed_mph), cmap=cmap, norm=norm,
                          shading="nearest", zorder=Z_SHADE, rasterized=True)
 
-    # 850 mb reference line (wherever it's above ground).
-    lvl = d["levels_mb"]
-    for ref in (850,):
-        if ref in lvl:
-            h = hgt_ft[lvl.index(ref)]
-            h_masked = np.where(h > sfc_ft, h, np.nan)
-            ax.plot(x_mi, h_masked, color="white", linewidth=1.0, linestyle=(0, (5, 4)),
-                    alpha=0.9, zorder=Z_ISOBAR)
-            ok = np.where(np.isfinite(h_masked))[0]
-            if len(ok):
-                ax.text(x_mi[ok[0]] + 0.6, h_masked[ok[0]] + 120, f"{ref} mb", fontproperties=f_med,
-                        fontsize=9, color=INK, path_effects=HALO, zorder=Z_LABEL)
+    # ---------- inversion top ----------
+    inv_ft = smooth_nan(inversion_top_ft(d), INVERSION_SMOOTH_PTS)
+    ax.plot(x_mi, inv_ft, color=INVERSION_COLOR, linewidth=2.0, linestyle=(0, (6, 3.5)),
+            zorder=Z_INVERSION, path_effects=[pe.withStroke(linewidth=4.2, foreground="white")])
+    ok = np.where(np.isfinite(inv_ft))[0]
+    if len(ok):
+        # Label above the line, a quarter of the way in, where it's away
+        # from both the end labels and the steep terrain.
+        j = ok[len(ok) // 4]
+        ax.text(x_mi[j], inv_ft[j] + 170, "Inversion top", ha="center", va="bottom",
+                fontproperties=f_med, fontsize=10, color=INVERSION_COLOR,
+                path_effects=[pe.withStroke(linewidth=3, foreground="white")], zorder=Z_LABEL)
 
     # ---------- wind barbs (knots, meteorological convention) ----------
     bx = np.arange(BARB_SPACING_MI / 2, x_mi[-1], BARB_SPACING_MI)
@@ -213,19 +268,33 @@ def main():
     ax.set_ylim(-LABEL_STRIP_FT, top_ft)
 
     # ---------- town labels in the ground strip ----------
-    # End points in bold at the corners; intermediate towns centered on their
-    # along-section position, staggered onto a second row when neighbors are
-    # too close to share one.
+    # End points at the corners; intermediate towns centered on their
+    # along-section position. Towns arrive in priority order (see
+    # fetch_cross_section.py's NEARBY_TOWNS) and each takes the first of the
+    # two rows it fits in -- a lower-priority town that fits in neither (e.g.
+    # Adams vs. Pendleton) is dropped rather than crowding a better label.
     row_y = [-0.30 * LABEL_STRIP_FT, -0.72 * LABEL_STRIP_FT]
     ax.text(x_mi[0] + 0.5, row_y[0], d["start"]["label"], ha="left", va="center",
-            fontproperties=f_bold, fontsize=10, color="white", zorder=Z_LABEL)
+            fontproperties=f_med, fontsize=10, color="white", zorder=Z_LABEL)
     ax.text(x_mi[-1] - 0.5, row_y[0], d["end"]["label"], ha="right", va="center",
-            fontproperties=f_bold, fontsize=10, color="white", zorder=Z_LABEL)
-    last_x, row = -1e9, 1
-    for t in sorted(d["towns"], key=lambda t: t["distance_km"]):
+            fontproperties=f_med, fontsize=10, color="white", zorder=Z_LABEL)
+    end_room = END_LABEL_WIDTH_MI
+    placed = [[x_mi[0] + end_room / 2 - TOWN_MIN_SEP_MI / 2, x_mi[-1] - end_room / 2 + TOWN_MIN_SEP_MI / 2],
+              []]
+    for t in d["towns"]:
         xt = t["distance_km"] * KM_TO_MI
-        row = 1 - row if xt - last_x < TOWN_MIN_SEP_MI else 0
-        last_x = xt
+        for row in (0, 1):
+            clear = all(abs(xt - xp) >= TOWN_MIN_SEP_MI for xp in placed[row])
+            # A row-1 label's leader line runs up through row 0 -- keep it
+            # off any row-0 label's text.
+            if row == 1:
+                clear = clear and all(abs(xt - xp) >= TOWN_MIN_SEP_MI / 2.2 for xp in placed[0])
+            if clear:
+                break
+        else:
+            print(f"NOTE: dropping town label {t['label']} (no room)")
+            continue
+        placed[row].append(xt)
         j = int(np.abs(x_mi - xt).argmin())
         ax.plot([xt, xt], [row_y[row] + 0.13 * LABEL_STRIP_FT, sfc_ft[j]], color="white",
                 linewidth=0.8, alpha=0.7, zorder=Z_LABEL)
@@ -235,11 +304,9 @@ def main():
     # ---------- axes styling ----------
     ax.spines["left"].set_bounds(0, top_ft)
     ax.set_ylabel("Height (ft above sea level)", fontproperties=f_med, fontsize=12, color=INK)
-    ax.set_xlabel(f"Distance from {d['start']['label']} (miles)", fontproperties=f_med,
-                  fontsize=12, color=INK)
     ax.yaxis.set_major_locator(matplotlib.ticker.MultipleLocator(1000))
     ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:,.0f}" if v >= 0 else ""))
-    ax.xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(10))
+    ax.set_xticks([])
     ax.set_axisbelow(False)
     ax.grid(axis="y", color=GRID_COLOR, alpha=0.18, linewidth=0.8, zorder=Z_ISOBAR)
     for spine in ("top", "right"):
@@ -278,7 +345,7 @@ def main():
     subtitle = (f"NOAA RRFS Init {init_time:%Y-%m-%d} {init_time:%H}z"
                 f" • Valid {valid_str} ({valid_time:%H}z) • Surface to 700 mb")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
-    fig.text(left_x, top_y + 0.018, "Shading: wind speed (mph) • Barbs: wind direction & speed (kt)",
+    fig.text(left_x, top_y + 0.018, "Shading: wind speed (mph) • Barbs: wind direction & speed (kt) • Dashed: inversion top",
              fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY)
 
     # ---------- logo ----------
@@ -302,7 +369,7 @@ def main():
     fig_w_in, fig_h_in = fig.get_size_inches()
     ax_w_in, ax_h_in = axpos.width * fig_w_in, axpos.height * fig_h_in
     exaggeration = ((top_ft + LABEL_STRIP_FT) / ax_h_in) ** -1 / ((x_mi[-1] * 5280) / ax_w_in) ** -1
-    fig.text(center_x, 0.02,
+    fig.text(center_x, axpos.y0 - 0.045,
              f"NOAA RRFS 3 km — Ingalls Weather  •  Vertical scale exaggerated ~{exaggeration:.0f}×"
              f"  •  Terrain is RRFS model terrain",
              fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
