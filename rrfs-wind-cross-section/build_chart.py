@@ -89,7 +89,9 @@ DOWNSLOPE_START_INSET_MI = 2.5  # arrow starts this far in from the mountain end
 DOWNSLOPE_STOP_BEFORE_MI = 1.0  # ...and stops this far short of the inversion rise
 DOWNSLOPE_SEARCH_FT = 3000      # jet-core search depth above ground/inversion
 DOWNSLOPE_RISE_FT = 300         # inversion-top rise that marks the arrow's end
-DOWNSLOPE_SMOOTH_SIGMA = 10     # Gaussian sigma, in samples (~4.5 km), on the core height
+DOWNSLOPE_SMOOTH_SIGMA = 6      # Gaussian sigma, in samples (~2.7 km), on the arrow height
+DOWNSLOPE_LID_OFFSET_FT = 350   # flat part of the arrow rides this far above the inversion top
+DOWNSLOPE_END_TOWN = "Athena"   # arrow ends over this town if it's labeled on the section
 LABEL_STRIP_FT = 900     # below-sea-level ground strip holding town labels
 TOWN_MIN_SEP_MI = 6.0
 END_LABEL_WIDTH_MI = 6.0  # rough width of the Irrigon/Tollgate corner labels
@@ -196,37 +198,45 @@ def inversion_top_ft(d):
     return out
 
 
-def downslope_path(x_mi, z_ft, sfc_ft, inv_ft, speed_mph):
-    """(x, z) points along the downslope jet core, mountain end first, or
-    None if there's no inversion low point to end at. Runs from
-    DOWNSLOPE_START_INSET_MI in from the mountain end to
-    DOWNSLOPE_STOP_BEFORE_MI short of where the inversion top rises
-    DOWNSLOPE_RISE_FT above its lowest point, heading west."""
+def downslope_path(x_mi, z_ft, sfc_ft, inv_ft, speed_mph, end_x=None):
+    """(x, z) points for the schematic downslope arrow, mountain end first,
+    or None if there's no inversion to land on. The arrow comes down the
+    slope at the jet core's height above the ground, then levels off just
+    above the inversion top (the cold-pool lid) and runs flat to end_x
+    (default: just short of where the inversion top rises again west of
+    its low point) -- showing the jet riding over the cold pool instead of
+    reaching the Basin floor."""
     ok = np.where(np.isfinite(inv_ft))[0]
     if not len(ok):
         return None
     j0 = ok[np.argmin(inv_ft[ok])]
     cap = inv_ft[j0]
-    west = np.where((np.arange(len(inv_ft)) < j0) & (inv_ft > cap + DOWNSLOPE_RISE_FT))[0]
-    x_rise = x_mi[west[-1]] if len(west) else x_mi[0]
-    x_stop = x_rise + DOWNSLOPE_STOP_BEFORE_MI
+    if end_x is None:
+        west = np.where((np.arange(len(inv_ft)) < j0) & (inv_ft > cap + DOWNSLOPE_RISE_FT))[0]
+        end_x = (x_mi[west[-1]] if len(west) else x_mi[0]) + DOWNSLOPE_STOP_BEFORE_MI
     x_start = x_mi[-1] - DOWNSLOPE_START_INSET_MI
-    cols = np.where((x_mi >= x_stop) & (x_mi <= x_start))[0][::-1]
+    cols = np.where((x_mi >= end_x) & (x_mi <= x_start))[0][::-1]
     if len(cols) < 3:
         return None
-    core = []
+    lid = cap + DOWNSLOPE_LID_OFFSET_FT
+
+    # Jet core height above ground, measured on the slope (columns where the
+    # ground is above the lid) -- the arrow keeps that clearance on the way
+    # down. Core = fastest wind in the lowest DOWNSLOPE_SEARCH_FT.
+    clear = []
     for j in cols:
-        floor = sfc_ft[j]
-        if np.isfinite(inv_ft[j]):
-            floor = max(floor, inv_ft[j])
-        win = (z_ft >= floor + 200) & (z_ft <= floor + DOWNSLOPE_SEARCH_FT)
+        if sfc_ft[j] <= lid:
+            continue
+        win = (z_ft >= sfc_ft[j] + 200) & (z_ft <= sfc_ft[j] + DOWNSLOPE_SEARCH_FT)
         sp = np.where(win, np.nan_to_num(speed_mph[:, j], nan=-1), -1)
-        core.append(z_ft[int(np.argmax(sp))])
-    # The column-by-column core height is stair-stepped (25 ft regrid,
-    # 25 mb source levels), so Gaussian-smooth it -- enough to remove the
-    # steps but keep the jet's real bends as it follows the slope down.
-    xs = x_mi[cols]
-    return xs, gaussian_filter1d(np.array(core, dtype=float), DOWNSLOPE_SMOOTH_SIGMA, mode="nearest")
+        clear.append(z_ft[int(np.argmax(sp))] - sfc_ft[j])
+    clearance = float(np.median(clear)) if clear else 500.0
+
+    z = np.maximum(lid, sfc_ft[cols] + clearance)
+    # Round off the corner where it levels out (and the terrain's
+    # wiggles) without letting the flat part sag below the lid.
+    z = np.maximum(lid, gaussian_filter1d(z, DOWNSLOPE_SMOOTH_SIGMA, mode="nearest"))
+    return x_mi[cols], z
 
 
 def smooth_nan(y, n):
@@ -308,13 +318,13 @@ def main():
                 path_effects=[pe.withStroke(linewidth=3.5, foreground="white")])
 
     # ---------- downslope flow arrow ----------
-    # One arrow tracing the downslope jet off the Blue Mountains: it follows
-    # the jet core (fastest wind in the lowest DOWNSLOPE_SEARCH_FT above the
-    # ground/inversion) from near the mountain end of the section down the
-    # slope, and stops just short of where the inversion top climbs back up
-    # west of its low point -- i.e. where the cold pool deepens enough to
-    # keep the jet off the Basin floor.
-    path = downslope_path(x_mi, z_ft, sfc_ft, inv_ft, speed_mph)
+    # One schematic arrow for the downslope jet off the Blue Mountains: down
+    # the slope at the jet core's clearance above the ground, then flat just
+    # above the inversion top, ending over DOWNSLOPE_END_TOWN (Athena) --
+    # the jet riding over the cold pool instead of reaching the Basin floor.
+    end_town = [t for t in d["towns"] if t["label"] == DOWNSLOPE_END_TOWN]
+    end_x = end_town[0]["distance_km"] * KM_TO_MI if end_town else None
+    path = downslope_path(x_mi, z_ft, sfc_ft, inv_ft, speed_mph, end_x)
     if path is not None:
         px, pz = path
         arrow = FancyArrowPatch(path=MplPath(np.column_stack([px, pz])),
