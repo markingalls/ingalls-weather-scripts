@@ -15,6 +15,8 @@ import cartopy.crs as ccrs
 from cartopy.mpl.path import shapely_to_path
 from shapely.geometry import shape, box, Polygon, LineString, Point
 from shapely.ops import transform as shp_transform, unary_union
+from shapely.geometry.polygon import orient
+from shapely.validation import make_valid
 import numpy as np
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -389,6 +391,57 @@ def polygons_only(geom):
     return unary_union(kept) if len(kept) > 1 else kept[0]
 
 
+# Margin (degrees) kept around the map extent when clipping alert shapes --
+# enough that an alert's edge just outside the frame still draws its
+# outline cleanly into the frame, small enough to drop everything far away.
+ALERT_CLIP_MARGIN_DEG = 3.0
+
+
+def clip_alert_geom(geom, clip_box):
+    """Validate an alert shape (lon/lat) and clip it to the area around
+    the map. NWS returns every active alert for every state in AREA, so an
+    event's union routinely includes zones hundreds of miles outside the
+    frame (California coast, Nevada, Montana...); those far-off pieces
+    don't render anyway but are exactly what trips cartopy's ring-cutting
+    into its "fill the whole disk" failure (see polygons_only)."""
+    if geom.is_empty:
+        return geom
+    if not geom.is_valid:
+        geom = make_valid(geom)
+    return polygons_only(polygons_only(geom).intersection(clip_box))
+
+
+def to_map_crs(geom, proj, src_crs):
+    """Project a lon/lat polygon geometry into the map's own projection
+    ourselves, with consistent CCW-exterior ring orientation, so it can be
+    handed to add_geometries with crs=proj. When a geometry's CRS already
+    matches the axes projection, cartopy draws it as-is and skips its
+    project_geometry ring-cutting step -- which is what, on some
+    geometries / library versions, decides a polygon's ring is "inverted"
+    and fills the entire projection disk instead of the polygon (an alert
+    shading the whole map). Callers must clip to the map area first
+    (clip_alert_geom) so every vertex sits on the visible hemisphere."""
+    if geom.is_empty:
+        return geom
+
+    def _fwd(x, y, z=None):
+        pts = proj.transform_points(src_crs, np.asarray(x, dtype=float),
+                                    np.asarray(y, dtype=float))
+        return pts[:, 0], pts[:, 1]
+
+    out = shp_transform(_fwd, geom)
+    if not out.is_valid:
+        out = make_valid(out)
+    if out.geom_type == "GeometryCollection":
+        parts = [g for g in out.geoms if g.geom_type in ("Polygon", "MultiPolygon")]
+        out = unary_union(parts) if parts else Polygon()
+    if out.geom_type == "Polygon":
+        return orient(out, sign=1.0)
+    if out.geom_type == "MultiPolygon":
+        return unary_union([orient(g, sign=1.0) for g in out.geoms])
+    return Polygon()
+
+
 def make_stripe_image(colors, width_px, height_px, stripe_px=20):
     """Diagonal candy-stripe raster alternating full-opacity bands of
     each color in `colors`, sized to cover width_px x height_px."""
@@ -633,7 +686,11 @@ def build_map(region_key, alerts_path, output_path):
                 continue
             plotted_zones.add(zone_key)
             event_geoms.setdefault(event, []).append(shape(z["geometry"]))
-    event_geoms = {event: unary_union(geoms) for event, geoms in event_geoms.items()}
+    clip_box = box(extent[0] - ALERT_CLIP_MARGIN_DEG, extent[2] - ALERT_CLIP_MARGIN_DEG,
+                   extent[1] + ALERT_CLIP_MARGIN_DEG, extent[3] + ALERT_CLIP_MARGIN_DEG)
+    event_geoms = {event: clip_alert_geom(unary_union([make_valid(g) for g in geoms]), clip_box)
+                   for event, geoms in event_geoms.items()}
+    event_geoms = {event: g for event, g in event_geoms.items() if not g.is_empty}
 
     # Only reflect an event in the title/legend if it's actually visible
     # somewhere in the current map domain -- NWS returns every active alert
@@ -686,9 +743,12 @@ def build_map(region_key, alerts_path, output_path):
             event = next(iter(tags))
             fill = NWS_COLORS.get(event, "#e8a33d")
             edge = EDGE_OVERRIDE.get(event, darken(fill, 0.55))
-            ax.add_geometries([geom], crs=pc, facecolor=fill, edgecolor=edge,
+            map_geom = to_map_crs(geom, proj, pc)
+            if map_geom.is_empty:
+                continue
+            ax.add_geometries([map_geom], crs=proj, facecolor=fill, edgecolor=edge,
                                alpha=0.55, linewidth=1.2, zorder=4.5)
-            ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=edge,
+            ax.add_geometries([map_geom], crs=proj, facecolor="none", edgecolor=edge,
                                linewidth=1.2, alpha=1.0, zorder=4.6)
             continue
 
@@ -697,7 +757,9 @@ def build_map(region_key, alerts_path, output_path):
         # alpha as the single-event fill so overlap zones don't read darker.
         colors = [NWS_COLORS.get(e, "#e8a33d") for e in sorted(tags)]
         stripe_img = make_stripe_image(colors, ax_w_px, ax_h_px)
-        proj_geom = ax.projection.project_geometry(geom, pc)
+        proj_geom = to_map_crs(geom, proj, pc)
+        if proj_geom.is_empty:
+            continue
         clip_path = shapely_to_path(proj_geom)
         clip_patch = PathPatch(clip_path, transform=ax.transData)
         # GeoAxes overrides imshow to require a CRS transform; we're placing
@@ -705,7 +767,7 @@ def build_map(region_key, alerts_path, output_path):
         im = Axes.imshow(ax, stripe_img, extent=(0, 1, 0, 1), transform=ax.transAxes,
                           origin="upper", interpolation="nearest", alpha=0.55, zorder=4.5)
         im.set_clip_path(clip_patch)
-        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=OVERLAP_EDGE,
+        ax.add_geometries([proj_geom], crs=proj, facecolor="none", edgecolor=OVERLAP_EDGE,
                            linewidth=1.2, alpha=1.0, zorder=4.6)
 
     # Polygon-type warnings drawn last (highest zorder among alerts) so
@@ -716,9 +778,12 @@ def build_map(region_key, alerts_path, output_path):
         if geom.is_empty or not geom.intersects(extent_box):
             continue
         color = NWS_COLORS.get(event, "#e8a33d")
-        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor="black",
+        map_geom = to_map_crs(geom, proj, pc)
+        if map_geom.is_empty:
+            continue
+        ax.add_geometries([map_geom], crs=proj, facecolor="none", edgecolor="black",
                            linewidth=2.6, zorder=4.7)
-        ax.add_geometries([geom], crs=pc, facecolor="none", edgecolor=color,
+        ax.add_geometries([map_geom], crs=proj, facecolor="none", edgecolor=color,
                            linewidth=1.4, zorder=4.8)
 
     # ---------- city labels ----------
