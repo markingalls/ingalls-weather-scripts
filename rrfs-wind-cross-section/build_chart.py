@@ -238,16 +238,36 @@ def main():
         if np.nanmean(speed_mph[layer, j]) >= INVERSION_MAX_MIXING_MPH:
             inv_raw[j] = np.nan
     inv_ft = smooth_nan(inv_raw, INVERSION_SMOOTH_PTS)
-    ax.plot(x_mi, inv_ft, color=INVERSION_COLOR, linewidth=2.0, linestyle=(0, (6, 3.5)),
+    inv_x = x_mi.copy()
+    # Mountain end: the Basin cold pool's top is held level from its lowest
+    # point (the dip near Adams on the default section) out to where that
+    # height meets the slope, instead of following the model's jumpier
+    # columns over the foothills. That's the layer that keeps the
+    # downslope jet off the Basin floor, so it's what the line is for.
+    ok = np.where(np.isfinite(inv_ft))[0]
+    if len(ok):
+        j0 = ok[np.argmin(inv_ft[ok])]
+        cap = inv_ft[j0]
+        hit = np.where((np.arange(len(sfc_ft)) > j0) & (sfc_ft >= cap))[0]
+        j_hit = hit[0] if len(hit) else len(sfc_ft)
+        inv_ft[j0 + 1:] = np.nan
+        inv_ft[j0 + 1:j_hit] = cap
+        if len(hit):
+            # End exactly on the terrain line, not at the last sample before it.
+            frac = (cap - sfc_ft[j_hit - 1]) / (sfc_ft[j_hit] - sfc_ft[j_hit - 1])
+            inv_x[j_hit] = x_mi[j_hit - 1] + frac * (x_mi[j_hit] - x_mi[j_hit - 1])
+            inv_ft[j_hit] = cap
+    ax.plot(inv_x, inv_ft, color=INVERSION_COLOR, linewidth=2.0, linestyle=(0, (6, 3.5)),
             zorder=Z_INVERSION, path_effects=[pe.withStroke(linewidth=4.2, foreground="white")])
     ok = np.where(np.isfinite(inv_ft))[0]
     if len(ok):
-        # Label above the line, a quarter of the way in, where it's away
-        # from both the end labels and the steep terrain.
-        j = ok[len(ok) // 4]
-        ax.text(x_mi[j], inv_ft[j] + 170, "Inversion top", ha="center", va="bottom",
-                fontproperties=f_med, fontsize=10, color=INVERSION_COLOR,
-                path_effects=[pe.withStroke(linewidth=3, foreground="white")], zorder=Z_LABEL)
+        # Label on a solid white tag above the line, a fifth of the way in,
+        # over the Basin -- clear of the end labels and the barb columns.
+        j = ok[len(ok) // 5]
+        ax.text(x_mi[j], inv_ft[j] + 260, "Inversion top", ha="center", va="bottom",
+                fontproperties=f_med, fontsize=10.5, color=INVERSION_COLOR, zorder=Z_LABEL,
+                bbox=dict(boxstyle="round,pad=0.3,rounding_size=0.4", facecolor="white",
+                          edgecolor=INVERSION_COLOR, linewidth=0.8, alpha=0.95))
 
     # ---------- wind barbs (knots, meteorological convention) ----------
     bx = np.arange(BARB_SPACING_MI / 2, x_mi[-1], BARB_SPACING_MI)

@@ -14,8 +14,10 @@ the west slope of the Blue Mountains).
   layer above the ground (at least 1 °C warmer than 2 m, including any
   near-isothermal cap within 0.5 °C of the warmest point), lightly smoothed
   along the section. Columns where the mean wind from the ground to the
-  inversion top is 30+ mph are left out as mechanically mixed. Gaps mean no
-  (surviving) inversion in that column.
+  inversion top is 30+ mph are left out as mechanically mixed. Toward the
+  mountains, the line is held level from its lowest point (near Adams on
+  the default section) out to where it meets the slope -- the cold-pool
+  top that keeps the downslope jet off the Basin floor.
 - **Terrain:** RRFS model terrain, filled; vertical scale is exaggerated
   (~20×, printed in the footer). Nearby towns are labeled at their
   along-section position.
