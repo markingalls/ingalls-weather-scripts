@@ -13,7 +13,9 @@ the west slope of the Blue Mountains).
 - **Dashed line:** top of the low-level inversion -- the top of the warm
   layer above the ground (at least 1 °C warmer than 2 m, including any
   near-isothermal cap within 0.5 °C of the warmest point), lightly smoothed
-  along the section. Gaps mean no inversion in that column.
+  along the section. Columns where the mean wind from the ground to the
+  inversion top is 30+ mph are left out as mechanically mixed. Gaps mean no
+  (surviving) inversion in that column.
 - **Terrain:** RRFS model terrain, filled; vertical scale is exaggerated
   (~20×, printed in the footer). Nearby towns are labeled at their
   along-section position.

@@ -92,6 +92,7 @@ INVERSION_COLOR = "#0b3d91"   # dark blue, same as hrrr-smoke-chart's second lin
 INVERSION_MIN_STRENGTH_C = 1.0  # warm layer must be this much warmer than 2 m
 INVERSION_TOP_TOL_C = 0.5       # near-isothermal cap counts as part of the inversion
 INVERSION_SMOOTH_PTS = 9        # ~4 km running mean along the section
+INVERSION_MAX_MIXING_MPH = 30   # layer-mean wind at/above this mixes the inversion out
 
 
 def interp_color(value, table):
@@ -228,7 +229,15 @@ def main():
                          shading="nearest", zorder=Z_SHADE, rasterized=True)
 
     # ---------- inversion top ----------
-    inv_ft = smooth_nan(inversion_top_ft(d), INVERSION_SMOOTH_PTS)
+    inv_raw = inversion_top_ft(d)
+    # Mechanical mixing: drop columns where the layer-mean wind from the
+    # ground up to the inversion top is strong enough that the model's
+    # inversion likely wouldn't survive (e.g. the downslope jet on the Blues).
+    for j in np.where(np.isfinite(inv_raw))[0]:
+        layer = (z_ft >= sfc_ft[j]) & (z_ft <= inv_raw[j])
+        if np.nanmean(speed_mph[layer, j]) >= INVERSION_MAX_MIXING_MPH:
+            inv_raw[j] = np.nan
+    inv_ft = smooth_nan(inv_raw, INVERSION_SMOOTH_PTS)
     ax.plot(x_mi, inv_ft, color=INVERSION_COLOR, linewidth=2.0, linestyle=(0, (6, 3.5)),
             zorder=Z_INVERSION, path_effects=[pe.withStroke(linewidth=4.2, foreground="white")])
     ok = np.where(np.isfinite(inv_ft))[0]
