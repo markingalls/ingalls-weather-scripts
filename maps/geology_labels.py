@@ -137,7 +137,26 @@ def is_proper(name):
     return sum(w[:1].isupper() for w in re.split(r"[\s/-]+", name)) >= 2
 
 
+VOLCANIC_NAME = re.compile(r"[Vv]olcanic|Lavas|Basalt\b")
+INTRUSIVE_NAME = re.compile(r"[Bb]atholith|[Pp]luton|[Ii]ntrusive|[Cc]omplex|[Ss]tock|[Dd]iabase"
+                            r"|[Gg]abbro|[Oo]phiolite|[Gg]ranite|[Gg]ranodiorite|[Tt]onalite"
+                            r"|[Tt]rondhjemite|[Qq]uartz [Mm]onzonite|[Dd]iorite|Plutonic")
+
+
 def local_name(props, state, cls, county=None):
+    n = _local_name(props, state, cls, county)
+    if not n:
+        return None
+    # a volcanic unit's name shouldn't label sedimentary or intrusive rock,
+    # and an intrusive class needs a name that describes an intrusion
+    if cls in ("cz_sedimentary", "mz_pz_sedimentary", "plutonic") and VOLCANIC_NAME.search(n):
+        return None
+    if cls == "plutonic" and not INTRUSIVE_NAME.search(n):
+        return None
+    return n
+
+
+def _local_name(props, state, cls, county=None):
     if state == "OR":
         if cls == "plutonic":
             f = (props.get("formation") or "").strip()
@@ -149,12 +168,7 @@ def local_name(props, state, cls, county=None):
     if n == "Vashon glacial deposits":
         # DNR: "mostly Vashon Stade in western WA; unnamed in eastern WA"
         return n if REGION.get(("WA", county)) in WEST_WA else None
-    if not n or not is_proper(n):
-        return None
-    # a volcanic unit's name shouldn't label sedimentary or intrusive rock
-    if cls in ("cz_sedimentary", "mz_pz_sedimentary", "plutonic") and re.search(r"[Vv]olcanic", n):
-        return None
-    return n
+    return n if n and is_proper(n) else None
 
 
 # ---------- ages ----------
