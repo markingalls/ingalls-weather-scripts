@@ -54,6 +54,11 @@ Z_LABEL = 6
 
 TITLE_REGION = "Blue Mountain Foothills"
 
+# Towns that get a column of temperatures (surface + every 1,000 ft) above them.
+PROFILE_TOWNS = ["Hermiston", "Pendleton", "Weston", "Tollgate"]
+PROFILE_MIN_GAP_FT = 700       # first 1,000-ft label at least this far above the ground
+PROFILE_ARROW_CLEAR_FT = 300   # skip a label this close to the downslope arrow
+
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
 M_TO_FT = 3.28084
@@ -93,7 +98,7 @@ DOWNSLOPE_SEARCH_FT = 3000      # jet-core search depth above ground/inversion
 DOWNSLOPE_RISE_FT = 300         # inversion-top rise that marks the arrow's end
 DOWNSLOPE_SMOOTH_SIGMA = 10     # Gaussian sigma, in samples (~4.5 km), on the core height
 DOWNSLOPE_END_TOWN = "Adams"    # arrow ends over this town if it's labeled on the section
-LABEL_STRIP_FT = 2100    # below-sea-level ground strip holding town labels + temps
+LABEL_STRIP_FT = 900     # below-sea-level ground strip holding town labels
 TOWN_MIN_SEP_MI = 6.0
 END_LABEL_WIDTH_MI = 6.0  # rough width of the Irrigon/Tollgate corner labels
 
@@ -305,10 +310,16 @@ def main():
             zorder=Z_INVERSION, path_effects=[pe.withStroke(linewidth=4.2, foreground="white")])
     ok = np.where(np.isfinite(inv_ft))[0]
     if len(ok):
-        # Bold, white-haloed label above the line, a fifth of the way in,
-        # over the Basin -- clear of the end labels and the downslope arrow.
-        j = ok[len(ok) // 5]
-        ax.text(x_mi[j], inv_ft[j] + 200, "Inversion top", ha="center", va="bottom",
+        # Bold, white-haloed label above the line, centered in the widest
+        # gap between the temperature-profile columns (so it never lands on
+        # one), among the columns where the line exists.
+        col_x = sorted([x_mi[0], x_mi[-1]] + [
+            t["distance_km"] * KM_TO_MI for t in d["towns"] if t["label"] in PROFILE_TOWNS])
+        gaps = [(b - a, (a + b) / 2) for a, b in zip(col_x, col_x[1:])
+                if np.isfinite(inv_ft[int(np.abs(x_mi - (a + b) / 2).argmin())])]
+        x_lab = max(gaps)[1] if gaps else x_mi[ok[len(ok) // 5]]
+        j = int(np.abs(x_mi - x_lab).argmin())
+        ax.text(x_mi[j], np.nanmax(inv_ft[max(0, j - 25):j + 25]) + 200, "Inversion top", ha="center", va="bottom",
                 fontproperties=f_bold, fontsize=11, color=INVERSION_COLOR, zorder=Z_LABEL,
                 path_effects=[pe.withStroke(linewidth=3.5, foreground="white")])
 
@@ -319,8 +330,10 @@ def main():
     end_town = [t for t in d["towns"] if t["label"] == DOWNSLOPE_END_TOWN]
     end_x = end_town[0]["distance_km"] * KM_TO_MI if end_town else None
     path = downslope_path(x_mi, z_ft, sfc_ft, inv_ft, speed_mph, end_x)
+    arrow_xz = None
     if path is not None:
         px, pz = path
+        arrow_xz = (px, pz)
         arrow = FancyArrowPatch(path=MplPath(np.column_stack([px, pz])),
                                 arrowstyle="-|>,head_length=9,head_width=6",
                                 color=ARROW_COLOR, linewidth=3.6, zorder=Z_ARROW,
@@ -344,17 +357,11 @@ def main():
     # fetch_cross_section.py's NEARBY_TOWNS) and each takes the first of the
     # two rows it fits in -- a lower-priority town that fits in neither (e.g.
     # Adams vs. Pendleton) is dropped rather than crowding a better label.
-    # Each label is the place's RRFS 2 m temperature (°F, bold) stacked
-    # above its name; row_y is the baseline between the two lines.
-    row_y = [-0.22 * LABEL_STRIP_FT, -0.72 * LABEL_STRIP_FT]
+    row_y = [-0.30 * LABEL_STRIP_FT, -0.72 * LABEL_STRIP_FT]
 
     def place_label(x, y, place, ha="center", name_size=9):
-        if place.get("t2m_c") is not None:
-            ax.text(x, y + 0.02 * LABEL_STRIP_FT, f"{place['t2m_c'] * 9 / 5 + 32:.0f}°F", ha=ha,
-                    va="bottom", fontproperties=f_bold, fontsize=name_size + 2, color="white",
-                    zorder=Z_LABEL)
-        ax.text(x, y - 0.02 * LABEL_STRIP_FT, place["label"], ha=ha, va="top",
-                fontproperties=f_med, fontsize=name_size, color="white", zorder=Z_LABEL)
+        ax.text(x, y, place["label"], ha=ha, va="center", fontproperties=f_med,
+                fontsize=name_size, color="white", zorder=Z_LABEL)
 
     place_label(x_mi[0] + 0.5, row_y[0], d["start"], ha="left", name_size=10)
     place_label(x_mi[-1] - 0.5, row_y[0], d["end"], ha="right", name_size=10)
@@ -376,9 +383,46 @@ def main():
             continue
         placed[row].append(xt)
         j = int(np.abs(x_mi - xt).argmin())
-        ax.plot([xt, xt], [row_y[row] + 0.17 * LABEL_STRIP_FT, sfc_ft[j]], color="white",
+        ax.plot([xt, xt], [row_y[row] + 0.13 * LABEL_STRIP_FT, sfc_ft[j]], color="white",
                 linewidth=0.8, alpha=0.7, zorder=Z_LABEL)
         place_label(xt, row_y[row], t)
+
+    # ---------- temperature profiles above selected towns ----------
+    # RRFS temperature (°F) at the ground (2 m) and every 1,000 ft MSL up to
+    # the 700 mb top, in the section column at each PROFILE_TOWNS position.
+    # A label that would sit on the downslope arrow is skipped.
+    def column_temp_f(j, z):
+        sfc_m = d["surface_height_m"][j]
+        hgt = np.array(d["height_m"])[:, j]
+        tmp = np.array(d["t_c"])[:, j]
+        above = hgt > sfc_m + 2
+        zc = np.concatenate([[sfc_m + 2], hgt[above]]) * M_TO_FT
+        tc = np.concatenate([[d["t2m_c"][j]], tmp[above]])
+        return np.interp(z, zc, tc) * 9 / 5 + 32
+
+    places = {d["start"]["label"]: x_mi[0], d["end"]["label"]: x_mi[-1]}
+    places.update({t["label"]: t["distance_km"] * KM_TO_MI for t in d["towns"]})
+    halo = [pe.withStroke(linewidth=3, foreground="white")]
+    for name in PROFILE_TOWNS:
+        if name not in places:
+            continue
+        xt = places[name]
+        j = int(np.abs(x_mi - xt).argmin())
+        # Keep end-of-section columns fully inside the plot.
+        ha = "right" if j == len(x_mi) - 1 else "left" if j == 0 else "center"
+        xl = xt - 0.4 if ha == "right" else xt + 0.4 if ha == "left" else xt
+        ax.text(xl, sfc_ft[j] + 90, f"{column_temp_f(j, sfc_ft[j]):.0f}°", ha=ha, va="bottom",
+                fontproperties=f_bold, fontsize=10, color=INK, path_effects=halo, zorder=Z_LABEL)
+        z0 = np.ceil((sfc_ft[j] + PROFILE_MIN_GAP_FT) / 1000) * 1000
+        for z in np.arange(z0, top_ft - 150, 1000):
+            if arrow_xz is not None:
+                ax_x, ax_z = arrow_xz
+                k = int(np.abs(ax_x - xt).argmin())
+                if abs(ax_x[k] - xt) < 1.0 and abs(ax_z[k] - z) < PROFILE_ARROW_CLEAR_FT:
+                    continue
+            ax.text(xl, z, f"{column_temp_f(j, z):.0f}°", ha=ha, va="center",
+                    fontproperties=f_bold, fontsize=9.5, color=INK, path_effects=halo,
+                    zorder=Z_LABEL)
 
     # ---------- axes styling ----------
     ax.spines["left"].set_bounds(0, top_ft)

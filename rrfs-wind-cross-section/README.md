@@ -22,8 +22,12 @@ the west slope of the Blue Mountains).
   top that keeps the downslope jet off the Basin floor.
 - **Terrain:** RRFS model terrain, filled; vertical scale is exaggerated
   (~17×, printed in the footer). Nearby towns are labeled at their
-  along-section position, each with its RRFS 2 m temperature (°F) above the
-  name -- sampled at the town itself, not its projection onto the line.
+  along-section position.
+- **Temperatures:** columns of RRFS temperature (°F) above Hermiston,
+  Pendleton, Weston and Tollgate (`PROFILE_TOWNS`) -- the 2 m temperature
+  at the ground, then every 1,000 ft MSL up to 700 mb, taken from the
+  section column at each town's along-section position (labels that would
+  sit on the arrow are skipped).
 - **Title:** "Low-Level Winds: Blue Mountain Foothills" (`TITLE_REGION` in
   `build_chart.py` -- change it for other sections).
 
