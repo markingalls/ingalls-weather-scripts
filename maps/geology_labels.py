@@ -201,6 +201,11 @@ def age_range(age):
     hits = [(s, e) for pat, s, e in EPOCHS if re.search(pat, a, re.I)]
     if not hits:
         return None
+    # A bare "Quaternary" (or "Cenozoic") tag doesn't mean active today: both
+    # DNR and DOGAMI tag Holocene units as Holocene explicitly, so without
+    # that word a unit's range ends with the Ice Age.
+    if not re.search(r"Holocene|Recent|Present", a, re.I):
+        hits = [(s, max(e, 0.0117)) for s, e in hits]
     return max(s for s, _ in hits), min(e for _, e in hits)
 
 
@@ -213,7 +218,10 @@ def fmt_ma(ma):
 
 
 def fmt_age(old, young):
-    if young < 0.02:
+    if abs(young - 0.0117) < 1e-6:  # ends with the Pleistocene, not today
+        return (f"~{fmt_ma(old)} million years ago through the Ice Age" if old >= 1
+                else "Ice Age")
+    if young < 0.005:
         return f"~{fmt_ma(old)} million years ago to today" if old >= 1 else "Ice Age to today"
     if young < 1:
         return f"~{fmt_ma(old)} million to ~{young * 1e6:,.0f} years ago"
@@ -223,6 +231,16 @@ def fmt_age(old, young):
 
 
 # ---------- per-county labels ----------
+CASCADE_WA = {"Cascade", "North Cascades"}
+
+
+def short_unit(n):
+    """'Mount Rainier andesite' -> 'Mount Rainier'; 'Fifes Peak Formation'
+    -> 'Fifes Peak' -- for the compact unit list under a regional title."""
+    n = re.sub(r"\s+(Formations?|Volcanics|Basalt|assemblage)$", "", n)
+    return re.sub(r"(\s+[a-z][a-z-]*)+$", "", n) or n   # trailing lowercase lithology words
+
+
 def county_labels(features, state, county, classes):
     """{class_key: legend label} for one county's geology features."""
     by_cls = {}
@@ -230,6 +248,7 @@ def county_labels(features, state, county, classes):
         p = f["properties"]
         by_cls.setdefault(p["class"], []).append((p, shape(f["geometry"]).area))
     base = {c["key"]: c for c in classes}
+    region = REGION.get((state, county))
     out = {}
     for cls, items in by_cls.items():
         c = base[cls]
@@ -237,18 +256,53 @@ def county_labels(features, state, county, classes):
             out[cls] = f"{c['label']}\n({c['age']})" if c.get("age") else c["label"]
             continue
         total = sum(a for _, a in items) or 1
-        # names
         names = {}
         for p, a in items:
             n = local_name(p, state, cls, county)
             if n:
                 names[n] = names.get(n, 0) + a
         ranked = [(n, a / total) for n, a in sorted(names.items(), key=lambda x: -x[1])]
+        # Washington Cascade counties: the volcanic class is titled "Cascade
+        # volcanic rocks", with up to three named units listed underneath
+        # (Pierce: Ohanapecosh, Fifes Peak & Mount Rainier).
+        cascade = state == "WA" and cls == "cz_volcanic" and region in CASCADE_WA
+        max_names = 3 if cascade else 2
         top = []
         if ranked and ranked[0][1] >= NAME_SHARE:
-            top = [ranked[0]] + [r for r in ranked[1:2] if r[1] >= SECOND_SHARE[state]]
-        title = None
-        if top and sum(s for _, s in top) >= NAMED_TOTAL:
+            top = [ranked[0]] + [r for r in ranked[1:max_names] if r[1] >= SECOND_SHARE[state]]
+        if cascade:
+            top = [r for r in top if r[1] >= 0.1] or top[:1]
+        if not (top and sum(s for _, s in top) >= NAMED_TOTAL):
+            top = []
+
+        # Age range: from the named units when the label names them (so
+        # "Simcoe Mountains volcanic rocks" gets Simcoe's age, not the
+        # youngest basalt elsewhere in the class); else from the class.
+        named = {n for n, _ in top}
+        pool = [(p, a) for p, a in items if local_name(p, state, cls, county) in named] if named else items
+        pool_total = sum(a for _, a in pool) or 1
+        ages = {}
+        for p, a in pool:
+            r = age_range(p.get("age"))
+            if r:
+                ages[r] = ages.get(r, 0) + a
+        keep = [r for r, a in ages.items() if a / pool_total >= AGE_MIN_SHARE] or list(ages)
+        age = fmt_age(max(r[0] for r in keep), min(r[1] for r in keep)) if keep else c.get("age")
+
+        if cls == "surficial":
+            title = " & ".join(n for n, _ in top) if top else None
+            out[cls] = (f"{title}\n({NOUN[cls]}, {c['age']})" if title
+                        else f"{c['label']}\n({c['age']})")
+            continue
+        if cascade:
+            units = [short_unit(n) for n, _ in top]
+            while len(units) > 1 and len(", ".join(units)) > 40:
+                units = units[:-1]
+            listed = (", ".join(units[:-1]) + " & " + units[-1]) if len(units) > 1 else (units[0] if units else "")
+            out[cls] = (f"{region} volcanic rocks\n({listed}, {age})" if listed
+                        else f"{region} volcanic rocks\n({age})")
+            continue
+        if top:
             title = " & ".join(n for n, _ in top)
             # "Ellensburg Formation & Ringold Formation" -> "Ellensburg & Ringold Formations"
             m = re.fullmatch(r"(.+) (Formation|Group) & (.+) \2", title)
@@ -256,21 +310,9 @@ def county_labels(features, state, county, classes):
                 title = f"{m.group(1)} & {m.group(3)} {m.group(2)}s"
             if len(title) > MAX_NAME_CHARS:
                 title = top[0][0]
-        # age range from units covering >= AGE_MIN_SHARE of the class
-        ages = {}
-        for p, a in items:
-            r = age_range(p.get("age"))
-            if r:
-                ages[r] = ages.get(r, 0) + a
-        keep = [r for r, a in ages.items() if a / total >= AGE_MIN_SHARE] or list(ages)
-        age = fmt_age(max(r[0] for r in keep), min(r[1] for r in keep)) if keep else c.get("age")
-        if cls == "surficial":
-            out[cls] = (f"{title}\n({NOUN[cls]}, {c['age']})" if title
-                        else f"{c['label']}\n({c['age']})")
-        elif title:
             out[cls] = f"{title}\n({NOUN[cls]}, {age})"
-        elif cls in FALLBACK_NOUN and (state, county) in REGION:
-            out[cls] = f"{REGION[(state, county)]} {FALLBACK_NOUN[cls]}\n({age})"
+        elif cls in FALLBACK_NOUN and region:
+            out[cls] = f"{region} {FALLBACK_NOUN[cls]}\n({age})"
         else:
             out[cls] = f"{c['label']}\n({age})"
     return out
