@@ -232,6 +232,12 @@ def fmt_age(old, young):
 
 # ---------- per-county labels ----------
 CASCADE_WA = {"Cascade", "North Cascades"}
+# Hand-set titles where the data's unit list doesn't read well; the age
+# range still comes from the data (the whole class in that county).
+TITLE_OVERRIDE = {
+    ("WA", "Klickitat", "cz_volcanic"): "Cascade & Simcoe Volcanics",
+    ("WA", "Yakima", "cz_volcanic"): "Cascade & Simcoe Volcanics",
+}
 
 
 def short_unit(n):
@@ -265,14 +271,15 @@ def county_labels(features, state, county, classes):
         # Washington Cascade counties: the volcanic class is titled "Cascade
         # volcanic rocks", with up to three named units listed underneath
         # (Pierce: Ohanapecosh, Fifes Peak & Mount Rainier).
-        cascade = state == "WA" and cls == "cz_volcanic" and region in CASCADE_WA
+        override = TITLE_OVERRIDE.get((state, county, cls))
+        cascade = state == "WA" and cls == "cz_volcanic" and region in CASCADE_WA and not override
         max_names = 3 if cascade else 2
         top = []
         if ranked and ranked[0][1] >= NAME_SHARE:
             top = [ranked[0]] + [r for r in ranked[1:max_names] if r[1] >= SECOND_SHARE[state]]
         if cascade:
             top = [r for r in top if r[1] >= 0.1] or top[:1]
-        if not (top and sum(s for _, s in top) >= NAMED_TOTAL):
+        if override or not (top and sum(s for _, s in top) >= NAMED_TOTAL):
             top = []
 
         # Age range: from the named units when the label names them (so
@@ -289,6 +296,9 @@ def county_labels(features, state, county, classes):
         keep = [r for r, a in ages.items() if a / pool_total >= AGE_MIN_SHARE] or list(ages)
         age = fmt_age(max(r[0] for r in keep), min(r[1] for r in keep)) if keep else c.get("age")
 
+        if override:
+            out[cls] = f"{override}\n({age})"
+            continue
         if cls == "surficial":
             title = " & ".join(n for n, _ in top) if top else None
             out[cls] = (f"{title}\n({NOUN[cls]}, {c['age']})" if title
