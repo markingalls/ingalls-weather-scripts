@@ -52,6 +52,8 @@ Z_INVERSION = 4
 Z_TERRAIN = 5
 Z_LABEL = 6
 
+TITLE_REGION = "Blue Mountain Foothills"
+
 PACIFIC = ZoneInfo("America/Los_Angeles")
 
 M_TO_FT = 3.28084
@@ -91,7 +93,7 @@ DOWNSLOPE_SEARCH_FT = 3000      # jet-core search depth above ground/inversion
 DOWNSLOPE_RISE_FT = 300         # inversion-top rise that marks the arrow's end
 DOWNSLOPE_SMOOTH_SIGMA = 10     # Gaussian sigma, in samples (~4.5 km), on the core height
 DOWNSLOPE_END_TOWN = "Adams"    # arrow ends over this town if it's labeled on the section
-LABEL_STRIP_FT = 900     # below-sea-level ground strip holding town labels
+LABEL_STRIP_FT = 2100    # below-sea-level ground strip holding town labels + temps
 TOWN_MIN_SEP_MI = 6.0
 END_LABEL_WIDTH_MI = 6.0  # rough width of the Irrigon/Tollgate corner labels
 
@@ -342,11 +344,20 @@ def main():
     # fetch_cross_section.py's NEARBY_TOWNS) and each takes the first of the
     # two rows it fits in -- a lower-priority town that fits in neither (e.g.
     # Adams vs. Pendleton) is dropped rather than crowding a better label.
-    row_y = [-0.30 * LABEL_STRIP_FT, -0.72 * LABEL_STRIP_FT]
-    ax.text(x_mi[0] + 0.5, row_y[0], d["start"]["label"], ha="left", va="center",
-            fontproperties=f_med, fontsize=10, color="white", zorder=Z_LABEL)
-    ax.text(x_mi[-1] - 0.5, row_y[0], d["end"]["label"], ha="right", va="center",
-            fontproperties=f_med, fontsize=10, color="white", zorder=Z_LABEL)
+    # Each label is the place's RRFS 2 m temperature (°F, bold) stacked
+    # above its name; row_y is the baseline between the two lines.
+    row_y = [-0.22 * LABEL_STRIP_FT, -0.72 * LABEL_STRIP_FT]
+
+    def place_label(x, y, place, ha="center", name_size=9):
+        if place.get("t2m_c") is not None:
+            ax.text(x, y + 0.02 * LABEL_STRIP_FT, f"{place['t2m_c'] * 9 / 5 + 32:.0f}°F", ha=ha,
+                    va="bottom", fontproperties=f_bold, fontsize=name_size + 2, color="white",
+                    zorder=Z_LABEL)
+        ax.text(x, y - 0.02 * LABEL_STRIP_FT, place["label"], ha=ha, va="top",
+                fontproperties=f_med, fontsize=name_size, color="white", zorder=Z_LABEL)
+
+    place_label(x_mi[0] + 0.5, row_y[0], d["start"], ha="left", name_size=10)
+    place_label(x_mi[-1] - 0.5, row_y[0], d["end"], ha="right", name_size=10)
     end_room = END_LABEL_WIDTH_MI
     placed = [[x_mi[0] + end_room / 2 - TOWN_MIN_SEP_MI / 2, x_mi[-1] - end_room / 2 + TOWN_MIN_SEP_MI / 2],
               []]
@@ -365,15 +376,14 @@ def main():
             continue
         placed[row].append(xt)
         j = int(np.abs(x_mi - xt).argmin())
-        ax.plot([xt, xt], [row_y[row] + 0.13 * LABEL_STRIP_FT, sfc_ft[j]], color="white",
+        ax.plot([xt, xt], [row_y[row] + 0.17 * LABEL_STRIP_FT, sfc_ft[j]], color="white",
                 linewidth=0.8, alpha=0.7, zorder=Z_LABEL)
-        ax.text(xt, row_y[row], t["label"], ha="center", va="center", fontproperties=f_med,
-                fontsize=9, color="white", zorder=Z_LABEL)
+        place_label(xt, row_y[row], t)
 
     # ---------- axes styling ----------
     ax.spines["left"].set_bounds(0, top_ft)
     ax.set_ylabel("Height (ft above sea level)", fontproperties=f_med, fontsize=12, color=INK)
-    ax.yaxis.set_major_locator(matplotlib.ticker.MultipleLocator(1000))
+    ax.yaxis.set_major_locator(matplotlib.ticker.FixedLocator(np.arange(0, top_ft + 1, 1000)))
     ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:,.0f}" if v >= 0 else ""))
     ax.set_xticks([])
     ax.set_axisbelow(False)
@@ -408,7 +418,7 @@ def main():
     # ---------- title / subtitle ----------
     subtitle_y = top_y + 0.058
     title_y = subtitle_y + 0.035
-    fig.text(left_x, title_y, f"Low-Level Winds: {d['start']['label']} to {d['end']['label']}",
+    fig.text(left_x, title_y, f"Low-Level Winds: {TITLE_REGION}",
              fontproperties=f_bold, fontsize=22, color=INK)
     valid_str = valid_local.strftime("%a %-m/%-d %-I %p %Z")
     subtitle = (f"NOAA RRFS Init {init_time:%Y-%m-%d} {init_time:%H}z"

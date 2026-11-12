@@ -21,8 +21,11 @@ the west slope of the Blue Mountains).
   the default section) out to where it meets the slope -- the cold-pool
   top that keeps the downslope jet off the Basin floor.
 - **Terrain:** RRFS model terrain, filled; vertical scale is exaggerated
-  (~20×, printed in the footer). Nearby towns are labeled at their
-  along-section position.
+  (~17×, printed in the footer). Nearby towns are labeled at their
+  along-section position, each with its RRFS 2 m temperature (°F) above the
+  name -- sampled at the town itself, not its projection onto the line.
+- **Title:** "Low-Level Winds: Blue Mountain Foothills" (`TITLE_REGION` in
+  `build_chart.py` -- change it for other sections).
 
 ## Files
 

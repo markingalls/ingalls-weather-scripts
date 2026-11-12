@@ -262,8 +262,19 @@ def main():
         v10 = fetch_field(sfc_url, sfc_rows, "VGRD", "10 m above ground", work)
         ue, ve = earth_relative(u10.values, v10.values, u10)
         out["u10_ms"] = sampler(ue).round(2).tolist()
-        out["t2m_c"] = (sampler(fetch_field(sfc_url, sfc_rows, "TMP", "2 m above ground", work).values)
-                        - 273.15).round(2).tolist()
+        t2m = fetch_field(sfc_url, sfc_rows, "TMP", "2 m above ground", work)
+        out["t2m_c"] = (sampler(t2m.values) - 273.15).round(2).tolist()
+        # 2 m temperature at each labeled place's own location (not its
+        # projection onto the line -- Pendleton is ~11 mi off it), for the
+        # chart's place labels.
+        places = [start, end] + NEARBY_TOWNS
+        place_sampler = LineSampler(t2m.latitude.values, t2m.longitude.values,
+                                    np.array([p["lat"] for p in places]),
+                                    np.array([p["lon"] for p in places]))
+        place_t2m_c = dict(zip([p["label"] for p in places],
+                               (place_sampler(t2m.values) - 273.15).round(2).tolist()))
+        out["start"] = {**start, "t2m_c": place_t2m_c[start["label"]]}
+        out["end"] = {**end, "t2m_c": place_t2m_c[end["label"]]}
         out["v10_ms"] = sampler(ve).round(2).tolist()
 
         out["levels_mb"] = LEVELS_MB
@@ -290,7 +301,8 @@ def main():
         d = np.hypot(lx - tx, ly - ty)
         i = int(d.argmin())
         if d[i] <= t.get("max_offset_km", TOWN_MAX_OFFSET_KM) and 0 < i < N_SAMPLES - 1:
-            towns.append({"label": t["label"], "distance_km": round(float(dist_km[i]), 2)})
+            towns.append({"label": t["label"], "distance_km": round(float(dist_km[i]), 2),
+                          "t2m_c": place_t2m_c[t["label"]]})
     out["towns"] = towns
 
     with open(args.output, "w") as f:
