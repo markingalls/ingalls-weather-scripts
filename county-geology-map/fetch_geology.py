@@ -379,7 +379,8 @@ def geology_or(county):
                                     r.ThematicFormation, r.MapUnitName)
         units.append({"type": "Feature",
                       "properties": {"code": r.MapUnit, "class": cls, "name": r.MapUnitName,
-                                     "age": r.ThematicAge, "source": "ogdc7"},
+                                     "age": r.ThematicAge, "group": r.ThematicTerraneGroup,
+                                     "formation": r.ThematicFormation, "source": "ogdc7"},
                       "geometry": round_coords(mapping(g))})
 
     faults = []

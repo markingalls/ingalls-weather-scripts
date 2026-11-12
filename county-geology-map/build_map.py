@@ -34,6 +34,7 @@ from shapely.ops import unary_union
 MAPS_DIR = "../maps"
 sys.path.insert(0, MAPS_DIR)
 from geology_sgmc import display_class, load_classes  # noqa: E402
+from geology_labels import county_labels  # noqa: E402
 from fetch_geology import STATE_INFO, cached, clean_polygon, data_name  # noqa: E402
 
 CB_COUNTIES = "https://www2.census.gov/geo/tiger/GENZ2024/shp/cb_2024_us_county_500k.zip"
@@ -94,8 +95,19 @@ LEFT, WIDTH = 0.06, 0.88
 MAP_TOP = 0.935
 
 # ---------- legends first (bottom-up), so the map can take what's left ----------
+# Legend wording is local (names + age range from this county's data, see
+# ../maps/geology_labels.py); colors stay the shared ones.
+LOCAL = county_labels(geo["features"], args.state, args.county.strip().title(), CLASSES)
+
+
+def unit_label(c):
+    if c["key"] in LOCAL:
+        return LOCAL[c["key"]]
+    return f"{c['label']}\n({c['age']})" if c.get("age") else c["label"]
+
+
 unit_handles = [Patch(facecolor=c["color"], edgecolor="#8a877d", linewidth=0.5,
-                      label=f"{c['label']}\n({c['age']})" if c.get("age") else c["label"])
+                      label=unit_label(c))
                 for c in CLASSES if c["key"] in by_class and c["key"] != "water"]
 has_solid = any(not f["properties"]["concealed"] for f in faults["features"])
 has_dashed = any(f["properties"]["concealed"] for f in faults["features"])
