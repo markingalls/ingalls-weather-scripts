@@ -5,7 +5,7 @@ Ingalls Weather
 Renders cross_section.json (see fetch_cross_section.py) into a styled
 height-vs-distance cross section: wind speed shaded with the same color
 table as the Tempest station wind chart (tempest-wind-chart/build_chart.py's
-WIND_COLOR_TABLE), wind barbs for direction, and model terrain filled in
+WIND_COLOR_TABLE), an arrow tracing the downslope jet off the mountains, and model terrain filled in
 along the bottom. Only the layer from the ground up to the 700 mb surface is
 shown. Vertical scale is heavily exaggerated (the section is ~70 mi long and
 ~2 mi tall) -- the exaggeration factor is printed in the footer.
@@ -23,6 +23,8 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
 from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.patches import FancyArrowPatch
+from matplotlib.path import Path as MplPath
 import numpy as np
 
 # ---------- fonts ----------
@@ -39,12 +41,12 @@ GRID_COLOR = "#000000"
 AXIS_COLOR = "#000000"
 TERRAIN_FILL = "#4a3b2a"     # dark earth brown, reads against every wind color
 TERRAIN_EDGE = "#1f1810"
-BARB_COLOR = "#111111"
+ARROW_COLOR = "#111111"
 HALO = [pe.withStroke(linewidth=3, foreground="white")]
 
 Z_SHADE = 1
 Z_ISOBAR = 2
-Z_BARBS = 3
+Z_ARROW = 3
 Z_INVERSION = 4
 Z_TERRAIN = 5
 Z_LABEL = 6
@@ -82,8 +84,10 @@ WIND_COLOR_TABLE = [
 SPEED_BINS_MPH = np.arange(0, 102.5, 2.5)
 
 VERT_RES_FT = 25        # regridding resolution for the shaded field
-BARB_SPACING_MI = 4.0
-BARB_SPACING_FT = 1000
+DOWNSLOPE_START_INSET_MI = 2.5  # arrow starts this far in from the mountain end
+DOWNSLOPE_STOP_BEFORE_MI = 1.0  # ...and stops this far short of the inversion rise
+DOWNSLOPE_SEARCH_FT = 3000      # jet-core search depth above ground/inversion
+DOWNSLOPE_RISE_FT = 300         # inversion-top rise that marks the arrow's end
 LABEL_STRIP_FT = 900     # below-sea-level ground strip holding town labels
 TOWN_MIN_SEP_MI = 6.0
 END_LABEL_WIDTH_MI = 6.0  # rough width of the Irrigon/Tollgate corner labels
@@ -190,6 +194,40 @@ def inversion_top_ft(d):
     return out
 
 
+def downslope_path(x_mi, z_ft, sfc_ft, inv_ft, speed_mph):
+    """(x, z) points along the downslope jet core, mountain end first, or
+    None if there's no inversion low point to end at. Runs from
+    DOWNSLOPE_START_INSET_MI in from the mountain end to
+    DOWNSLOPE_STOP_BEFORE_MI short of where the inversion top rises
+    DOWNSLOPE_RISE_FT above its lowest point, heading west."""
+    ok = np.where(np.isfinite(inv_ft))[0]
+    if not len(ok):
+        return None
+    j0 = ok[np.argmin(inv_ft[ok])]
+    cap = inv_ft[j0]
+    west = np.where((np.arange(len(inv_ft)) < j0) & (inv_ft > cap + DOWNSLOPE_RISE_FT))[0]
+    x_rise = x_mi[west[-1]] if len(west) else x_mi[0]
+    x_stop = x_rise + DOWNSLOPE_STOP_BEFORE_MI
+    x_start = x_mi[-1] - DOWNSLOPE_START_INSET_MI
+    cols = np.where((x_mi >= x_stop) & (x_mi <= x_start))[0][::-1]
+    if len(cols) < 3:
+        return None
+    core = []
+    for j in cols:
+        floor = sfc_ft[j]
+        if np.isfinite(inv_ft[j]):
+            floor = max(floor, inv_ft[j])
+        win = (z_ft >= floor + 200) & (z_ft <= floor + DOWNSLOPE_SEARCH_FT)
+        sp = np.where(win, np.nan_to_num(speed_mph[:, j], nan=-1), -1)
+        core.append(z_ft[int(np.argmax(sp))])
+    # The column-by-column core height is stair-stepped (25 ft regrid,
+    # 25 mb source levels), so draw a smooth quadratic fit through it
+    # rather than the raw trace -- this is a schematic arrow, not a contour.
+    xs = x_mi[cols]
+    fit = np.polyval(np.polyfit(xs, np.array(core, dtype=float), 2), xs)
+    return xs, fit
+
+
 def smooth_nan(y, n):
     """Centered running mean that leaves NaN gaps (no-inversion columns) as
     gaps instead of smearing them."""
@@ -262,27 +300,28 @@ def main():
     ok = np.where(np.isfinite(inv_ft))[0]
     if len(ok):
         # Bold, white-haloed label above the line, a fifth of the way in,
-        # over the Basin -- clear of the end labels and the barb columns.
+        # over the Basin -- clear of the end labels and the downslope arrow.
         j = ok[len(ok) // 5]
         ax.text(x_mi[j], inv_ft[j] + 200, "Inversion top", ha="center", va="bottom",
                 fontproperties=f_bold, fontsize=11, color=INVERSION_COLOR, zorder=Z_LABEL,
                 path_effects=[pe.withStroke(linewidth=3.5, foreground="white")])
 
-    # ---------- wind barbs (knots, meteorological convention) ----------
-    bx = np.arange(BARB_SPACING_MI / 2, x_mi[-1], BARB_SPACING_MI)
-    bz = np.arange(BARB_SPACING_FT / 2, top_ft - 200, BARB_SPACING_FT)
-    BX, BZ, BU, BV = [], [], [], []
-    for xb in bx:
-        j = int(np.abs(x_mi - xb).argmin())
-        for zb in bz:
-            if zb < sfc_ft[j] + 250:
-                continue
-            i = int(np.abs(z_ft - zb).argmin())
-            if np.isfinite(U[i, j]):
-                BX.append(x_mi[j]); BZ.append(z_ft[i])
-                BU.append(U[i, j] * MS_TO_KT); BV.append(V[i, j] * MS_TO_KT)
-    ax.barbs(BX, BZ, BU, BV, length=5.6, linewidth=0.9, color=BARB_COLOR, zorder=Z_BARBS,
-             path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
+    # ---------- downslope flow arrow ----------
+    # One arrow tracing the downslope jet off the Blue Mountains: it follows
+    # the jet core (fastest wind in the lowest DOWNSLOPE_SEARCH_FT above the
+    # ground/inversion) from near the mountain end of the section down the
+    # slope, and stops just short of where the inversion top climbs back up
+    # west of its low point -- i.e. where the cold pool deepens enough to
+    # keep the jet off the Basin floor.
+    path = downslope_path(x_mi, z_ft, sfc_ft, inv_ft, speed_mph)
+    if path is not None:
+        px, pz = path
+        arrow = FancyArrowPatch(path=MplPath(np.column_stack([px, pz])),
+                                arrowstyle="-|>,head_length=9,head_width=6",
+                                color=ARROW_COLOR, linewidth=3.6, zorder=Z_ARROW,
+                                capstyle="round", joinstyle="round",
+                                path_effects=[pe.withStroke(linewidth=7, foreground="white")])
+        ax.add_patch(arrow)
 
     # ---------- terrain ----------
     # The terrain fill runs below sea level into a solid "ground strip"
@@ -373,7 +412,7 @@ def main():
     subtitle = (f"NOAA RRFS Init {init_time:%Y-%m-%d} {init_time:%H}z"
                 f" • Valid {valid_str} ({valid_time:%H}z) • Surface to 700 mb")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
-    fig.text(left_x, top_y + 0.018, "Shading: wind speed (mph) • Barbs: wind direction & speed (kt) • Dashed: inversion top",
+    fig.text(left_x, top_y + 0.018, "Shading: wind speed (mph) • Arrow: downslope flow • Dashed: inversion top",
              fontproperties=f_reg, fontsize=10.5, color=INK_SECONDARY)
 
     # ---------- logo ----------

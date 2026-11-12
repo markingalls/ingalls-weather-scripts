@@ -8,8 +8,11 @@ the west slope of the Blue Mountains).
 - **Shading:** wind speed (mph), using the same color table as the Tempest
   station wind chart (`tempest-wind-chart/build_chart.py`'s
   `WIND_COLOR_TABLE`).
-- **Barbs:** wind direction and speed (kt), rotated from RRFS's
-  grid-relative winds to true north.
+- **Arrow:** the downslope jet off the Blue Mountains -- a smooth fit
+  through the fastest wind in the lowest 3,000 ft above the ground/inversion,
+  from near the mountain end down to just short of where the inversion top
+  rises again west of its low point (the cold pool that keeps the jet off
+  the Basin floor).
 - **Dashed line:** top of the low-level inversion -- the top of the warm
   layer above the ground (at least 1 °C warmer than 2 m, including any
   near-isothermal cap within 0.5 °C of the warmest point), lightly smoothed
