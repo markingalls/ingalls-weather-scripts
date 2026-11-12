@@ -464,7 +464,7 @@ def main():
     title_y = subtitle_y + 0.035
     fig.text(left_x, title_y, f"Low-Level Winds: {TITLE_REGION}",
              fontproperties=f_bold, fontsize=22, color=INK)
-    valid_str = valid_local.strftime("%a %-m/%-d %-I %p %Z")
+    valid_str = valid_local.strftime("%a %-m/%-d %H:%M %Z")
     subtitle = (f"NOAA RRFS Init {init_time:%Y-%m-%d} {init_time:%H}z"
                 f" • Valid {valid_str} ({valid_time:%H}z) • Surface to 700 mb")
     fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
