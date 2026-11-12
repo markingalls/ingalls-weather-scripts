@@ -93,7 +93,10 @@ OR_GENERIC = {"", "no data", "quaternary surficial deposits", "quaternary sedime
 WA_NOT_NAMES = {"unconsolidated materials", "ultramafic rocks", "undifferentiated till",
                 "nonmarine ice-contact deposits", "morainal deposits", "water"}
 
-NAME_SHARE = 0.2      # a name must cover >= 20% of the class to be listed
+NAME_SHARE = 0.2      # the main name must cover >= 20% of the class
+SECOND_SHARE = {"WA": 0.05, "OR": 0.2}  # a second name: WA lists any unit >= 5%
+                      # (Ringold is only ~7% of Benton's exposed sediments --
+                      # mostly buried under flood deposits -- but belongs there)
 NAMED_TOTAL = 0.4     # ... and the listed names >= 40% together, else fallback
 MAX_NAME_CHARS = 46
 AGE_MIN_SHARE = 0.05  # units under 5% of a class don't stretch its age range
@@ -108,16 +111,20 @@ def clean_wa_name(name):
     n = re.sub(r"\s+of\s+[A-Z][A-Za-z]+(\s+and others)?\s*\(\d{4}\)", "", n)
     n = re.sub(r"\s*\([^)]*\)", "", n)
     parts = [p.strip() for p in n.split(",") if p.strip()]
-    # "Simcoe Mountains, volcanic rocks of" -> "Simcoe Mountains volcanic rocks"
-    for i, p in enumerate(parts):
-        if p.endswith(" of") and i > 0:
-            kind = p[:-3].split(" and ")[0]
-            return f"{parts[i - 1]} {kind}".replace("Mount St Helens", "Mount St. Helens")
     rank = [(r"Supergroup\b", 5), (r"\bterrane\b", 4), (r"\bGroup\b", 3), (r"[Bb]atholith\b", 2.5),
             (r"\bFormation\b", 2), (r"\bComplex\b|\bcomplex\b", 1.5)]
 
     def score(p):
         return max([s for pat, s in rank if re.search(pat, p)] or [0])
+    # A formation/group named anywhere wins over its member or subunit:
+    # "Ellensburg Formation, Snipes Mountain conglomerate member of" ->
+    # "Ellensburg Formation"; "Roslyn Formation, lower member of" -> "Roslyn Formation"
+    named = [p for p in parts if score(p) >= 2 and not p.endswith(" of")]
+    # "Simcoe Mountains, volcanic rocks of" -> "Simcoe Mountains volcanic rocks"
+    for i, p in enumerate(parts if not named else []):
+        if p.endswith(" of") and i > 0:
+            kind = p[:-3].split(" and ")[0]
+            return f"{parts[i - 1]} {kind}".replace("Mount St Helens", "Mount St. Helens")
     best = max(parts, key=lambda p: (score(p), -parts.index(p)))
     best = re.sub(r"\bWinderemere\b", "Windermere", best)
     if re.search(r"Belt Supergroup|Ravalli Group|Missoula Group|Piegan Group|Prichard Formation"
@@ -236,11 +243,17 @@ def county_labels(features, state, county, classes):
             n = local_name(p, state, cls, county)
             if n:
                 names[n] = names.get(n, 0) + a
-        top = [(n, a / total) for n, a in sorted(names.items(), key=lambda x: -x[1])
-               if a / total >= NAME_SHARE][:2]
+        ranked = [(n, a / total) for n, a in sorted(names.items(), key=lambda x: -x[1])]
+        top = []
+        if ranked and ranked[0][1] >= NAME_SHARE:
+            top = [ranked[0]] + [r for r in ranked[1:2] if r[1] >= SECOND_SHARE[state]]
         title = None
         if top and sum(s for _, s in top) >= NAMED_TOTAL:
             title = " & ".join(n for n, _ in top)
+            # "Ellensburg Formation & Ringold Formation" -> "Ellensburg & Ringold Formations"
+            m = re.fullmatch(r"(.+) (Formation|Group) & (.+) \2", title)
+            if m:
+                title = f"{m.group(1)} & {m.group(3)} {m.group(2)}s"
             if len(title) > MAX_NAME_CHARS:
                 title = top[0][0]
         # age range from units covering >= AGE_MIN_SHARE of the class
