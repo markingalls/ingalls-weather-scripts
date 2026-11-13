@@ -59,6 +59,9 @@ ap.add_argument("--also-label", action="append", default=[], metavar="CITY",
                 help='label an incorporated city outside the county that falls on the map, '
                      'e.g. --also-label "Moses Lake" (repeatable)')
 ap.add_argument("--out", help="output PNG path (default <state>_<county>_geology.png)")
+ap.add_argument("--logo-corner", choices=["bottom-right", "top-right", "top-left", "bottom-left"],
+                default="bottom-right",
+                help="where the logo sits inside the map frame (move it off the county)")
 ap.add_argument("--no-detail", action="store_true",
                 help="draw detail classes (CRB formations, loess, flood deposits) "
                      "in their parent class's color")
@@ -372,7 +375,10 @@ nearby = [f for f in by_size if not f["properties"]["in_county"] and f not in fo
 fig.canvas.draw()
 renderer = fig.canvas.get_renderer()
 ax_box = ax.get_window_extent(renderer)
-logo_zone = (ax_box.x1 - 0.16 * ax_box.width, ax_box.y0, ax_box.x1, ax_box.y0 + 0.16 * ax_box.width)
+_zw = 0.16 * ax_box.width
+_lx0 = ax_box.x1 - _zw if args.logo_corner.endswith("right") else ax_box.x0
+_ly0 = ax_box.y1 - _zw if args.logo_corner.startswith("top") else ax_box.y0
+logo_zone = (_lx0, _ly0, _lx0 + _zw, _ly0 + _zw)
 taken = [logo_zone]
 dx_deg = 0.012 * (EXTENT[1] - EXTENT[0])
 dy_deg = 0.022 * (EXTENT[3] - EXTENT[2])
@@ -420,8 +426,11 @@ if os.path.exists(LOGO_PATH):
     inset_x, inset_y = 22 / (FIG_W * DPI), 22 / (FIG_H * DPI)
     logo_w = 0.10 * (map_pos.x1 - map_pos.x0)
     logo_h = logo_w * FIG_W * (img_h / img_w) / FIG_H
-    logo_ax = fig.add_axes([map_pos.x1 - inset_x - logo_w, map_pos.y0 + inset_y,
-                            logo_w, logo_h], zorder=20)
+    logo_x = (map_pos.x1 - inset_x - logo_w if args.logo_corner.endswith("right")
+              else map_pos.x0 + inset_x)
+    logo_y = (map_pos.y1 - inset_y - logo_h if args.logo_corner.startswith("top")
+              else map_pos.y0 + inset_y)
+    logo_ax = fig.add_axes([logo_x, logo_y, logo_w, logo_h], zorder=20)
     logo_ax.imshow(logo_img)
     logo_ax.axis("off")
 

@@ -34,6 +34,8 @@ FOLDER = {"WA": "Washington", "OR": "Oregon"}
 # Hand-picked extra labels for cities just outside a county (on top of the
 # automatic nearby-city labels in build_map.py).
 ALSO_LABEL = {("WA", "Adams"): ["Moses Lake"]}
+# Counties whose shape runs into the default bottom-right logo corner.
+LOGO_CORNER = {("OR", "Washington"): "top-right"}
 
 
 def out_path(state, county):
@@ -85,6 +87,8 @@ def main():
             if ok:
                 cmd = [sys.executable, "build_map.py", "--state", st, "--county", county,
                        "--out", out_path(st, county)]
+                if (st, county) in LOGO_CORNER:
+                    cmd += ["--logo-corner", LOGO_CORNER[(st, county)]]
                 for extra in ALSO_LABEL.get((st, county), []):
                     cmd += ["--also-label", extra]
                 ok, out = run(cmd, log)
