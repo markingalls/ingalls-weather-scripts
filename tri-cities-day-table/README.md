@@ -17,9 +17,13 @@ Hermiston example below.
   the point's IANA timezone) and Open-Meteo's 50-member ECMWF IFS ensemble
   hourly precipitation/snowfall (chance-of-precip row) and writes
   `forecast.json`. No API keys needed.
-- `build_table.py` — renders `forecast.json` into
-  `<label>_<day>_table.png` (e.g. `tri_cities_wednesday_table.png`,
-  `hermiston_wednesday_table.png`), named from the location label so
+- `build_table.py` — renders one or more `fetch_forecast.py` outputs
+  (`--forecast a.json b.json ...`; each location gets its own green
+  section title and pair of rows, stacked in the order given, with the
+  rows shrinking to fit and each precip cell's icon moving beside its
+  number) into
+  `<labels>_<day>_table.png` (e.g. `tri_cities_wednesday_table.png`,
+  `tri_cities_hermiston_wednesday_table.png`), named from the location label so
   renders for different points don't overwrite each other.
 - `fonts/easy_weather_icons_font.ttf` — raindrop/snowflake glyphs, copied
   from `tri-cities-7day-forecast/fonts/` (MIT license, see
@@ -39,6 +43,10 @@ python3 build_table.py --day friday
 python3 fetch_forecast.py --lat 45.8404 --lon -119.2895 --label "Hermiston" \
     --output forecast_hermiston.json
 python3 build_table.py --forecast forecast_hermiston.json   # -> hermiston_wednesday_table.png
+
+# Tri-Cities and Hermiston stacked on one graphic
+python3 build_table.py --forecast forecast.json forecast_hermiston.json
+#   -> tri_cities_hermiston_wednesday_table.png
 ```
 
 ## Notes
