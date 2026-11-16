@@ -38,17 +38,16 @@ python3 build_table.py --day friday
   each column's hour. MetaMesh (the 7-day graphic's high/low source) isn't
   used here since the table wants the hourly curve rather than a daily
   max/min, and NWS's hourly feed gives that without a WindBorne key. A
-  column outside NWS's ~6.5-day hourly horizon shows "—". Temperatures
-  below freezing (under 32°F, `FREEZING_F` in `build_table.py`) get a
-  snowflake above the number; the number itself stays centered so the
-  row's values line up.
+  column outside NWS's ~6.5-day hourly horizon shows "—".
 - **Chance of precip**: the fraction of the 50 ECMWF members whose total
   over the three hourly steps labeled hour-1, hour, hour+1 exceeds
   0.254mm (0.01", measurable) — the 7-day graphic's 0.5mm threshold is a
   whole-day one and would be too strict over 3 hours. With Open-Meteo's
   preceding-hour accumulations, the six columns tile the 04:00-22:00 local
   stretch. Rounded to the nearest 5% (same as the 7-day). A snowflake
-  replaces the raindrop when at least half the members show measurable
-  snowfall in that window (same rain/snow rule as the 7-day). Below 20%
+  replaces the raindrop when that column's NWS temperature is below
+  freezing (under 32°F, `FREEZING_F` in `build_table.py`); only if there's
+  no temperature for the column does it fall back to the 7-day's ensemble
+  rule (at least half the members show measurable snowfall). Below 20%
   (the 7-day's display threshold) the glyph is faded and the number gray
   rather than hidden, since a table should have every cell filled.
