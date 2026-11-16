@@ -105,3 +105,8 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+
+# tri-cities-day-table: forecast.json is live data fetch_forecast.py
+# regenerates every run, and the rendered PNG is an output.
+tri-cities-day-table/forecast.json
+tri-cities-day-table/tri_cities_*_table.png
