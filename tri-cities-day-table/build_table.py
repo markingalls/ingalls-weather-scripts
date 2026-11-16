@@ -7,6 +7,7 @@ palette, and logo/title treatment as tri-cities-7day-forecast/build_graphic.py.
 import argparse
 import json
 import os
+import re
 import statistics
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -119,7 +120,7 @@ def parse_args():
     ap.add_argument("--day", default="wednesday",
                      help="Weekday to show (the next one, today included)")
     ap.add_argument("--output", default=None,
-                     help="Defaults to tri_cities_<day>_table.png")
+                     help="Defaults to <label>_<day>_table.png, e.g. tri_cities_wednesday_table.png")
     return ap.parse_args()
 
 
@@ -129,7 +130,10 @@ def main():
     local_tz = ZoneInfo(data["timezone"])
     now_local = datetime.now(local_tz)
     date = next_weekday(now_local.date(), args.day)
-    output = args.output or f"tri_cities_{args.day.lower()}_table.png"
+    # named after the location label, so renders for different points
+    # (Tri-Cities, Hermiston, ...) don't overwrite each other
+    slug = re.sub(r"[^a-z0-9]+", "_", data.get("label", "Tri-Cities").split(",")[0].lower()).strip("_")
+    output = args.output or f"{slug}_{args.day.lower()}_table.png"
 
     cols = []
     for h in COLUMN_HOURS:
