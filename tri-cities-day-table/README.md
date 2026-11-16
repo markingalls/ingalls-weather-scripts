@@ -38,7 +38,10 @@ python3 build_table.py --day friday
   each column's hour. MetaMesh (the 7-day graphic's high/low source) isn't
   used here since the table wants the hourly curve rather than a daily
   max/min, and NWS's hourly feed gives that without a WindBorne key. A
-  column outside NWS's ~6.5-day hourly horizon shows "—".
+  column outside NWS's ~6.5-day hourly horizon shows "—". Temperatures
+  below freezing (under 32°F, `FREEZING_F` in `build_table.py`) get a
+  snowflake above the number; the number itself stays centered so the
+  row's values line up.
 - **Chance of precip**: the fraction of the 50 ECMWF members whose total
   over the three hourly steps labeled hour-1, hour, hour+1 exceeds
   0.254mm (0.01", measurable) — the 7-day graphic's 0.5mm threshold is a

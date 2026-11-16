@@ -59,6 +59,9 @@ COLUMN_HOURS = [6, 9, 12, 15, 18, 21]
 # is a whole-day threshold and would be too strict over just 3 hours.
 POP_THRESHOLD_MM = 0.254
 
+# Temperature cells below this get a snowflake flag.
+FREEZING_F = 32
+
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
@@ -190,6 +193,13 @@ def main():
             ax.text(cx, (TEMP_TOP + TEMP_BOTTOM) / 2, f"{col['temp']}°", ha="center",
                      va="center", fontproperties=f_bold, fontsize=40,
                      color=INK, zorder=3)
+            if col["temp"] < FREEZING_F:
+                # below-freezing flag above the number (which stays centered,
+                # so the temperature row's numbers line up across columns)
+                flake = ax.text(cx, (TEMP_TOP + TEMP_BOTTOM) / 2 + 0.095, SNOWFLAKE, ha="center",
+                                 va="center", fontproperties=ICON_FONT, fontsize=26,
+                                 color=COLOR_SNOW, zorder=3)
+                flake.set_path_effects([pe.withStroke(linewidth=1.2, foreground=COLOR_SNOW)])
         else:
             ax.text(cx, (TEMP_TOP + TEMP_BOTTOM) / 2, "—", ha="center", va="center",
                      fontproperties=f_bold, fontsize=34, color=INK_SECONDARY, zorder=3)
