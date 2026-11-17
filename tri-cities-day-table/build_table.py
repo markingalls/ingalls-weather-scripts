@@ -115,6 +115,14 @@ def precip_chance(ensemble, date, hour):
     return pop, statistics.median(snow) > 0
 
 
+def text_width(fig, ax, text, fontprops, fontsize):
+    """Rendered width of text in ax's data (0-1 figure-fraction) units."""
+    t = ax.text(0, 0, text, fontproperties=fontprops, fontsize=fontsize)
+    bbox = t.get_window_extent(renderer=fig.canvas.get_renderer())
+    t.remove()
+    return bbox.width / fig.bbox.width
+
+
 def parse_args():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--forecast", nargs="+", default=["forecast.json"],
@@ -248,17 +256,25 @@ def main():
             pop_pct = round(pop * 100 / 5) * 5
             color = COLOR_SNOW if is_snow else COLOR_RAIN
             faint = pop_pct < 20
+            glyph_char = SNOWFLAKE if is_snow else RAINDROP
+            pop_text = f"{pop_pct:.0f}%"
             if compact:
-                icon_xy, icon_ha = (cx - 0.014, pop_mid), "right"
-                num_xy, num_ha = (cx - 0.008, pop_mid), "left"
+                # icon beside the number: measure both and center the pair as
+                # a unit, so a wide "100%" doesn't spill past the cell edge
+                PAIR_GAP = 0.008
+                icon_w = text_width(fig, ax, glyph_char, ICON_FONT, pop_icon_fs)
+                num_w = text_width(fig, ax, pop_text, f_bold, pop_fs)
+                left_x = cx - (icon_w + PAIR_GAP + num_w) / 2
+                icon_xy, icon_ha = (left_x, pop_mid), "left"
+                num_xy, num_ha = (left_x + icon_w + PAIR_GAP, pop_mid), "left"
             else:
                 icon_xy, icon_ha = (cx, pop_mid + 0.045), "center"
                 num_xy, num_ha = (cx, pop_mid - 0.04), "center"
-            glyph = ax.text(*icon_xy, SNOWFLAKE if is_snow else RAINDROP, ha=icon_ha,
+            glyph = ax.text(*icon_xy, glyph_char, ha=icon_ha,
                              va="center", fontproperties=ICON_FONT, fontsize=pop_icon_fs, color=color,
                              alpha=0.35 if faint else 1.0, zorder=3)
             glyph.set_path_effects([pe.withStroke(linewidth=1.2, foreground=color)])
-            ax.text(*num_xy, f"{pop_pct:.0f}%", ha=num_ha, va="center",
+            ax.text(*num_xy, pop_text, ha=num_ha, va="center",
                      fontproperties=f_bold, fontsize=pop_fs,
                      color=INK_SECONDARY if faint else color, zorder=3)
 

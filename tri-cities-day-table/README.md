@@ -47,6 +47,14 @@ python3 build_table.py --forecast forecast_hermiston.json   # -> hermiston_wedne
 # Tri-Cities and Hermiston stacked on one graphic
 python3 build_table.py --forecast forecast.json forecast_hermiston.json
 #   -> tri_cities_hermiston_wednesday_table.png
+
+# Yakima and Ellensburg (same points as the Columbia Basin maps' labels)
+python3 fetch_forecast.py --lat 46.6021 --lon -120.5059 --label "Yakima" \
+    --output forecast_yakima.json
+python3 fetch_forecast.py --lat 46.9965 --lon -120.5478 --label "Ellensburg" \
+    --output forecast_ellensburg.json
+python3 build_table.py --forecast forecast_yakima.json forecast_ellensburg.json
+#   -> yakima_ellensburg_wednesday_table.png
 ```
 
 ## Notes
