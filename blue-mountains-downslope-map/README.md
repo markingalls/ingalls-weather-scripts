@@ -1,6 +1,6 @@
 # Blue Mountains Downslope Wind Map
 
-One-off map of the latest NOAA **RTMA** (Real-Time Mesoscale Analysis,
+One-off map of the newest NOAA **RTMA** (Real-Time Mesoscale Analysis,
 2.5 km) 2m temperature over the Tri-Cities, Walla Walla Valley, Umatilla
 Basin and northern Blue Mountains, with **10m wind streamlines** and
 1,000 ft terrain contours on top. Built to show downslope flow off the
@@ -18,8 +18,9 @@ visible slice) and logo placement all match that project.
 
 ```bash
 bash setup.sh                                   # first time / fresh environment only
-python build_map.py                             # latest RTMA hour on AWS
-python build_map.py --time "2026-11-18 15:00"   # a specific analysis hour (UTC)
+python build_map.py                             # newest RTMA / RTMA-RU analysis on AWS
+python build_map.py --time "2026-11-18 15:45"   # a specific analysis time (UTC, 24h)
+python build_map.py --product rtma              # hourly RTMA only
 python build_map.py --title "Downslope Winds Off the Blues"
 ```
 
@@ -29,6 +30,16 @@ temperature, wind and elevation (nearest native RTMA grid point) to the
 console, which is handy for writing the caption. Output lands in `output/`.
 
 ## Notes
+
+- **Newest analysis.** RTMA comes as an hourly analysis (`rtma`) and a
+  15-minute Rapid Update (`rtma_ru`), both on the same 2.5 km grid with
+  the same fields. By default the script walks back in 15-minute steps
+  from now and uses whichever product posted most recently; RTMA-RU
+  usually wins because it posts sooner. RTMA-RU is noisier from one
+  quarter-hour to the next than the hourly analysis (a few °F at single
+  points), so use `--product rtma` for a steadier picture.
+- **Times are 24-hour** throughout: the subtitle shows local time plus
+  UTC, e.g. `Wednesday 07:45 PST (1545z)`.
 
 - **Wind direction.** RTMA's UGRD/VGRD are grid-relative to its Lambert
   conformal grid (rotated about 10° from true north out here), so u/v are

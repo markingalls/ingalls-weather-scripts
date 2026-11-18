@@ -16,8 +16,9 @@ temperature map.
 
 USAGE
 -----
-    python build_map.py                              # latest available RTMA hour
-    python build_map.py --time "2026-11-18 15:00"    # a specific analysis hour (UTC)
+    python build_map.py                              # newest RTMA / RTMA-RU analysis
+    python build_map.py --time "2026-11-18 15:45"    # a specific analysis time (UTC, 24h)
+    python build_map.py --product rtma               # hourly RTMA only
     python build_map.py --title "Downslope Winds Off the Blues"
 
 No API key needed -- Herbie pulls RTMA's GRIB2 from NOAA's AWS Open Data
@@ -224,26 +225,45 @@ def c_to_f(c):
 RTMA_SEARCH = ":(TMP:2 m above ground|WIND:10 m above ground|WDIR:10 m above ground|HGT:surface):"
 
 
-def select_rtma_hour(requested=None):
-    """Most recent hourly RTMA analysis posted to AWS (or the requested one)."""
+# RTMA comes in two flavors on the same 2.5 km NDFD grid with the same
+# fields: the hourly analysis ("rtma") and the 15-minute Rapid Update
+# ("rtma_ru"), which posts sooner. By default the newest analysis from
+# either is used.
+RTMA_PRODUCTS = {"rtma": "NOAA RTMA 2.5 km", "rtma_ru": "NOAA RTMA-RU 2.5 km"}
+
+
+def rtma_available(model, valid):
+    return Herbie(valid, model=model, product="anl", verbose=False).grib is not None
+
+
+def select_rtma(requested=None, model=None):
+    """(model, valid) for the newest RTMA / RTMA-RU analysis posted to AWS,
+    or for the requested time. `model` restricts the search to one product."""
+    models = [model] if model else ["rtma_ru", "rtma"]
     if requested:
-        H = Herbie(requested, model="rtma", product="anl", verbose=False)
-        if H.grib is None:
-            sys.exit(f"RTMA analysis for {requested:%Y-%m-%d %H}z not found on AWS.")
-        return requested
-    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0, tzinfo=None)
-    for lookback in range(6):
-        candidate = now - timedelta(hours=lookback)
-        if Herbie(candidate, model="rtma", product="anl", verbose=False).grib is not None:
-            return candidate
+        for m in models:
+            if (m == "rtma" and requested.minute) or not rtma_available(m, requested):
+                continue
+            return m, requested
+        sys.exit(f"No RTMA analysis for {requested:%Y-%m-%d %H%M}z found on AWS.")
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0, tzinfo=None)
+    newest_quarter = now.replace(minute=now.minute // 15 * 15)
+    # Walk back in 15-minute steps; the first time either product has wins.
+    for step in range(16):
+        candidate = newest_quarter - timedelta(minutes=15 * step)
+        for m in models:
+            if m == "rtma" and candidate.minute:
+                continue
+            if rtma_available(m, candidate):
+                return m, candidate
     sys.exit("Could not find a recent RTMA analysis on AWS.")
 
 
-def fetch_rtma(valid):
+def fetch_rtma(model, valid):
     """Returns cropped (lat, lon, temp_k, u_ms, v_ms, hgt_m) on RTMA's native
     2.5 km grid. u/v are earth-relative, derived from WIND + WDIR."""
-    print(f"Fetching RTMA {valid:%Y-%m-%d %H}z ...")
-    ds = Herbie(valid, model="rtma", product="anl", verbose=False).xarray(RTMA_SEARCH)
+    print(f"Fetching {RTMA_PRODUCTS[model]} {valid:%Y-%m-%d %H%M}z ...")
+    ds = Herbie(valid, model=model, product="anl", verbose=False).xarray(RTMA_SEARCH)
     if isinstance(ds, list):
         import xarray as xr
         ds = xr.merge(ds, compat="override")
@@ -307,12 +327,12 @@ def load_roads():
     return motorway_geoms, trunk_geoms
 
 
-def build_map(valid, title, output_path):
+def build_map(model, valid, title, output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_SEMIBOLD_PATH)
     poppins_bold = fm.FontProperties(fname=POPPINS_BOLD_PATH)
 
-    lat, lon, temp_k_native, u_native, v_native, hgt_native = fetch_rtma(valid)
+    lat, lon, temp_k_native, u_native, v_native, hgt_native = fetch_rtma(model, valid)
 
     print("Resampling onto regular grids...")
     _, _, temp_k = resample(lat, lon, temp_k_native, RESAMPLE_NX, RESAMPLE_NY)
@@ -442,13 +462,11 @@ def build_map(valid, title, output_path):
 
     # Title / subtitle
     valid_local = valid.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
-    h12 = valid_local.hour % 12 or 12
-    ampm = "am" if valid_local.hour < 12 else "pm"
-    when = f"{valid_local:%A} {h12}{ampm} {valid_local.tzname()}"
+    when = f"{valid_local:%A %H:%M} {valid_local.tzname()} ({valid:%H%M}z)"  # 24-hour time
     fig.text(0.03, 0.975, title, fontsize=22, fontproperties=poppins_reg, color="#2b2a26", ha="left", va="top")
-    fig.text(0.03, 0.935, f"NOAA RTMA 2.5 km • Temperature & 10 m wind streamlines • {when}",
+    fig.text(0.03, 0.935, f"{RTMA_PRODUCTS[model]} • Temperature & 10 m wind streamlines • {when}",
              fontsize=12, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
-    fig.text(0.5, 0.012, "NOAA RTMA 2.5 km analysis — terrain contours every 1,000 ft — Ingalls Weather",
+    fig.text(0.5, 0.012, f"{RTMA_PRODUCTS[model]} analysis — terrain contours every 1,000 ft — Ingalls Weather",
              fontsize=9, fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -480,13 +498,16 @@ def build_map(valid, title, output_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RTMA temperature + wind streamline map, Blue Mountains downslope.")
     parser.add_argument("--time", type=str, default=None,
-                        help='RTMA analysis hour, UTC, "YYYY-MM-DD HH:00" (default: latest available).')
+                        help='Analysis time, UTC, 24-hour "YYYY-MM-DD HH:MM" (default: newest available). '
+                             'Quarter-hour times use RTMA-RU; top-of-hour times prefer RTMA-RU, then hourly RTMA.')
+    parser.add_argument("--product", choices=list(RTMA_PRODUCTS), default=None,
+                        help="Restrict to hourly RTMA or 15-minute RTMA-RU (default: whichever is newest).")
     parser.add_argument("--title", type=str, default="Downslope Winds Warm Pendleton & Hermiston",
                         help="Map title.")
     parser.add_argument("--out", type=Path, default=None, help="Output PNG path.")
     args = parser.parse_args()
 
     requested = datetime.strptime(args.time, "%Y-%m-%d %H:%M") if args.time else None
-    valid = select_rtma_hour(requested)
-    out = args.out or OUTPUT_DIR / f"blue_mountains_downslope_rtma_{valid:%Y%m%d_%H}z.png"
-    build_map(valid, args.title, out)
+    model, valid = select_rtma(requested, args.product)
+    out = args.out or OUTPUT_DIR / f"blue_mountains_downslope_{model}_{valid:%Y%m%d_%H%M}z.png"
+    build_map(model, valid, args.title, out)
