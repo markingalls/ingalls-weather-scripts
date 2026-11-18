@@ -239,7 +239,9 @@ def rtma_available(model, valid):
 def select_rtma(requested=None, model=None):
     """(model, valid) for the newest RTMA / RTMA-RU analysis posted to AWS,
     or for the requested time. `model` restricts the search to one product."""
-    models = [model] if model else ["rtma_ru", "rtma"]
+    # Hourly RTMA first: when both exist for the same time, it's the steadier
+    # analysis. RTMA-RU fills the quarter-hours and the newest slot.
+    models = [model] if model else ["rtma", "rtma_ru"]
     if requested:
         for m in models:
             if (m == "rtma" and requested.minute) or not rtma_available(m, requested):
@@ -499,7 +501,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="RTMA temperature + wind streamline map, Blue Mountains downslope.")
     parser.add_argument("--time", type=str, default=None,
                         help='Analysis time, UTC, 24-hour "YYYY-MM-DD HH:MM" (default: newest available). '
-                             'Quarter-hour times use RTMA-RU; top-of-hour times prefer RTMA-RU, then hourly RTMA.')
+                             'Quarter-hour times use RTMA-RU; top-of-hour times prefer hourly RTMA, then RTMA-RU.')
     parser.add_argument("--product", choices=list(RTMA_PRODUCTS), default=None,
                         help="Restrict to hourly RTMA or 15-minute RTMA-RU (default: whichever is newest).")
     parser.add_argument("--title", type=str, default="Downslope Winds Warm Pendleton & Hermiston",

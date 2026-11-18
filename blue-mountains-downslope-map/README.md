@@ -35,7 +35,8 @@ console, which is handy for writing the caption. Output lands in `output/`.
   15-minute Rapid Update (`rtma_ru`), both on the same 2.5 km grid with
   the same fields. By default the script walks back in 15-minute steps
   from now and uses whichever product posted most recently; RTMA-RU
-  usually wins because it posts sooner. RTMA-RU is noisier from one
+  usually wins because it posts sooner. When both exist for the same
+  time (top of the hour), the hourly RTMA is used. RTMA-RU is noisier from one
   quarter-hour to the next than the hourly analysis (a few °F at single
   points), so use `--product rtma` for a steadier picture.
 - **Times are 24-hour** throughout: the subtitle shows local time plus
