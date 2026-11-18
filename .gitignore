@@ -105,3 +105,8 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+
+# blue-mountains-downslope-map/
+# build_map.py fetches RTMA live every run; the rendered PNGs are outputs --
+# not source, so don't track them.
+blue-mountains-downslope-map/output/*.png

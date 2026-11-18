@@ -1,0 +1,10 @@
+matplotlib
+cartopy
+shapely
+Pillow
+numpy
+requests
+scipy
+herbie-data
+cfgrib
+eccodes
