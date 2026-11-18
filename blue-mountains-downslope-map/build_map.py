@@ -109,6 +109,9 @@ RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAM
 STREAM_NX, STREAM_NY = 140, 100
 STREAM_SMOOTH_SIGMA = 1.2  # in STREAM grid cells
 STREAM_DENSITY = (1.35, 1.05)
+# Streamlines are only drawn where the (smoothed) wind is at least this
+# fast -- calm/light-and-variable areas (e.g. the cold pool) stay clean.
+STREAM_MIN_MPH = 3.0
 
 # Terrain contours (ft) to show where the Blue Mountains rise.
 TERRAIN_CONTOURS_FT = [2000, 3000, 4000, 5000, 6000]
@@ -360,7 +363,12 @@ def build_map(valid, title, output_path):
     # compass direction once projected. Line width scales with speed.
     s_lon2d, s_lat2d = np.meshgrid(s_lon, s_lat)
     lw = 0.45 + 1.6 * np.clip(speed_mph / 18, 0, 1)
-    strm = ax.streamplot(s_lon2d, s_lat2d, u / np.cos(np.radians(s_lat2d)), v, transform=pc,
+    # NaN out light-wind cells: matplotlib's streamplot treats non-finite
+    # vectors as masked, so a streamline stops where it enters one.
+    calm = speed_mph < STREAM_MIN_MPH
+    u_plot = np.where(calm, np.nan, u / np.cos(np.radians(s_lat2d)))
+    v_plot = np.where(calm, np.nan, v)
+    strm = ax.streamplot(s_lon2d, s_lat2d, u_plot, v_plot, transform=pc,
                          density=STREAM_DENSITY, color=(1, 1, 1, 0.9), linewidth=lw,
                          arrowsize=1.0, arrowstyle="-|>", minlength=0.15, maxlength=3.0, zorder=3)
     halo = [pe.withStroke(linewidth=2.2, foreground=(0, 0, 0, 0.35))]

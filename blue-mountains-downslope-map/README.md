@@ -36,7 +36,9 @@ console, which is handy for writing the caption. Output lands in `output/`.
 - **Streamlines** are computed on a coarser (140×100) regular grid after a
   light Gaussian smooth, since RTMA's wind field is noisy at full
   resolution. Line width scales with speed (thicker = stronger, saturating
-  near 18 mph). For PlateCarree input, cartopy reads vectors as
+  near 18 mph). Streamlines are only drawn where the smoothed wind is at
+  least 3 mph (`STREAM_MIN_MPH`), so calm cold-pool areas stay clean and
+  each line stops where it runs into one. For PlateCarree input, cartopy reads vectors as
   d(lon)/d(lat) rates, so the eastward component is divided by cos(lat) to
   keep the true compass direction once projected.
 - **City temperatures** come from the nearest native RTMA grid point, not
