@@ -11,7 +11,7 @@ Temperature uses the preferred Ingalls Weather color table, the same
 fixed Kelvin-to-RGB `TEMP_COLOR_TABLE` as
 [`../columbia-basin-temps/`](../columbia-basin-temps/), so a given shade
 means the same temperature here as on every other temp map. Canvas, fonts,
-borders, highways, city labels, colorbar (°F bottom / °C top, only the
+borders, highways, colorbar (°F bottom / °C top, only the
 visible slice) and logo placement all match that project.
 
 ## Usage
@@ -41,7 +41,13 @@ console, which is handy for writing the caption. Output lands in `output/`.
   each line stops where it runs into one. For PlateCarree input, cartopy reads vectors as
   d(lon)/d(lat) rates, so the eastward component is divided by cos(lat) to
   keep the true compass direction once projected.
-- **City temperatures** come from the nearest native RTMA grid point, not
+- **Labels** follow the Central Sierra snowfall map's convention: no
+  dots; each name is centered on its point in Poppins SemiBold on a 50%
+  black rounded box, with the temperature centered above it in larger
+  Poppins Bold (no box). The list (`LABELS`) is kept short so nothing
+  collides. The Tri-Cities get one label at the centroid of Kennewick,
+  Pasco and Richland, showing the average of the three.
+- **Label temperatures** come from the nearest native RTMA grid point, not
   the resampled raster. RTMA is an analysis (observations blended into a
   short-range model background), so it can differ from a single station
   ob by a degree or two.

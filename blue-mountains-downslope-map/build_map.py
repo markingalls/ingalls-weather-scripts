@@ -78,7 +78,8 @@ MOTORWAY_COLOR = "#8FB8E0"  # pastel blue
 TRUNK_COLOR = "#F2B880"     # pastel orange
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
-POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+POPPINS_SEMIBOLD_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-SemiBold.ttf"
+POPPINS_BOLD_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf"
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -116,22 +117,32 @@ STREAM_MIN_MPH = 5.0
 # Terrain contours (ft) to show where the Blue Mountains rise.
 TERRAIN_CONTOURS_FT = [2000, 3000, 4000, 5000, 6000]
 
-CITIES = [
-    ("Richland", -119.2845, 46.2856, "left"),
-    ("Pasco", -119.1006, 46.2396, "right"),
-    ("Kennewick", -119.1372, 46.2112, "left"),
-    ("Walla Walla", -118.3430, 46.0646, "right"),
-    ("Dayton", -117.9762, 46.3212, "right"),
-    ("Milton-Freewater", -118.3880, 45.9326, "right"),
-    ("Umatilla", -119.3411, 45.9174, "left"),
-    ("Hermiston", -119.2895, 45.8404, "right"),
-    ("Boardman", -119.7006, 45.8393, "left"),
-    ("Pendleton", -118.7879, 45.6721, "right"),
-    ("Heppner", -119.5528, 45.3554, "right"),
-    ("Meacham", -118.4220, 45.5110, "right"),
-    ("La Grande", -118.0877, 45.3246, "right"),
-    ("Prosser", -119.7686, 46.2532, "left"),
+# Labeled points -- same convention as the Central Sierra snowfall map: no
+# dots, the name is centered on the geographic point on a 50% black box,
+# and the value (bigger, bold) is centered just above it. Kept to a short
+# list of well-separated places so the larger labels don't collide.
+#
+# (name, label lon, label lat, sample points). The value shown is the mean
+# of the nearest native RTMA grid point to each sample point; None means
+# sample at the label point itself. "Tri-Cities" is one label at the
+# centroid of Kennewick, Pasco and Richland, averaging all three.
+LABELS = [
+    ("Tri-Cities", -119.1741, 46.2455, [(-119.1372, 46.2112),    # Kennewick
+                                        (-119.1006, 46.2396),    # Pasco
+                                        (-119.2845, 46.2856)]),  # Richland
+    ("Prosser", -119.7686, 46.2532, None),
+    ("Walla Walla", -118.3430, 46.0646, None),
+    ("Dayton", -117.9762, 46.3212, None),
+    ("Boardman", -119.7006, 45.8393, None),
+    ("Hermiston", -119.2895, 45.8404, None),
+    ("Pendleton", -118.7879, 45.6721, None),
+    ("Meacham", -118.4220, 45.5110, None),
+    ("Heppner", -119.5528, 45.3554, None),
+    ("La Grande", -118.0877, 45.3246, None),
 ]
+NAME_FONTSIZE = 12.5
+VALUE_FONTSIZE = 20
+VALUE_GAP_PT = 7.0  # name's half-height + a small gap, in points
 
 # ---------------------------------------------------------------------------
 # Preferred Ingalls Weather temperature color table -- identical to
@@ -298,7 +309,8 @@ def load_roads():
 
 def build_map(valid, title, output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
-    poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
+    poppins_semibold = fm.FontProperties(fname=POPPINS_SEMIBOLD_PATH)
+    poppins_bold = fm.FontProperties(fname=POPPINS_BOLD_PATH)
 
     lat, lon, temp_k_native, u_native, v_native, hgt_native = fetch_rtma(valid)
 
@@ -315,17 +327,18 @@ def build_map(valid, title, output_path):
     visible_f = k_to_f(temp_k_native[in_view])
     print(f"Visible range: {visible_f.min():.0f}F - {visible_f.max():.0f}F")
 
-    print("City readout (nearest RTMA grid point):")
-    city_vals = {}
-    for name, lon_c, lat_c, _ in CITIES:
-        tf = k_to_f(sample_native(lat, lon, temp_k_native, lon_c, lat_c))
-        uu = sample_native(lat, lon, u_native, lon_c, lat_c)
-        vv = sample_native(lat, lon, v_native, lon_c, lat_c)
+    print("Label readout (nearest RTMA grid point, averaged where a label covers several):")
+    label_vals = {}
+    for name, lon_c, lat_c, samples in LABELS:
+        samples = samples or [(lon_c, lat_c)]
+        avg = lambda field: np.mean([sample_native(lat, lon, field, sx, sy) for sx, sy in samples])
+        tf = k_to_f(avg(temp_k_native))
+        uu, vv = avg(u_native), avg(v_native)
         spd = np.hypot(uu, vv) * 2.23694
         frm = (np.degrees(np.arctan2(-uu, -vv)) + 360) % 360
-        elev = sample_native(lat, lon, hgt_native, lon_c, lat_c) * 3.28084
-        city_vals[name] = tf
-        print(f"  {name:17s} {tf:5.1f}F  {compass(frm):>3s} {spd:4.1f} mph  ({elev:,.0f} ft)")
+        elev = avg(hgt_native) * 3.28084
+        label_vals[name] = tf
+        print(f"  {name:12s} {tf:5.1f}F  {compass(frm):>3s} {spd:4.1f} mph  ({elev:,.0f} ft)")
 
     print("Loading basemap layers...")
     admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
@@ -374,22 +387,24 @@ def build_map(valid, title, output_path):
     halo = [pe.withStroke(linewidth=2.2, foreground=(0, 0, 0, 0.35))]
     strm.lines.set_path_effects(halo)
 
-    # City labels
+    # Labels -- name centered on the point on a 50% black box, temperature
+    # (bold, larger, no box) centered just above it. Same styling as the
+    # Central Sierra snowfall map.
     geodetic_transform = pc._as_mpl_transform(ax)
-    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
-    for name, lon_c, lat_c, pos in CITIES:
-        ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
-                mec="black", mew=0.8, transform=pc)
-        dx_pt = 6 if pos == "right" else -6
-        ha = "left" if pos == "right" else "right"
-        t1 = ax.text(lon_c, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold, color="white",
-                     ha=ha, va="center", zorder=101,
-                     transform=offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points"))
-        t1.set_path_effects(stroke)
-        t2 = ax.text(lon_c, lat_c, f"{city_vals[name]:.0f}°F", fontsize=9.75, fontproperties=poppins_semibold,
-                     color="white", ha=ha, va="top", zorder=101,
-                     transform=offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-4, units="points"))
-        t2.set_path_effects(stroke)
+    name_stroke = [pe.withStroke(linewidth=0.9, foreground=(0, 0, 0, 0.85))]
+    value_stroke = [pe.withStroke(linewidth=2.2, foreground=(0, 0, 0, 0.9))]
+    for name, lon_c, lat_c, _ in LABELS:
+        t = ax.text(lon_c, lat_c, f" {name} ", fontsize=NAME_FONTSIZE, fontproperties=poppins_semibold,
+                    color="white", ha="center", va="center", zorder=101, transform=geodetic_transform,
+                    # Box pad is uniform, so keep it tiny (short box) and get the side
+                    # padding from the space on each end of the name instead.
+                    bbox=dict(boxstyle="round,pad=0.04,rounding_size=0.25", facecolor="black",
+                              alpha=0.50, edgecolor="none"))
+        t.set_path_effects(name_stroke)
+        val_tr = offset_copy(geodetic_transform, fig=fig, x=0, y=VALUE_GAP_PT, units="points")
+        v = ax.text(lon_c, lat_c, f"{label_vals[name]:.0f}°", fontsize=VALUE_FONTSIZE, fontproperties=poppins_bold,
+                    color="white", ha="center", va="bottom", zorder=102, transform=val_tr)
+        v.set_path_effects(value_stroke)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
