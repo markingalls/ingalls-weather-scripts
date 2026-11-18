@@ -111,7 +111,7 @@ STREAM_SMOOTH_SIGMA = 1.2  # in STREAM grid cells
 STREAM_DENSITY = (1.35, 1.05)
 # Streamlines are only drawn where the (smoothed) wind is at least this
 # fast -- calm/light-and-variable areas (e.g. the cold pool) stay clean.
-STREAM_MIN_MPH = 3.0
+STREAM_MIN_MPH = 5.0
 
 # Terrain contours (ft) to show where the Blue Mountains rise.
 TERRAIN_CONTOURS_FT = [2000, 3000, 4000, 5000, 6000]
