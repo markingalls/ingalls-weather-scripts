@@ -2,15 +2,15 @@
 
 Generates a single-day forecast table for the Tri-Cities (Pasco, Kennewick,
 Richland, WA) for Ingalls Weather's Instagram: one column per time of day
-(6 AM, 9 AM, Noon, 3 PM, 6 PM, 9 PM), with a **temperature** row and a
+(06:00, 09:00, 12:00, 15:00, 18:00, 21:00 -- 24-hour clock, like the "Updated" stamp), with a **temperature** row and a
 **chance of precip** row. Same canvas footprint, fonts, palette, and
 logo/title treatment as `tri-cities-7day-forecast/`.
 
 Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA) and the **next
 Wednesday** (today included); pass `--day` for any other weekday. Works
 anywhere NWS covers via `fetch_forecast.py --lat/--lon/--label` — see the
-Hermiston example below. `--overnight` swaps the 6 AM-9 PM daytime
-columns for 6 PM on `--day` through 9 AM the next morning (each column
+Hermiston example below. `--overnight` swaps the 06:00-21:00 daytime
+columns for 18:00 on `--day` through 09:00 the next morning (each column
 header then also names its day, since the window spans two dates).
 
 ## Files
@@ -50,7 +50,7 @@ python3 build_table.py --forecast forecast_hermiston.json   # -> hermiston_wedne
 python3 build_table.py --forecast forecast.json forecast_hermiston.json
 #   -> tri_cities_hermiston_wednesday_table.png
 
-# Overnight: Friday night/Saturday morning (6 PM Fri - 9 AM Sat)
+# Overnight: Friday night/Saturday morning (18:00 Fri - 09:00 Sat)
 python3 build_table.py --forecast forecast.json forecast_hermiston.json --day friday --overnight
 #   -> tri_cities_hermiston_friday_night_table.png
 

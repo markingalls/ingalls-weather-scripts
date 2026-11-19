@@ -80,11 +80,8 @@ def short_tz_abbr(tzname):
 
 
 def hour_label(h):
-    if h == 0:
-        return "Midnight"
-    if h == 12:
-        return "Noon"
-    return f"{h % 12} {'AM' if h < 12 else 'PM'}"
+    """24-hour clock, same as the "Updated HH:MM" stamp (e.g. 06:00, 18:00)."""
+    return f"{h:02d}:00"
 
 
 def next_weekday(today, weekday_name):
