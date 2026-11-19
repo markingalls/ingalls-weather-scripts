@@ -7,6 +7,8 @@ Tri-Cities table and writes them to forecast.json:
   lookup. No API key needed. (The 7-day graphic's MetaMesh highs/lows are a
   daily max/min reduction; this table wants the hourly curve itself, and
   NWS's hourly feed gives that directly without a WindBorne key.)
+- NWS's gridded snow level (`forecastGridData` snowLevel, plus the grid
+  cell's surface elevation) for the rain/snow-mix icon. No API key needed.
 - Open-Meteo's 50-member ECMWF IFS ensemble (hourly precipitation +
   snowfall) for the chance-of-precip row -- same source and reasoning as
   tri-cities-7day-forecast/fetch_ecmwf_ensemble_forecast.py (raw members, so
@@ -35,7 +37,22 @@ def fetch_nws_hourly(lat, lon):
     periods = r.json()["properties"]["periods"]
     hourly = [{"start": p["startTime"], "temperature_f": p["temperature"]} for p in periods
               if p.get("temperatureUnit") == "F"]
-    return point["timeZone"], hourly
+    return point, hourly
+
+
+def fetch_snow_level(point):
+    """NWS gridded snowLevel series (start/duration intervals, meters MSL)
+    and the grid cell's own surface elevation (m), both from the point's
+    forecastGridData -- the raw grid, since the hourly/periods forecasts
+    don't carry snow level at all."""
+    r = requests.get(point["forecastGridData"], headers=HEADERS, timeout=30)
+    r.raise_for_status()
+    grid = r.json()["properties"]
+    return {
+        "surface_elevation_m": grid["elevation"]["value"],
+        "values": [{"valid_time": v["validTime"], "snow_level_m": v["value"]}
+                   for v in grid.get("snowLevel", {}).get("values", [])],
+    }
 
 
 def fetch_ensemble(lat, lon, forecast_days):
@@ -62,11 +79,14 @@ if __name__ == "__main__":
     ap.add_argument("--output", default="forecast.json")
     args = ap.parse_args()
 
-    tz, hourly = fetch_nws_hourly(args.lat, args.lon)
+    point, hourly = fetch_nws_hourly(args.lat, args.lon)
+    tz = point["timeZone"]
+    snow_level = fetch_snow_level(point)
     ensemble = fetch_ensemble(args.lat, args.lon, args.forecast_days)
 
     with open(args.output, "w") as f:
         json.dump({"label": args.label, "timezone": tz, "nws_hourly": hourly,
+                   "nws_snow_level": snow_level,
                    "ecmwf_ensemble": ensemble}, f)
 
     n_members = sum(1 for k in ensemble["hourly"] if k.startswith("precipitation_member"))

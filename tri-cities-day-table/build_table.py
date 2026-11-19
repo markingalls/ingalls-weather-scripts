@@ -65,7 +65,9 @@ OVERNIGHT_HOUR_OFFSETS = [18, 21, 24, 27, 30, 33]
 POP_THRESHOLD_MM = 0.254
 
 # Chance-of-precip cells get a snowflake instead of a raindrop when that
-# column's temperature is below this.
+# column's temperature is below this, and a raindrop+snowflake "mix" icon
+# when it's at/above freezing but NWS's snow level is at or below the
+# surface (snow reaching the ground through an above-freezing surface layer).
 FREEZING_F = 32
 
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
@@ -119,6 +121,29 @@ def precip_chance(ensemble, when_local):
     return pop, statistics.median(snow) > 0
 
 
+def parse_valid_time(valid_time):
+    """NWS gridpoint '2026-11-21T09:00:00+00:00/PT3H' -> (start, end)
+    datetimes. Only the H/D duration parts NWS actually uses are handled."""
+    start_s, dur_s = valid_time.split("/")
+    start = datetime.fromisoformat(start_s)
+    m = re.fullmatch(r"P(?:(\d+)D)?(?:T(?:(\d+)H)?)?", dur_s)
+    days, hours = (int(g) if g else 0 for g in m.groups())
+    return start, start + timedelta(days=days, hours=hours)
+
+
+def snow_level_at(snow_level, when_local):
+    """Lowest NWS snow level (m) among intervals overlapping the column's
+    3-hour precip window (when-2h..when+1h, the span its three
+    preceding-hour precip steps cover), or None without data."""
+    win_start, win_end = when_local - timedelta(hours=2), when_local + timedelta(hours=1)
+    levels = []
+    for v in snow_level.get("values", []):
+        start, end = parse_valid_time(v["valid_time"])
+        if start < win_end and end > win_start and v["snow_level_m"] is not None:
+            levels.append(v["snow_level_m"])
+    return min(levels) if levels else None
+
+
 def text_width(fig, ax, text, fontprops, fontsize):
     """Rendered width of text in ax's data (0-1 figure-fraction) units."""
     t = ax.text(0, 0, text, fontproperties=fontprops, fontsize=fontsize)
@@ -159,8 +184,14 @@ def location_columns(data, times):
     cols = []
     for when in times:
         when = when.replace(tzinfo=local_tz)
+        snow = data.get("nws_snow_level", {})
+        level = snow_level_at(snow, when) if snow else None
+        surface = snow.get("surface_elevation_m")
         cols.append({
             "label": hour_label(when.hour),
+            # snow reaching the surface: the snow level is at/below the
+            # ground (i.e. the surface sits above the snow level)
+            "snow_to_surface": level is not None and surface is not None and level <= surface,
             "temp": nws_temp_at(data["nws_hourly"], when),
             "precip": precip_chance(data["ecmwf_ensemble"], when),
         })
@@ -273,30 +304,55 @@ def main():
                          fontproperties=f_bold, fontsize=pop_fs, color=INK_SECONDARY, zorder=3)
                 continue
             pop, ens_snow = col["precip"]
-            # below freezing -> snowflake; the ensemble's own rain/snow call is
-            # only the fallback when there's no NWS temperature for the column
-            is_snow = col["temp"] < FREEZING_F if col["temp"] is not None else ens_snow
+            # Precip type, in priority order:
+            #  - below freezing at the surface -> snow
+            #  - at/above freezing, but the snow level is at/below the
+            #    surface -> rain/snow mix
+            #  - otherwise rain
+            # The ensemble's own rain/snow call is only the fallback when
+            # there's no NWS temperature for the column.
+            if col["temp"] is None:
+                ptype = "snow" if ens_snow else "rain"
+            elif col["temp"] < FREEZING_F:
+                ptype = "snow"
+            elif col["snow_to_surface"]:
+                ptype = "mix"
+            else:
+                ptype = "rain"
             pop_pct = round(pop * 100 / 5) * 5
-            color = COLOR_SNOW if is_snow else COLOR_RAIN
+            color = COLOR_RAIN if ptype == "rain" else COLOR_SNOW
             faint = pop_pct < 20
-            glyph_char = SNOWFLAKE if is_snow else RAINDROP
+            # (char, color) parts of the icon, drawn left to right as one unit;
+            # the mix icon is a raindrop + snowflake pair at a smaller size, so
+            # it stays in the same drop/flake vocabulary as the other cells
+            # (the icon font's own MIXED_RAIN_SNOW glyph is a whole cloud).
+            if ptype == "mix":
+                parts, icon_fs = [(RAINDROP, COLOR_RAIN), (SNOWFLAKE, COLOR_SNOW)], pop_icon_fs * 0.8
+            else:
+                parts, icon_fs = [(SNOWFLAKE if ptype == "snow" else RAINDROP, color)], pop_icon_fs
+            PART_GAP = 0.002
+            part_ws = [text_width(fig, ax, ch, ICON_FONT, icon_fs) for ch, _ in parts]
+            icon_w = sum(part_ws) + PART_GAP * (len(parts) - 1)
             pop_text = f"{pop_pct:.0f}%"
             if compact:
                 # icon beside the number: measure both and center the pair as
                 # a unit, so a wide "100%" doesn't spill past the cell edge
                 PAIR_GAP = 0.008
-                icon_w = text_width(fig, ax, glyph_char, ICON_FONT, pop_icon_fs)
                 num_w = text_width(fig, ax, pop_text, f_bold, pop_fs)
-                left_x = cx - (icon_w + PAIR_GAP + num_w) / 2
-                icon_xy, icon_ha = (left_x, pop_mid), "left"
-                num_xy, num_ha = (left_x + icon_w + PAIR_GAP, pop_mid), "left"
+                icon_left = cx - (icon_w + PAIR_GAP + num_w) / 2
+                icon_y = pop_mid
+                num_xy, num_ha = (icon_left + icon_w + PAIR_GAP, pop_mid), "left"
             else:
-                icon_xy, icon_ha = (cx, pop_mid + 0.045), "center"
+                icon_left = cx - icon_w / 2
+                icon_y = pop_mid + 0.045
                 num_xy, num_ha = (cx, pop_mid - 0.04), "center"
-            glyph = ax.text(*icon_xy, glyph_char, ha=icon_ha,
-                             va="center", fontproperties=ICON_FONT, fontsize=pop_icon_fs, color=color,
-                             alpha=0.35 if faint else 1.0, zorder=3)
-            glyph.set_path_effects([pe.withStroke(linewidth=1.2, foreground=color)])
+            x = icon_left
+            for (ch, part_color), w in zip(parts, part_ws):
+                glyph = ax.text(x, icon_y, ch, ha="left", va="center", fontproperties=ICON_FONT,
+                                 fontsize=icon_fs, color=part_color,
+                                 alpha=0.35 if faint else 1.0, zorder=3)
+                glyph.set_path_effects([pe.withStroke(linewidth=1.2, foreground=part_color)])
+                x += w + PART_GAP
             ax.text(*num_xy, pop_text, ha=num_ha, va="center",
                      fontproperties=f_bold, fontsize=pop_fs,
                      color=INK_SECONDARY if faint else color, zorder=3)

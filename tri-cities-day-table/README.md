@@ -75,10 +75,24 @@ python3 build_table.py --forecast forecast_yakima.json forecast_ellensburg.json
   0.254mm (0.01", measurable) — the 7-day graphic's 0.5mm threshold is a
   whole-day one and would be too strict over 3 hours. With Open-Meteo's
   preceding-hour accumulations, the six columns tile the 04:00-22:00 local
-  stretch. Rounded to the nearest 5% (same as the 7-day). A snowflake
-  replaces the raindrop when that column's NWS temperature is below
-  freezing (under 32°F, `FREEZING_F` in `build_table.py`); only if there's
-  no temperature for the column does it fall back to the 7-day's ensemble
-  rule (at least half the members show measurable snowfall). Below 20%
+  stretch. Rounded to the nearest 5% (same as the 7-day). The icon
+  beside each chance shows precip type, in priority order:
+  - **Snowflake**: the column's NWS temperature is below freezing (under
+    32°F, `FREEZING_F` in `build_table.py`).
+  - **Rain/snow mix** (a raindrop and snowflake together): at or above
+    freezing, but NWS's gridded snow level is at or below the surface,
+    i.e. the surface sits above the snow level. Snow level comes from
+    `forecastGridData`'s `snowLevel` (meters MSL), reduced to its lowest
+    value over the column's precip window, and compared against that same
+    grid cell's own `elevation` (~120 m Tri-Cities, ~150 m Hermiston). The
+    icon font's own `MIXED_RAIN_SNOW` glyph is a whole cloud, so the mix
+    icon is built from the drop/flake glyphs instead to match the other
+    cells.
+  - **Raindrop**: otherwise.
+  - Only if a column has no NWS temperature does it fall back to the
+    7-day's ensemble rule (at least half the members show measurable
+    snowfall).
+  - Forecast files fetched before snow level was added have no
+    `nws_snow_level`; they just never show the mix icon. Below 20%
   (the 7-day's display threshold) the glyph is faded and the number gray
   rather than hidden, since a table should have every cell filled.
