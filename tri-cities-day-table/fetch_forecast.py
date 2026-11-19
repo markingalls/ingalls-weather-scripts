@@ -9,6 +9,9 @@ Tri-Cities table and writes them to forecast.json:
   NWS's hourly feed gives that directly without a WindBorne key.)
 - NWS's gridded snow level (`forecastGridData` snowLevel, plus the grid
   cell's surface elevation) for the rain/snow-mix icon. No API key needed.
+- WindBorne WM-6 ensemble precip-type probabilities (rain / freezing rain /
+  ice pellets / snow), for the rain-vs-snow-vs-mix call. Optional: needs
+  WB_API_KEY, skipped without one.
 - Open-Meteo's 50-member ECMWF IFS ensemble (hourly precipitation +
   snowfall) for the chance-of-precip row -- same source and reasoning as
   tri-cities-7day-forecast/fetch_ecmwf_ensemble_forecast.py (raw members, so
@@ -16,6 +19,8 @@ Tri-Cities table and writes them to forecast.json:
 """
 import argparse
 import json
+import os
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -55,6 +60,32 @@ def fetch_snow_level(point):
     }
 
 
+WM6_INTERPOLATED_URL = "https://api.windbornesystems.com/forecasts/v1/wm-6/point_forecast/interpolated"
+
+
+def fetch_wm6_ptype(lat, lon, forecast_days):
+    """WindBorne WM-6 ensemble precipitation-type probabilities
+    (p_rain/p_freezing_rain/p_ice_pellets/p_snow per 3-hourly step), stored
+    as the API's own response. Needs WB_API_KEY; returns None without one
+    (build_table.py then just skips the WM-6 rain/snow/mix rule)."""
+    api_key = os.environ.get("WB_API_KEY")
+    if not api_key:
+        print("NOTE: WB_API_KEY not set -- skipping WM-6 precip-type probabilities.")
+        return None
+    now = datetime.now(timezone.utc)
+    params = {
+        "coordinates": f"{lat},{lon}",
+        "variable": "p_type",
+        "include_distribution": "true",
+        "min_forecast_time": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "max_forecast_time": (now + timedelta(days=forecast_days)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    r = requests.get(WM6_INTERPOLATED_URL, params=params,
+                      headers={"Authorization": f"Bearer {api_key}"}, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+
 def fetch_ensemble(lat, lon, forecast_days):
     params = {
         "latitude": lat,
@@ -83,10 +114,12 @@ if __name__ == "__main__":
     tz = point["timeZone"]
     snow_level = fetch_snow_level(point)
     ensemble = fetch_ensemble(args.lat, args.lon, args.forecast_days)
+    wm6_ptype = fetch_wm6_ptype(args.lat, args.lon, args.forecast_days)
 
     with open(args.output, "w") as f:
         json.dump({"label": args.label, "timezone": tz, "nws_hourly": hourly,
                    "nws_snow_level": snow_level,
+                   "wm6_ptype": wm6_ptype,
                    "ecmwf_ensemble": ensemble}, f)
 
     n_members = sum(1 for k in ensemble["hourly"] if k.startswith("precipitation_member"))

@@ -79,10 +79,16 @@ python3 build_table.py --forecast forecast_yakima.json forecast_ellensburg.json
   beside each chance shows precip type, in priority order:
   - **Snowflake**: the column's NWS temperature is below freezing (under
     32°F, `FREEZING_F` in `build_table.py`).
+  - **Snowflake** also when WindBorne's WM-6 ensemble gives at least a
+    70% chance of snow (`WM6_SNOW_PROB`), linearly interpolated from its
+    3-hourly `p_type` steps to the column's time.
   - **Rain/snow mix** (a raindrop top-left and a snowflake bottom-right,
     split by a diagonal slash): at or above
     freezing, but NWS's gridded snow level is at or below the surface,
-    i.e. the surface sits above the snow level. Snow level comes from
+    i.e. the surface sits above the snow level, or WM-6 gives a 30-70%
+    chance of snow (`WM6_MIX_PROB`). NWS's snow level alone can miss a
+    marginal night: e.g. Nov 21-22 it sat ~400-500 m above the towns
+    while WM-6 had snow 50-78% likely overnight. Snow level comes from
     `forecastGridData`'s `snowLevel` (meters MSL), reduced to its lowest
     value over the column's precip window, and compared against that same
     grid cell's own `elevation` (~120 m Tri-Cities, ~150 m Hermiston). The
@@ -90,6 +96,10 @@ python3 build_table.py --forecast forecast_yakima.json forecast_ellensburg.json
     icon is built from the drop/flake glyphs instead to match the other
     cells.
   - **Raindrop**: otherwise.
+  - WM-6 probabilities need `WB_API_KEY` in `fetch_forecast.py`'s
+    environment; without one they're skipped and only the temperature and
+    snow-level rules apply. WM-6 also returns freezing-rain and ice-pellet
+    probabilities (stored in `forecast.json`), not yet shown.
   - Only if a column has no NWS temperature does it fall back to the
     7-day's ensemble rule (at least half the members show measurable
     snowfall).

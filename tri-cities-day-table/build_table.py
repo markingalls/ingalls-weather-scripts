@@ -144,6 +144,28 @@ def snow_level_at(snow_level, when_local):
     return min(levels) if levels else None
 
 
+# WM-6 ensemble snow probability thresholds for an at/above-freezing
+# column: at or above SNOW -> snowflake, at or above MIX -> mix icon.
+WM6_SNOW_PROB = 0.70
+WM6_MIX_PROB = 0.30
+
+
+def wm6_p_snow_at(wm6_ptype, when_local):
+    """WM-6 ensemble probability of snow at when_local, linearly
+    interpolated between its 3-hourly steps (column times fall between
+    them), or None if there's no data bracketing it."""
+    if not wm6_ptype:
+        return None
+    recs = wm6_ptype["forecasts"][0] if isinstance(wm6_ptype["forecasts"][0], list) else wm6_ptype["forecasts"]
+    pts = sorted((datetime.fromisoformat(r["time"].replace("Z", "+00:00")), r["distribution"]["p_snow"])
+                 for r in recs if r.get("distribution") and r["distribution"].get("p_snow") is not None)
+    for (t0, p0), (t1, p1) in zip(pts, pts[1:]):
+        if t0 <= when_local <= t1:
+            frac = (when_local - t0) / (t1 - t0) if t1 > t0 else 0
+            return p0 + (p1 - p0) * frac
+    return None
+
+
 def text_width(fig, ax, text, fontprops, fontsize):
     """Rendered width of text in ax's data (0-1 figure-fraction) units."""
     t = ax.text(0, 0, text, fontproperties=fontprops, fontsize=fontsize)
@@ -192,6 +214,7 @@ def location_columns(data, times):
             # snow reaching the surface: the snow level is at/below the
             # ground (i.e. the surface sits above the snow level)
             "snow_to_surface": level is not None and surface is not None and level <= surface,
+            "wm6_p_snow": wm6_p_snow_at(data.get("wm6_ptype"), when),
             "temp": nws_temp_at(data["nws_hourly"], when),
             "precip": precip_chance(data["ecmwf_ensemble"], when),
         })
@@ -306,8 +329,9 @@ def main():
             pop, ens_snow = col["precip"]
             # Precip type, in priority order:
             #  - below freezing at the surface -> snow
-            #  - at/above freezing, but the snow level is at/below the
-            #    surface -> rain/snow mix
+            #  - WM-6 ensemble snow probability >= WM6_SNOW_PROB -> snow
+            #  - snow level at/below the surface, or WM-6 snow probability
+            #    >= WM6_MIX_PROB -> rain/snow mix
             #  - otherwise rain
             # The ensemble's own rain/snow call is only the fallback when
             # there's no NWS temperature for the column.
@@ -315,7 +339,10 @@ def main():
                 ptype = "snow" if ens_snow else "rain"
             elif col["temp"] < FREEZING_F:
                 ptype = "snow"
-            elif col["snow_to_surface"]:
+            elif col["wm6_p_snow"] is not None and col["wm6_p_snow"] >= WM6_SNOW_PROB:
+                ptype = "snow"
+            elif col["snow_to_surface"] or (col["wm6_p_snow"] is not None
+                                            and col["wm6_p_snow"] >= WM6_MIX_PROB):
                 ptype = "mix"
             else:
                 ptype = "rain"
@@ -329,7 +356,7 @@ def main():
             # whole cloud).
             single_ch = SNOWFLAKE if ptype == "snow" else RAINDROP
             single_w = text_width(fig, ax, RAINDROP, ICON_FONT, pop_icon_fs)
-            icon_w = single_w * 2.0 if ptype == "mix" else text_width(fig, ax, single_ch, ICON_FONT, pop_icon_fs)
+            icon_w = single_w * 1.6 if ptype == "mix" else text_width(fig, ax, single_ch, ICON_FONT, pop_icon_fs)
             pop_text = f"{pop_pct:.0f}%"
             if compact:
                 # icon beside the number: measure both and center the pair as
@@ -349,17 +376,15 @@ def main():
                 # diagonal offsets scale with the icon size
                 icon_h = pop_icon_fs / 72 / fig.get_size_inches()[1]
                 icon_cx = icon_left + icon_w / 2
-                # (the flake glyph draws visually smaller than the drop at the
-                # same point size, so it gets a little more)
                 for ch, part_color, part_fs, fx, fy in [
-                        (RAINDROP, COLOR_RAIN, pop_icon_fs * 0.8, -0.27, 0.27),
-                        (SNOWFLAKE, COLOR_SNOW, pop_icon_fs * 0.9, 0.27, -0.27)]:
+                        (RAINDROP, COLOR_RAIN, pop_icon_fs * 0.62, -0.27, 0.24),
+                        (SNOWFLAKE, COLOR_SNOW, pop_icon_fs * 0.62, 0.27, -0.24)]:
                     glyph = ax.text(icon_cx + fx * icon_w, icon_y + fy * icon_h, ch, ha="center",
                                      va="center", fontproperties=ICON_FONT, fontsize=part_fs,
                                      color=part_color, alpha=alpha, zorder=3)
                     glyph.set_path_effects([pe.withStroke(linewidth=1.0, foreground=part_color)])
-                ax.plot([icon_cx - 0.12 * icon_w, icon_cx + 0.12 * icon_w],
-                         [icon_y - 0.55 * icon_h, icon_y + 0.55 * icon_h],
+                ax.plot([icon_cx - 0.14 * icon_w, icon_cx + 0.14 * icon_w],
+                         [icon_y - 0.42 * icon_h, icon_y + 0.42 * icon_h],
                          color=INK_SECONDARY, linewidth=1.6, solid_capstyle="round",
                          alpha=alpha, zorder=3)
             else:
@@ -403,7 +428,9 @@ def main():
 
     fig.text((LEFT + RIGHT) / 2, 0.075,
               "Temperature: NWS hourly • Chance of precip: ≥0.01\" in the 3 hrs around each time, "
-              "ECMWF ensemble • Ingalls Weather",
+              "ECMWF ensemble"
+              + (" • Rain/snow: WM-6 ensemble" if any(d.get("wm6_ptype") for d in locations) else "")
+              + " • Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
     plt.savefig(output, facecolor=fig.get_facecolor(), bbox_inches="tight", pad_inches=0.15)
@@ -412,8 +439,10 @@ def main():
         print(f"  {label}:")
         for col in cols:
             p = col["precip"]
+            ps = col.get("wm6_p_snow")
             print(f"    {col['label']:>5}: {col['temp']}°F, "
-                  f"{'—' if p is None else f'{p[0]:.0%}'}")
+                  f"{'—' if p is None else f'{p[0]:.0%}'}"
+                  f"{'' if ps is None else f', WM-6 snow {ps:.0%}'}")
 
 
 if __name__ == "__main__":
