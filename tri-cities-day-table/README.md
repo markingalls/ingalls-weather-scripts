@@ -79,7 +79,8 @@ python3 build_table.py --forecast forecast_yakima.json forecast_ellensburg.json
   beside each chance shows precip type, in priority order:
   - **Snowflake**: the column's NWS temperature is below freezing (under
     32°F, `FREEZING_F` in `build_table.py`).
-  - **Rain/snow mix** (a raindrop and snowflake together): at or above
+  - **Rain/snow mix** (a raindrop top-left and a snowflake bottom-right,
+    split by a diagonal slash): at or above
     freezing, but NWS's gridded snow level is at or below the surface,
     i.e. the surface sits above the snow level. Snow level comes from
     `forecastGridData`'s `snowLevel` (meters MSL), reduced to its lowest

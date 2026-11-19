@@ -322,17 +322,14 @@ def main():
             pop_pct = round(pop * 100 / 5) * 5
             color = COLOR_RAIN if ptype == "rain" else COLOR_SNOW
             faint = pop_pct < 20
-            # (char, color) parts of the icon, drawn left to right as one unit;
-            # the mix icon is a raindrop + snowflake pair at a smaller size, so
-            # it stays in the same drop/flake vocabulary as the other cells
-            # (the icon font's own MIXED_RAIN_SNOW glyph is a whole cloud).
-            if ptype == "mix":
-                parts, icon_fs = [(RAINDROP, COLOR_RAIN), (SNOWFLAKE, COLOR_SNOW)], pop_icon_fs * 0.8
-            else:
-                parts, icon_fs = [(SNOWFLAKE if ptype == "snow" else RAINDROP, color)], pop_icon_fs
-            PART_GAP = 0.002
-            part_ws = [text_width(fig, ax, ch, ICON_FONT, icon_fs) for ch, _ in parts]
-            icon_w = sum(part_ws) + PART_GAP * (len(parts) - 1)
+            # The mix icon is a raindrop (top-left) / snowflake (bottom-right)
+            # split by a diagonal slash, in a box about as tall as a normal
+            # single glyph -- it stays in the same drop/flake vocabulary as
+            # the other cells (the icon font's own MIXED_RAIN_SNOW glyph is a
+            # whole cloud).
+            single_ch = SNOWFLAKE if ptype == "snow" else RAINDROP
+            single_w = text_width(fig, ax, RAINDROP, ICON_FONT, pop_icon_fs)
+            icon_w = single_w * 2.0 if ptype == "mix" else text_width(fig, ax, single_ch, ICON_FONT, pop_icon_fs)
             pop_text = f"{pop_pct:.0f}%"
             if compact:
                 # icon beside the number: measure both and center the pair as
@@ -346,13 +343,30 @@ def main():
                 icon_left = cx - icon_w / 2
                 icon_y = pop_mid + 0.045
                 num_xy, num_ha = (cx, pop_mid - 0.04), "center"
-            x = icon_left
-            for (ch, part_color), w in zip(parts, part_ws):
-                glyph = ax.text(x, icon_y, ch, ha="left", va="center", fontproperties=ICON_FONT,
-                                 fontsize=icon_fs, color=part_color,
-                                 alpha=0.35 if faint else 1.0, zorder=3)
-                glyph.set_path_effects([pe.withStroke(linewidth=1.2, foreground=part_color)])
-                x += w + PART_GAP
+            alpha = 0.35 if faint else 1.0
+            if ptype == "mix":
+                # glyph height in axes-y units (figure is 8.3in tall), so the
+                # diagonal offsets scale with the icon size
+                icon_h = pop_icon_fs / 72 / fig.get_size_inches()[1]
+                icon_cx = icon_left + icon_w / 2
+                # (the flake glyph draws visually smaller than the drop at the
+                # same point size, so it gets a little more)
+                for ch, part_color, part_fs, fx, fy in [
+                        (RAINDROP, COLOR_RAIN, pop_icon_fs * 0.8, -0.27, 0.27),
+                        (SNOWFLAKE, COLOR_SNOW, pop_icon_fs * 0.9, 0.27, -0.27)]:
+                    glyph = ax.text(icon_cx + fx * icon_w, icon_y + fy * icon_h, ch, ha="center",
+                                     va="center", fontproperties=ICON_FONT, fontsize=part_fs,
+                                     color=part_color, alpha=alpha, zorder=3)
+                    glyph.set_path_effects([pe.withStroke(linewidth=1.0, foreground=part_color)])
+                ax.plot([icon_cx - 0.12 * icon_w, icon_cx + 0.12 * icon_w],
+                         [icon_y - 0.55 * icon_h, icon_y + 0.55 * icon_h],
+                         color=INK_SECONDARY, linewidth=1.6, solid_capstyle="round",
+                         alpha=alpha, zorder=3)
+            else:
+                glyph = ax.text(icon_left, icon_y, single_ch, ha="left", va="center",
+                                 fontproperties=ICON_FONT, fontsize=pop_icon_fs, color=color,
+                                 alpha=alpha, zorder=3)
+                glyph.set_path_effects([pe.withStroke(linewidth=1.2, foreground=color)])
             ax.text(*num_xy, pop_text, ha=num_ha, va="center",
                      fontproperties=f_bold, fontsize=pop_fs,
                      color=INK_SECONDARY if faint else color, zorder=3)
