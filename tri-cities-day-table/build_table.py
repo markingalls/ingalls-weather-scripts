@@ -56,6 +56,9 @@ COLOR_SNOW = "#5aa9d6"
 # graphic's own string-label handling). 6 AM-9 PM every 3 hours tiles the
 # 05:00-22:59 labels, lining up with the 7-day's PRECIP_DAY_START_HOUR.
 COLUMN_HOURS = [6, 9, 12, 15, 18, 21]
+# --overnight: 6 PM on --day through 9 AM the next morning (e.g. Friday
+# night/Saturday morning), as hour offsets from midnight starting --day.
+OVERNIGHT_HOUR_OFFSETS = [18, 21, 24, 27, 30, 33]
 
 # Measurable precip (0.01") in a 3-hour window -- the 7-day graphic's 0.5mm
 # is a whole-day threshold and would be too strict over just 3 hours.
@@ -97,13 +100,14 @@ def nws_temp_at(hourly, when_local):
     return None
 
 
-def precip_chance(ensemble, date, hour):
-    """(pop, is_snow) for the three hourly steps labeled hour-1..hour+1 on
-    date, or None if the ensemble doesn't cover them. pop is the fraction of
+def precip_chance(ensemble, when_local):
+    """(pop, is_snow) for the three hourly steps labeled when-1h..when+1h
+    (crossing midnight where needed), or None if the ensemble doesn't cover
+    them. pop is the fraction of
     members whose window total exceeds POP_THRESHOLD_MM; is_snow if at least
     half the members show measurable snowfall (same rule as the 7-day)."""
     hourly = ensemble["hourly"]
-    wanted = {f"{date.isoformat()}T{h:02d}:00" for h in (hour - 1, hour, hour + 1)}
+    wanted = {(when_local + timedelta(hours=dh)).strftime("%Y-%m-%dT%H:00") for dh in (-1, 0, 1)}
     idxs = [i for i, t in enumerate(hourly["time"]) if t in wanted]
     if len(idxs) != len(wanted):
         return None
@@ -131,21 +135,34 @@ def parse_args():
                           "forecast_hermiston.json for Tri-Cities + Hermiston on one graphic)")
     ap.add_argument("--day", default="wednesday",
                      help="Weekday to show (the next one, today included)")
+    ap.add_argument("--overnight", action="store_true",
+                     help="Show --day's night into the next morning (6 PM-9 AM) instead of "
+                          "its 6 AM-9 PM daytime, e.g. --day friday --overnight for "
+                          "Friday night/Saturday morning")
     ap.add_argument("--output", default=None,
                      help="Defaults to <labels>_<day>_table.png, e.g. tri_cities_wednesday_table.png "
                           "or tri_cities_hermiston_wednesday_table.png")
     return ap.parse_args()
 
 
-def location_columns(data, date):
+def column_times(date, local_tz, overnight):
+    """Local datetimes for each column. Built by adding hours to local
+    midnight via a naive datetime, so a column past midnight lands on the
+    next calendar date at the right wall-clock hour."""
+    offsets = OVERNIGHT_HOUR_OFFSETS if overnight else COLUMN_HOURS
+    midnight = datetime(date.year, date.month, date.day)
+    return [(midnight + timedelta(hours=o)).replace(tzinfo=local_tz) for o in offsets]
+
+
+def location_columns(data, times):
     local_tz = ZoneInfo(data["timezone"])
     cols = []
-    for h in COLUMN_HOURS:
-        when = datetime(date.year, date.month, date.day, h, tzinfo=local_tz)
+    for when in times:
+        when = when.replace(tzinfo=local_tz)
         cols.append({
-            "label": hour_label(h),
+            "label": hour_label(when.hour),
             "temp": nws_temp_at(data["nws_hourly"], when),
-            "precip": precip_chance(data["ecmwf_ensemble"], date, h),
+            "precip": precip_chance(data["ecmwf_ensemble"], when),
         })
     return cols
 
@@ -162,9 +179,11 @@ def main():
     # named after the location label(s), so renders for different points
     # (Tri-Cities, Hermiston, both, ...) don't overwrite each other
     slug = "_".join(re.sub(r"[^a-z0-9]+", "_", lbl.split(",")[0].lower()).strip("_") for lbl in labels)
-    output = args.output or f"{slug}_{args.day.lower()}_table.png"
+    period = f"{args.day.lower()}_night" if args.overnight else args.day.lower()
+    output = args.output or f"{slug}_{period}_table.png"
 
-    groups = [(lbl, location_columns(d, date)) for lbl, d in zip(labels, locations)]
+    times = column_times(date, local_tz, args.overnight)
+    groups = [(lbl, location_columns(d, times)) for lbl, d in zip(labels, locations)]
     multi = len(groups) > 1
 
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
@@ -177,7 +196,7 @@ def main():
     LEFT, RIGHT = 0.055, 0.965
     LABEL_W = 0.165           # row-label column
     GUTTER = 0.012
-    n = len(COLUMN_HOURS)
+    n = len(times)
     cell_x0 = LEFT + LABEL_W + GUTTER
     cell_w = (RIGHT - cell_x0 - (n - 1) * GUTTER) / n
 
@@ -202,10 +221,14 @@ def main():
             (x, y0), w, h, boxstyle="round,pad=0,rounding_size=0.012",
             facecolor=CARD_FILL, edgecolor=CARD_EDGE, linewidth=1.0, zorder=2))
 
-    for idx, h in enumerate(COLUMN_HOURS):
+    for idx, when in enumerate(times):
         cx = cell_x0 + idx * (cell_w + GUTTER) + cell_w / 2
-        ax.text(cx, HEADER_Y, hour_label(h), ha="center", va="center",
+        ax.text(cx, HEADER_Y, hour_label(when.hour), ha="center", va="center",
                  fontproperties=f_bold, fontsize=17, color=INK, zorder=3)
+        if args.overnight:
+            # the window spans two dates, so say which day each column is on
+            ax.text(cx, HEADER_Y + 0.033, when.strftime("%a").upper(), ha="center", va="center",
+                     fontproperties=f_med, fontsize=10.5, color=INK_SECONDARY, zorder=3)
 
     y = TABLE_TOP
     for g, (label, cols) in enumerate(groups):
@@ -295,9 +318,17 @@ def main():
     else:
         print(f"NOTE: no logo found at {LOGO_PATH} -- skipping logo placement.")
 
-    fig.text(title_x, 0.935, f"{' & '.join(labels)} Forecast: {date.strftime('%A, %B %-d')}",
+    updated = f"Updated {now_local.strftime('%d %B %Y %H:%M')} {short_tz_abbr(now_local.strftime('%Z'))}"
+    if args.overnight:
+        next_day = date + timedelta(days=1)
+        title = f"{' & '.join(labels)}: {date.strftime('%A')} Night–{next_day.strftime('%A')} Morning"
+        subtitle = f"{date.strftime('%B %-d')}–{next_day.strftime('%-d') if next_day.month == date.month else next_day.strftime('%B %-d')} • {updated}"
+    else:
+        title = f"{' & '.join(labels)} Forecast: {date.strftime('%A, %B %-d')}"
+        subtitle = updated
+    fig.text(title_x, 0.935, title,
               fontproperties=f_bold, fontsize=24, color=INK)
-    fig.text(title_x, 0.895, f"Updated {now_local.strftime('%d %B %Y %H:%M')} {short_tz_abbr(now_local.strftime('%Z'))}",
+    fig.text(title_x, 0.895, subtitle,
               fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     fig.text((LEFT + RIGHT) / 2, 0.075,

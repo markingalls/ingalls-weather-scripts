@@ -9,7 +9,9 @@ logo/title treatment as `tri-cities-7day-forecast/`.
 Defaults to **KPSC** (Tri-Cities Airport, Pasco, WA) and the **next
 Wednesday** (today included); pass `--day` for any other weekday. Works
 anywhere NWS covers via `fetch_forecast.py --lat/--lon/--label` — see the
-Hermiston example below.
+Hermiston example below. `--overnight` swaps the 6 AM-9 PM daytime
+columns for 6 PM on `--day` through 9 AM the next morning (each column
+header then also names its day, since the window spans two dates).
 
 ## Files
 
@@ -47,6 +49,10 @@ python3 build_table.py --forecast forecast_hermiston.json   # -> hermiston_wedne
 # Tri-Cities and Hermiston stacked on one graphic
 python3 build_table.py --forecast forecast.json forecast_hermiston.json
 #   -> tri_cities_hermiston_wednesday_table.png
+
+# Overnight: Friday night/Saturday morning (6 PM Fri - 9 AM Sat)
+python3 build_table.py --forecast forecast.json forecast_hermiston.json --day friday --overnight
+#   -> tri_cities_hermiston_friday_night_table.png
 
 # Yakima and Ellensburg (same points as the Columbia Basin maps' labels)
 python3 fetch_forecast.py --lat 46.6021 --lon -120.5059 --label "Yakima" \
