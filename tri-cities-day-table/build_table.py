@@ -424,9 +424,8 @@ def main():
               fontproperties=f_reg, fontsize=12, color=INK_SECONDARY)
 
     fig.text((LEFT + RIGHT) / 2, 0.075,
-              "Temperature: NWS hourly • Chance of precip: ≥0.01\" in the 3 hrs around each time, "
-              "ECMWF ensemble"
-              + (" • Rain/snow: WM-6 ensemble" if any(d.get("wm6_ptype") for d in locations) else "")
+              # same short form as the 7-day graphic's "NWS/ECMWF/WM-6 • Ingalls Weather"
+              ("NWS/ECMWF/WM-6" if any(d.get("wm6_ptype") for d in locations) else "NWS/ECMWF")
               + " • Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
