@@ -105,3 +105,11 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+
+# --- tri-cities-equal-temp-reel ---
+# normals.json is fetched data (fetch_normals.py regenerates it), and the
+# rendered reel/still frames are outputs -- neither is source, so don't
+# track them.
+tri-cities-equal-temp-reel/normals.json
+tri-cities-equal-temp-reel/*.mp4
+tri-cities-equal-temp-reel/*.png
