@@ -118,19 +118,40 @@ HALF_BAND_F = 0.5
 SUBSTEPS = 24
 MAX_RUNS = 8  # wedge patches kept in the pool; a sweep never needs more than ~3
 
-# Canvas is 1080x2340 (9:19.5, modern phone screens) so the reel fills the
+# Output is 1080x2340 (9:19.5, modern phone screens) so the reel fills the
 # whole screen instead of letterboxing. The layout itself is designed on a
-# 1080x1920 (9:16) block, centered vertically: Y() maps a position in that
-# block to a figure fraction of the taller canvas, so extra height just
-# becomes background above and below rather than spreading content out.
-W_PX, H_PX, DPI = 1080, 2340, 200
-CONTENT_H_PX = 1920
+# 1080x1920 (9:16) content block, centered on the canvas and scaled down to
+# CONTENT_SCALE of the canvas width, so there's plain background margin on
+# every side (clear of IG/FB's side buttons and top/bottom overlays).
+# X()/Y() map a position in that block to a figure fraction of the full
+# canvas, WF()/HF() map a width/height; scaling is done via DPI, so fonts,
+# line widths and the logo all shrink together and the content's
+# proportions never change.
+W_PX, H_PX = 1080, 2340
+CONTENT_W_PX, CONTENT_H_PX = 1080, 1920   # design units of the content block
+CONTENT_SCALE = 0.80                      # content width / canvas width
+DES_W = CONTENT_W_PX / CONTENT_SCALE      # canvas size in design units
+DES_H = DES_W * H_PX / W_PX
+DPI = 200 * CONTENT_SCALE                 # 200 dpi = the original 1080-wide design
 FIG_W, FIG_H = W_PX / DPI, H_PX / DPI
 
 
+def X(frac):
+    """x fraction of the content block -> fraction of the full canvas."""
+    return ((DES_W - CONTENT_W_PX) / 2 + frac * CONTENT_W_PX) / DES_W
+
+
 def Y(frac):
-    """Fraction of the 1920-px content block -> fraction of the full canvas."""
-    return ((H_PX - CONTENT_H_PX) / 2 + frac * CONTENT_H_PX) / H_PX
+    """y fraction of the content block -> fraction of the full canvas."""
+    return ((DES_H - CONTENT_H_PX) / 2 + frac * CONTENT_H_PX) / DES_H
+
+
+def WF(frac):
+    return frac * CONTENT_W_PX / DES_W
+
+
+def HF(frac):
+    return frac * CONTENT_H_PX / DES_H
 
 MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -216,7 +237,7 @@ class Reel:
     # ---------- static pieces ----------
     def _build_header(self):
         fig = self.fig
-        lx = 0.07
+        lx = X(0.07)
         loc = self.ndata.get("label") or self.ndata["station_name"].title()
         el = self.ndata["element_label"]
         # two-line title, per element (avgt is the default reel)
@@ -238,9 +259,9 @@ class Reel:
 
     def _build_pie(self):
         fig = self.fig
-        size_w = 0.86
+        size_w = WF(0.86)
         size_h = size_w * FIG_W / FIG_H
-        self.pie_ax = ax = fig.add_axes([(1 - size_w) / 2, Y(0.335), size_w, size_h])
+        self.pie_ax = ax = fig.add_axes([0.5 - size_w / 2, Y(0.335), size_w, size_h])
         ax.set_xlim(-1.06, 1.06)
         ax.set_ylim(-1.06, 1.06)
         ax.set_aspect("equal")
@@ -289,7 +310,7 @@ class Reel:
         # bar range: rounded outward to 5F around the year's normals
         self.cb_lo = 5 * np.floor((self.tmin - 1) / 5)
         self.cb_hi = 5 * np.ceil((self.tmax + 1) / 5)
-        cb_left, cb_w, cb_bot, cb_h = 0.09, 0.82, Y(0.172), 0.026 * CONTENT_H_PX / H_PX
+        cb_left, cb_w, cb_bot, cb_h = X(0.09), WF(0.82), Y(0.172), HF(0.026)
         self.cax = cax = fig.add_axes([cb_left, cb_bot, cb_w, cb_h])
         grad = np.linspace(self.cb_lo, self.cb_hi, 512)
         cax.imshow(f_to_k(grad).reshape(1, -1), aspect="auto", cmap=TEMP_CMAP, norm=TEMP_NORM,
@@ -324,7 +345,7 @@ class Reel:
                                  "..", "assets", "ingalls_weather_logo.png")
         if os.path.exists(logo_path):
             img = plt.imread(logo_path)
-            logo_w = 0.11
+            logo_w = WF(0.11)
             logo_h = logo_w * FIG_W / FIG_H * img.shape[0] / img.shape[1]
             lax = fig.add_axes([0.5 - logo_w / 2, Y(0.028), logo_w, logo_h], zorder=20)
             lax.imshow(img)

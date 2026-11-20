@@ -61,6 +61,8 @@ python3 fetch_normals.py --element mint
   the lit arc widens fast), with a hold at each end.
 - **Canvas size**: 1080x2340 matches modern phone screens (9:19.5), so the
   reel fills the screen instead of letterboxing as a 9:16 video does. The
-  layout is designed on a centered 1080x1920 block (`Y()` in
-  `build_reel.py`); the extra height is plain background top and bottom,
-  which also keeps content clear of IG/FB overlay UI and captions.
+  layout is designed on a 1080x1920 block, centered and scaled to 80% of
+  the canvas width (`CONTENT_SCALE` / `X()` / `Y()` in `build_reel.py`),
+  so there's plain background on all four sides -- keeping content clear
+  of IG/FB's side buttons, top bar and captions. Scaling is done through
+  DPI, so the content's proportions never change.
