@@ -1,9 +1,9 @@
 # Tri-Cities Equal-Temperature Reel
 
-Renders a vertical (1080x1920, 9:16) MP4 for Facebook/Instagram Reels: a
+Renders a vertical (1080x2340, 9:19.5) MP4 for Facebook/Instagram Reels: a
 "year clock" pie (12 month wedges sized by day count, January at 12
 o'clock, running clockwise) while a temperature sweeps from the year's
-coldest normal to its warmest. At each step, every part of the year whose
+coldest normal to its warmest and back, twice (loops seamlessly). At each step, every part of the year whose
 **normal daily average temperature** is within ±0.5°F of the current
 temperature lights up in that temperature's color -- so the two mirror
 stretches of the year that share a normal (e.g. **Apr 1–7 ≈ Oct 20–22**
@@ -20,7 +20,7 @@ styling.
   (`normal: "1"`) and writes `normals.json` (365 days, plus annual mean).
   No API key. Only needs re-running if you change station or element.
 - `build_reel.py` -- renders `normals.json` into
-  `tri_cities_equal_temp_reel.mp4` (H.264, yuv420p, 30 fps, faststart --
+  `tri_cities_equal_temp_reel.mp4` (~45 s, H.264, yuv420p, 30 fps, faststart --
   uploads directly to FB/IG). `--still TEMP_F` renders a single PNG frame
   instead (layout preview / cover image).
 - `requirements.txt` / `setup.sh` -- Python deps, ffmpeg, Poppins fonts.
@@ -30,11 +30,11 @@ styling.
 ```bash
 bash setup.sh                       # first time / fresh environment only
 python3 fetch_normals.py            # KPSC daily-average normals
-python3 build_reel.py               # -> tri_cities_equal_temp_reel.mp4 (~18 s)
+python3 build_reel.py               # -> tri_cities_equal_temp_reel.mp4 (~45 s)
 
 python3 build_reel.py --still 50    # -> tri_cities_equal_temp_reel.png
-python3 build_reel.py --round-trip  # sweep up then back down (loops cleanly)
-python3 build_reel.py --sweep-seconds 25 --hold-seconds 2
+python3 build_reel.py --cycles 1    # one up/down round trip (~22 s)
+python3 build_reel.py --sweep-seconds 15 --hold-seconds 2
 
 # Variants: highs or lows instead of daily average
 python3 fetch_normals.py --element maxt
@@ -59,5 +59,8 @@ python3 fetch_normals.py --element mint
   wedges, so slices grow/shrink sub-day between frames without seams.
   The sweep uses cosine easing (slower near the coldest/warmest, where
   the lit arc widens fast), with a hold at each end.
-- **Reel safe zones**: the top ~10% and bottom ~10% of the frame are left
-  mostly empty/low-priority, since IG/FB overlay UI and captions there.
+- **Canvas size**: 1080x2340 matches modern phone screens (9:19.5), so the
+  reel fills the screen instead of letterboxing as a 9:16 video does. The
+  layout is designed on a centered 1080x1920 block (`Y()` in
+  `build_reel.py`); the extra height is plain background top and bottom,
+  which also keeps content clear of IG/FB overlay UI and captions.

@@ -118,8 +118,19 @@ HALF_BAND_F = 0.5
 SUBSTEPS = 24
 MAX_RUNS = 8  # wedge patches kept in the pool; a sweep never needs more than ~3
 
-W_PX, H_PX, DPI = 1080, 1920, 200
+# Canvas is 1080x2340 (9:19.5, modern phone screens) so the reel fills the
+# whole screen instead of letterboxing. The layout itself is designed on a
+# 1080x1920 (9:16) block, centered vertically: Y() maps a position in that
+# block to a figure fraction of the taller canvas, so extra height just
+# becomes background above and below rather than spreading content out.
+W_PX, H_PX, DPI = 1080, 2340, 200
+CONTENT_H_PX = 1920
 FIG_W, FIG_H = W_PX / DPI, H_PX / DPI
+
+
+def Y(frac):
+    """Fraction of the 1920-px content block -> fraction of the full canvas."""
+    return ((H_PX - CONTENT_H_PX) / 2 + frac * CONTENT_H_PX) / H_PX
 
 MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -131,12 +142,12 @@ def parse_args():
     ap.add_argument("--normals", default="normals.json")
     ap.add_argument("--output", default="tri_cities_equal_temp_reel.mp4")
     ap.add_argument("--fps", type=int, default=30)
-    ap.add_argument("--sweep-seconds", type=float, default=16.0,
+    ap.add_argument("--sweep-seconds", type=float, default=10.0,
                     help="Time to sweep from the coldest normal to the warmest")
     ap.add_argument("--hold-seconds", type=float, default=1.2,
                     help="Pause at the start (coldest) and end (warmest) of the sweep")
-    ap.add_argument("--round-trip", action="store_true",
-                    help="Sweep back down to the coldest after the warmest (seamless loop)")
+    ap.add_argument("--cycles", type=int, default=2,
+                    help="Number of coldest->warmest->coldest round trips (default 2)")
     ap.add_argument("--still", type=float, default=None, metavar="TEMP_F",
                     help="Render one PNG frame at this temperature instead of the video")
     return ap.parse_args()
@@ -208,14 +219,14 @@ class Reel:
         lx = 0.07
         loc = self.ndata.get("label") or self.ndata["station_name"].title()
         el = self.ndata["element_label"]
-        fig.text(lx, 0.892, f"{loc}: Same {el.split()[0].title()} Temp,",
+        fig.text(lx, Y(0.892), f"{loc}: Same {el.split()[0].title()} Temp,",
                  fontproperties=f_bold, fontsize=19, color=INK)
-        fig.text(lx, 0.862, "Different Season",
+        fig.text(lx, Y(0.862), "Different Season",
                  fontproperties=f_bold, fontsize=19, color=INK)
-        fig.text(lx, 0.836,
+        fig.text(lx, Y(0.836),
                  f"Times of year that share the same normal daily {el}",
                  fontproperties=f_reg, fontsize=8.6, color=INK_SECONDARY)
-        fig.text(lx, 0.820,
+        fig.text(lx, Y(0.820),
                  f"NCEI {self.ndata['period']} daily normals • {self.ndata['station_name'].title()}",
                  fontproperties=f_reg, fontsize=8.6, color=INK_SECONDARY)
 
@@ -223,7 +234,7 @@ class Reel:
         fig = self.fig
         size_w = 0.86
         size_h = size_w * FIG_W / FIG_H
-        self.pie_ax = ax = fig.add_axes([(1 - size_w) / 2, 0.335, size_w, size_h])
+        self.pie_ax = ax = fig.add_axes([(1 - size_w) / 2, Y(0.335), size_w, size_h])
         ax.set_xlim(-1.06, 1.06)
         ax.set_ylim(-1.06, 1.06)
         ax.set_aspect("equal")
@@ -260,10 +271,10 @@ class Reel:
 
     def _build_readout(self):
         fig = self.fig
-        self.temp_text = fig.text(0.5, 0.283, "", ha="center", va="center",
+        self.temp_text = fig.text(0.5, Y(0.283), "", ha="center", va="center",
                                   fontproperties=f_bold, fontsize=30, color=INK)
         self.temp_text.set_path_effects([pe.withStroke(linewidth=1.2, foreground=INK)])
-        self.period_text = fig.text(0.5, 0.236, "", ha="center", va="center",
+        self.period_text = fig.text(0.5, Y(0.236), "", ha="center", va="center",
                                     fontproperties=f_med, fontsize=10.5, color=INK,
                                     linespacing=1.5)
 
@@ -272,7 +283,7 @@ class Reel:
         # bar range: rounded outward to 5F around the year's normals
         self.cb_lo = 5 * np.floor((self.tmin - 1) / 5)
         self.cb_hi = 5 * np.ceil((self.tmax + 1) / 5)
-        cb_left, cb_w, cb_bot, cb_h = 0.09, 0.82, 0.172, 0.026
+        cb_left, cb_w, cb_bot, cb_h = 0.09, 0.82, Y(0.172), 0.026 * CONTENT_H_PX / H_PX
         self.cax = cax = fig.add_axes([cb_left, cb_bot, cb_w, cb_h])
         grad = np.linspace(self.cb_lo, self.cb_hi, 512)
         cax.imshow(f_to_k(grad).reshape(1, -1), aspect="auto", cmap=TEMP_CMAP, norm=TEMP_NORM,
@@ -309,12 +320,12 @@ class Reel:
             img = plt.imread(logo_path)
             logo_w = 0.11
             logo_h = logo_w * FIG_W / FIG_H * img.shape[0] / img.shape[1]
-            lax = fig.add_axes([0.5 - logo_w / 2, 0.028, logo_w, logo_h], zorder=20)
+            lax = fig.add_axes([0.5 - logo_w / 2, Y(0.028), logo_w, logo_h], zorder=20)
             lax.imshow(img)
             lax.axis("off")
         else:
             print(f"NOTE: no logo found at {logo_path} -- skipping logo placement.")
-        fig.text(0.5, 0.104, "Data: NCEI 1991–2020 normals via ACIS/xmACIS — Ingalls Weather",
+        fig.text(0.5, Y(0.104), "Data: NCEI 1991–2020 normals via ACIS/xmACIS — Ingalls Weather",
                  ha="center", fontproperties=f_reg, fontsize=7, color=INK_SECONDARY)
 
     # ---------- per-frame ----------
@@ -361,13 +372,15 @@ def ease_in_out(x):
     return 0.5 - 0.5 * np.cos(np.pi * x)
 
 
-def temp_schedule(lo, hi, fps, sweep_s, hold_s, round_trip):
+def temp_schedule(lo, hi, fps, sweep_s, hold_s, cycles):
+    """Hold at coldest, then `cycles` x (sweep up, hold, sweep down, hold).
+    Ends where it starts, so the reel loops seamlessly."""
     n_sweep = int(round(sweep_s * fps))
     n_hold = int(round(hold_s * fps))
     up = lo + (hi - lo) * ease_in_out(np.linspace(0, 1, n_sweep))
-    seq = [np.full(n_hold, lo), up, np.full(n_hold, hi)]
-    if round_trip:
-        seq += [up[::-1], np.full(n_hold, lo)]
+    seq = [np.full(n_hold, lo)]
+    for _ in range(max(cycles, 1)):
+        seq += [up, np.full(n_hold, hi), up[::-1], np.full(n_hold, lo)]
     return np.concatenate(seq)
 
 
@@ -386,7 +399,7 @@ def main():
     # sweep slightly inside the extremes so the first/last frames still
     # light a real (non-empty) slice of the year
     temps = temp_schedule(reel.tmin + 0.2, reel.tmax - 0.2, args.fps,
-                          args.sweep_seconds, args.hold_seconds, args.round_trip)
+                          args.sweep_seconds, args.hold_seconds, args.cycles)
 
     cmd = ["ffmpeg", "-y", "-loglevel", "error",
            "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W_PX}x{H_PX}", "-r", str(args.fps),
