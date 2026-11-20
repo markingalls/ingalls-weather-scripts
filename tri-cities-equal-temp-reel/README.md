@@ -1,6 +1,6 @@
 # Tri-Cities Equal-Temperature Reel
 
-Renders a vertical (1080x2340, 9:19.5) MP4 for Facebook/Instagram Reels: a
+Renders a vertical (1080x1920, 9:16) MP4 for Facebook/Instagram Reels: a
 "year clock" pie (12 month wedges sized by day count, January at 12
 o'clock, running clockwise) while a temperature sweeps from the year's
 coldest normal to its warmest and back, twice (loops seamlessly). At each step, every part of the year whose
@@ -59,10 +59,10 @@ python3 fetch_normals.py --element mint
   wedges, so slices grow/shrink sub-day between frames without seams.
   The sweep uses cosine easing (slower near the coldest/warmest, where
   the lit arc widens fast), with a hold at each end.
-- **Canvas size**: 1080x2340 matches modern phone screens (9:19.5), so the
-  reel fills the screen instead of letterboxing as a 9:16 video does. The
-  layout is designed on a 1080x1920 block, centered and scaled to 80% of
-  the canvas width (`CONTENT_SCALE` / `X()` / `Y()` in `build_reel.py`),
-  so there's plain background on all four sides -- keeping content clear
-  of IG/FB's side buttons, top bar and captions. Scaling is done through
-  DPI, so the content's proportions never change.
+- **Canvas size**: 1080x1920 (9:16) is what IG/FB's reel editor and player
+  fill edge to edge; a taller 9:19.5 frame got pillarboxed (black side bars)
+  in the IG editor. The layout is designed on a 1080x1920 block, centered
+  and scaled to 80% of the canvas (`CONTENT_SCALE` / `X()` / `Y()` in
+  `build_reel.py`), so there's plain background on all four sides --
+  keeping content clear of IG/FB's side buttons, top bar and captions.
+  Scaling is done through DPI, so the content's proportions never change.

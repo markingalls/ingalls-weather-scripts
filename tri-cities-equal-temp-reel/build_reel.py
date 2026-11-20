@@ -118,8 +118,9 @@ HALF_BAND_F = 0.5
 SUBSTEPS = 24
 MAX_RUNS = 8  # wedge patches kept in the pool; a sweep never needs more than ~3
 
-# Output is 1080x2340 (9:19.5, modern phone screens) so the reel fills the
-# whole screen instead of letterboxing. The layout itself is designed on a
+# Output is 1080x1920 (9:16) -- the frame IG/FB's reel editor and player
+# fill edge to edge (a taller 9:19.5 frame gets pillarboxed in the IG
+# editor). The layout itself is designed on a
 # 1080x1920 (9:16) content block, centered on the canvas and scaled down to
 # CONTENT_SCALE of the canvas width, so there's plain background margin on
 # every side (clear of IG/FB's side buttons and top/bottom overlays).
@@ -127,7 +128,7 @@ MAX_RUNS = 8  # wedge patches kept in the pool; a sweep never needs more than ~3
 # canvas, WF()/HF() map a width/height; scaling is done via DPI, so fonts,
 # line widths and the logo all shrink together and the content's
 # proportions never change.
-W_PX, H_PX = 1080, 2340
+W_PX, H_PX = 1080, 1920
 CONTENT_W_PX, CONTENT_H_PX = 1080, 1920   # design units of the content block
 CONTENT_SCALE = 0.80                      # content width / canvas width
 DES_W = CONTENT_W_PX / CONTENT_SCALE      # canvas size in design units
