@@ -30,6 +30,9 @@ def parse_args():
     ap = argparse.ArgumentParser(description="Fetch NCEI 1991-2020 daily normals via ACIS.")
     ap.add_argument("--sid", default="KPSC 5", help="ACIS station id (default: KPSC 5, Tri-Cities Airport)")
     ap.add_argument("--label", default="Tri-Cities", help="Place name for the graphic's title")
+    ap.add_argument("--station-label", default="Pasco / Tri-Cities Airport, Washington",
+                    help="Station name as shown in the graphic's subtitle "
+                         "(ACIS's own name is all-caps and unpunctuated)")
     ap.add_argument("--element", default="avgt", choices=sorted(ELEMENT_LABELS),
                     help="avgt (daily mean, default), maxt (highs) or mint (lows)")
     ap.add_argument("--output", default="normals.json")
@@ -58,6 +61,7 @@ def main():
     lon, lat = meta["ll"]
     out = {
         "station_name": meta["name"],
+        "station_label": args.station_label,
         "sid": args.sid,
         "label": args.label,
         "lat": lat, "lon": lon,

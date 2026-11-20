@@ -233,7 +233,7 @@ class Reel:
                  f"Times of year that share the same normal daily {el}",
                  fontproperties=f_reg, fontsize=8.6, color=INK_SECONDARY)
         fig.text(lx, Y(0.820),
-                 f"NCEI {self.ndata['period']} daily normals • {self.ndata['station_name'].title()}",
+                 f"NCEI {self.ndata['period']} daily normals • {self.ndata.get('station_label') or self.ndata['station_name'].title()}",
                  fontproperties=f_reg, fontsize=8.6, color=INK_SECONDARY)
 
     def _build_pie(self):
