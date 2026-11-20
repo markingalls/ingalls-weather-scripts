@@ -219,9 +219,15 @@ class Reel:
         lx = 0.07
         loc = self.ndata.get("label") or self.ndata["station_name"].title()
         el = self.ndata["element_label"]
-        fig.text(lx, Y(0.892), f"{loc}: Same {el.split()[0].title()} Temp,",
+        # two-line title, per element (avgt is the default reel)
+        line1, line2 = {
+            "avgt": (f"{loc} Average", "Annual Temperatures"),
+            "maxt": (f"{loc} Annual", "High Temperatures"),
+            "mint": (f"{loc} Annual", "Low Temperatures"),
+        }[self.ndata["element"]]
+        fig.text(lx, Y(0.892), line1,
                  fontproperties=f_bold, fontsize=19, color=INK)
-        fig.text(lx, Y(0.862), "Different Season",
+        fig.text(lx, Y(0.862), line2,
                  fontproperties=f_bold, fontsize=19, color=INK)
         fig.text(lx, Y(0.836),
                  f"Times of year that share the same normal daily {el}",
