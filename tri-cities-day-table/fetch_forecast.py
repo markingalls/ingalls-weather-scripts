@@ -63,6 +63,26 @@ def fetch_snow_level(point):
 WM6_INTERPOLATED_URL = "https://api.windbornesystems.com/forecasts/v1/wm-6/point_forecast/interpolated"
 
 
+def fetch_wm6_variable(lat, lon, forecast_days, variable):
+    """One WM-6 variable's ensemble distribution at a point, stored as the
+    API's own response. Needs WB_API_KEY; returns None without one."""
+    api_key = os.environ.get("WB_API_KEY")
+    if not api_key:
+        return None
+    now = datetime.now(timezone.utc)
+    params = {
+        "coordinates": f"{lat},{lon}",
+        "variable": variable,
+        "include_distribution": "true",
+        "min_forecast_time": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "max_forecast_time": (now + timedelta(days=forecast_days)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    r = requests.get(WM6_INTERPOLATED_URL, params=params,
+                      headers={"Authorization": f"Bearer {api_key}"}, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+
 def fetch_wm6_ptype(lat, lon, forecast_days):
     """WindBorne WM-6 ensemble precipitation-type probabilities
     (p_rain/p_freezing_rain/p_ice_pellets/p_snow per 3-hourly step), stored
@@ -113,15 +133,24 @@ if __name__ == "__main__":
     point, hourly = fetch_nws_hourly(args.lat, args.lon)
     tz = point["timeZone"]
     snow_level = fetch_snow_level(point)
-    ensemble = fetch_ensemble(args.lat, args.lon, args.forecast_days)
+    try:
+        ensemble = fetch_ensemble(args.lat, args.lon, args.forecast_days)
+    except requests.RequestException as e:
+        # Open-Meteo's free tier rate-limits shared IPs; still save the NWS
+        # (and WM-6) data so build_table.py can fall back to WM-6 precip odds.
+        print(f"WARNING: ECMWF ensemble fetch failed ({e}) -- saving without it.")
+        ensemble = None
     wm6_ptype = fetch_wm6_ptype(args.lat, args.lon, args.forecast_days)
+    # WM-6 3h precip distribution: fallback chance-of-precip source
+    wm6_precip = fetch_wm6_variable(args.lat, args.lon, args.forecast_days, "total_precipitation_3h")
 
     with open(args.output, "w") as f:
         json.dump({"label": args.label, "timezone": tz, "nws_hourly": hourly,
                    "nws_snow_level": snow_level,
                    "wm6_ptype": wm6_ptype,
+                   "wm6_precip": wm6_precip,
                    "ecmwf_ensemble": ensemble}, f)
 
-    n_members = sum(1 for k in ensemble["hourly"] if k.startswith("precipitation_member"))
+    n_members = sum(1 for k in ensemble["hourly"] if k.startswith("precipitation_member")) if ensemble else 0
     print(f"Saved {args.output}: {len(hourly)} NWS hourly temps, {n_members} ECMWF members "
           f"at {args.lat},{args.lon} (timezone {tz})")

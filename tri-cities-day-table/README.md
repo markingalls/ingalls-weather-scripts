@@ -70,6 +70,13 @@ python3 build_table.py --forecast forecast_yakima.json forecast_ellensburg.json
   used here since the table wants the hourly curve rather than a daily
   max/min, and NWS's hourly feed gives that without a WindBorne key. A
   column outside NWS's ~6.5-day hourly horizon shows "—".
+- **Chance of precip** (fallback): if the ECMWF ensemble fetch fails
+  (Open-Meteo's free tier rate-limits shared IPs, often with 429s),
+  `fetch_forecast.py` still saves the NWS/WM-6 data, and `build_table.py`
+  uses WM-6's `total_precipitation_3h` `gt_0p25mm` probability for the
+  3-hour step ending one hour after each column time -- the same window,
+  at effectively the same 0.01" threshold. `--precip-source wm6` forces it.
+  WM-6 data needs `WB_API_KEY`.
 - **Chance of precip**: the fraction of the 50 ECMWF members whose total
   over the three hourly steps labeled hour-1, hour, hour+1 exceeds
   0.254mm (0.01", measurable) — the 7-day graphic's 0.5mm threshold is a

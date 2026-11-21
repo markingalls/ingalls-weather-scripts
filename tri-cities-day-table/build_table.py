@@ -118,6 +118,22 @@ def precip_chance(ensemble, when_local):
     return pop, statistics.median(snow) > 0
 
 
+def wm6_precip_chance(wm6_precip, when_local):
+    """(pop, None) from WM-6's total_precipitation_3h distribution: its
+    gt_0p25mm probability (0.25mm, effectively the same 0.01" threshold) for
+    the 3-hour accumulation ending at when+1h -- the same when-2h..when+1h
+    span precip_chance() covers. None if that step isn't in the data. The
+    snow half is left to the column's other precip-type rules."""
+    if not wm6_precip:
+        return None
+    recs = wm6_precip["forecasts"][0] if isinstance(wm6_precip["forecasts"][0], list) else wm6_precip["forecasts"]
+    target = when_local + timedelta(hours=1)
+    for r in recs:
+        if datetime.fromisoformat(r["time"].replace("Z", "+00:00")) == target and r.get("distribution"):
+            return r["distribution"]["gt_0p25mm"], None
+    return None
+
+
 def parse_valid_time(valid_time):
     """NWS gridpoint '2026-11-21T09:00:00+00:00/PT3H' -> (start, end)
     datetimes. Only the H/D duration parts NWS actually uses are handled."""
@@ -183,6 +199,10 @@ def parse_args():
                      help="Show --day's night into the next morning (6 PM-9 AM) instead of "
                           "its 6 AM-9 PM daytime, e.g. --day friday --overnight for "
                           "Friday night/Saturday morning")
+    ap.add_argument("--precip-source", choices=["ecmwf", "wm6"], default="ecmwf",
+                     help="Chance-of-precip source. ecmwf (default) is Open-Meteo's ECMWF "
+                          "ensemble; wm6 is WM-6's 3h P(>0.25mm). Files without ECMWF data "
+                          "fall back to wm6 automatically.")
     ap.add_argument("--output", default=None,
                      help="Defaults to <labels>_<day>_table.png, e.g. tri_cities_wednesday_table.png "
                           "or tri_cities_hermiston_wednesday_table.png")
@@ -198,7 +218,7 @@ def column_times(date, local_tz, overnight):
     return [(midnight + timedelta(hours=o)).replace(tzinfo=local_tz) for o in offsets]
 
 
-def location_columns(data, times):
+def location_columns(data, times, precip_source="ecmwf"):
     local_tz = ZoneInfo(data["timezone"])
     cols = []
     for when in times:
@@ -213,7 +233,12 @@ def location_columns(data, times):
             "snow_to_surface": level is not None and surface is not None and level <= surface,
             "wm6_p_snow": wm6_p_snow_at(data.get("wm6_ptype"), when),
             "temp": nws_temp_at(data["nws_hourly"], when),
-            "precip": precip_chance(data["ecmwf_ensemble"], when),
+            # ECMWF ensemble by default; WM-6's own 3h precip odds when the
+            # ensemble wasn't fetched (e.g. Open-Meteo rate-limited) or the
+            # caller asked for it
+            "precip": (wm6_precip_chance(data.get("wm6_precip"), when)
+                       if precip_source == "wm6" or not data.get("ecmwf_ensemble")
+                       else precip_chance(data["ecmwf_ensemble"], when)),
         })
     return cols
 
@@ -234,7 +259,7 @@ def main():
     output = args.output or f"{slug}_{period}_table.png"
 
     times = column_times(date, local_tz, args.overnight)
-    groups = [(lbl, location_columns(d, times)) for lbl, d in zip(labels, locations)]
+    groups = [(lbl, location_columns(d, times, args.precip_source)) for lbl, d in zip(labels, locations)]
     multi = len(groups) > 1
 
     fig = plt.figure(figsize=(12, 8.3), dpi=200)
@@ -333,7 +358,7 @@ def main():
             # The ensemble's own rain/snow call is only the fallback when
             # there's no NWS temperature for the column.
             if col["temp"] is None:
-                ptype = "snow" if ens_snow else "rain"
+                ptype = "snow" if ens_snow or (col["wm6_p_snow"] or 0) >= 0.5 else "rain"
             elif col["temp"] < FREEZING_F:
                 ptype = "snow"
             elif col["wm6_p_snow"] is not None and col["wm6_p_snow"] >= WM6_SNOW_PROB:
@@ -425,7 +450,10 @@ def main():
 
     fig.text((LEFT + RIGHT) / 2, 0.075,
               # same short form as the 7-day graphic's "NWS/ECMWF/WM-6 • Ingalls Weather"
-              ("NWS/ECMWF/WM-6" if any(d.get("wm6_ptype") for d in locations) else "NWS/ECMWF")
+              "/".join(["NWS"]
+                       + (["ECMWF"] if args.precip_source == "ecmwf"
+                          and any(d.get("ecmwf_ensemble") for d in locations) else [])
+                       + (["WM-6"] if any(d.get("wm6_ptype") or d.get("wm6_precip") for d in locations) else []))
               + " • Ingalls Weather",
               fontproperties=f_reg, fontsize=9, color=INK_SECONDARY, ha="center")
 
