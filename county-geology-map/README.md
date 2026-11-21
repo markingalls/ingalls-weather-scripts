@@ -45,6 +45,12 @@ whole series: all 39 Washington and 36 Oregon counties.
   `series/contact_sheet.jpg`, `series/run_log.txt` and a zip with one
   folder per state. Each county runs in its own subprocess, so a failure is
   logged and the batch keeps going.
+- `build_map.py ... --palette cvd` -- colorblind-friendly variant:
+  Okabe-Ito hues (distinct under protanopia, deuteranopia and
+  tritanopia), hatching to separate related units like the Columbia River
+  Basalt formations, white-cored grayscale highways told apart by weight,
+  and dark-blue folds. It's a per-map option. The series' shared colors
+  are unchanged.
 - `requirements.txt` / `setup.sh` -- Python + system dependencies.
 
 ## Usage

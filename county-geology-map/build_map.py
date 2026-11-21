@@ -62,6 +62,9 @@ ap.add_argument("--out", help="output PNG path (default <state>_<county>_geology
 ap.add_argument("--logo-corner", choices=["bottom-right", "top-right", "top-left", "bottom-left"],
                 default="bottom-right",
                 help="where the logo sits inside the map frame (move it off the county)")
+ap.add_argument("--palette", choices=["standard", "cvd"], default="standard",
+                help="cvd: colorblind-friendly variant (Okabe-Ito hues, hatching to "
+                     "separate related units, grayscale highways)")
 ap.add_argument("--no-detail", action="store_true",
                 help="draw detail classes (CRB formations, loess, flood deposits) "
                      "in their parent class's color")
@@ -70,6 +73,42 @@ name = data_name(args.state, args.county)
 state_name = STATE_INFO[args.state][1]
 title_name = args.county.strip().title()
 
+CLASSES = load_classes()
+# ---------- colorblind-friendly variant (--palette cvd) ----------
+# Hues from the Okabe-Ito set, which stay distinct under protanopia,
+# deuteranopia and tritanopia; related units (the Columbia River Basalt
+# formations, loess/flood deposits) share a hue and are told apart by
+# hatching rather than by subtle shade differences. Highways become
+# white-cored grayscale lines so they can't be confused with orange/blue
+# rock or water, and folds turn dark blue against the reddish-purple basalt.
+CVD = {  # class: (fill, hatch)
+    "surficial": ("#F2E98C", None),
+    "surficial_loess": ("#FBF6D2", None),
+    "surficial_flood": ("#F2E98C", "...."),
+    "cz_sedimentary": ("#E69F00", None),
+    "cz_volcanic": ("#D55E00", None),
+    "crb": ("#CC79A7", "---"),
+    "crb_saddle_mtns": ("#CC79A7", "...."),
+    "crb_wanapum": ("#CC79A7", "///"),
+    "crb_grande_ronde": ("#CC79A7", "\\\\\\"),
+    "crb_imnaha": ("#CC79A7", "xxx"),
+    "plutonic": ("#009E73", None),
+    "mz_pz_sedimentary": ("#0072B2", None),
+    "mz_pz_volcanic": ("#009E73", "///"),
+    "metamorphic": ("#9E9E9E", None),
+    "ultramafic": ("#4D4D4D", None),
+    "precambrian": ("#9E9E9E", "xxx"),
+    "ice": ("#FFFFFF", None),
+}
+HATCH_COLOR = "#2b2a26"
+if args.palette == "cvd":
+    plt.rcParams["hatch.linewidth"] = 0.6
+    _classes = load_classes()
+    for c in _classes:
+        if c["key"] in CVD:
+            c["color"], c["hatch"] = CVD[c["key"]]
+    load_classes = lambda: _classes  # noqa: E731  (shared list for the rest of the script)
+    MOTORWAY_COLOR = TRUNK_COLOR = SECONDARY_COLOR = "white"
 CLASSES = load_classes()
 BY_KEY = {c["key"]: c for c in CLASSES}
 SHOW_DETAIL = set() if args.no_detail else {c["key"] for c in CLASSES if c.get("parent")}
@@ -109,8 +148,8 @@ def unit_label(c):
     return f"{c['label']}\n({c['age']})" if c.get("age") else c["label"]
 
 
-unit_handles = [Patch(facecolor=c["color"], edgecolor="#8a877d", linewidth=0.5,
-                      label=unit_label(c))
+unit_handles = [Patch(facecolor=c["color"], edgecolor=HATCH_COLOR if c.get("hatch") else "#8a877d",
+                      linewidth=0.5, hatch=c.get("hatch"), label=unit_label(c))
                 for c in CLASSES if c["key"] in by_class and c["key"] != "water"]
 has_solid = any(not f["properties"]["concealed"] for f in faults["features"])
 has_dashed = any(f["properties"]["concealed"] for f in faults["features"])
@@ -121,6 +160,8 @@ if has_dashed:
     other_handles.append(Line2D([0], [0], color="black", linewidth=1.1, linestyle=(0, (3, 2)),
                                 label="Fault, concealed"))
 FOLD_COLOR = "#6B3FA0"  # purple: reads on every unit color, distinct from black faults
+if args.palette == "cvd":
+    FOLD_COLOR = "#003F7F"  # dark blue: distinct from black faults and the reddish-purple basalt
 
 
 class FoldHandle:
@@ -152,6 +193,13 @@ other_handles += [
     Line2D([0], [0], color=MOTORWAY_COLOR, linewidth=2.2, label="Freeway"),
     Line2D([0], [0], color=TRUNK_COLOR, linewidth=2.2, label="Major highway"),
     Line2D([0], [0], color=SECONDARY_COLOR, linewidth=1.2, label="State highway"),
+] if args.palette != "cvd" else [
+    Line2D([0], [0], color="white", linewidth=3.0, label="Freeway",
+           path_effects=[pe.Stroke(linewidth=5.6, foreground="#111111"), pe.Normal()]),
+    Line2D([0], [0], color="white", linewidth=2.0, label="Major highway",
+           path_effects=[pe.Stroke(linewidth=4.0, foreground="#3c3c3c"), pe.Normal()]),
+    Line2D([0], [0], color="white", linewidth=1.0, label="State highway",
+           path_effects=[pe.Stroke(linewidth=2.4, foreground="#6e6e6e"), pe.Normal()]),
 ]
 if "water" in by_class or water_ctx["features"]:
     other_handles.append(Patch(facecolor=BY_KEY["water"]["color"], edgecolor=BY_KEY["water"]["edge"],
@@ -248,6 +296,9 @@ for key, geoms in by_class.items():
         continue  # drawn later, above other lines' base but under highways/faults
     ax.add_geometries(geoms, crs=pc, facecolor=BY_KEY[key]["color"],
                       edgecolor=BY_KEY[key]["color"], linewidth=0.2, zorder=2)
+    if BY_KEY[key].get("hatch"):
+        ax.add_geometries(geoms, crs=pc, facecolor="none", edgecolor=HATCH_COLOR,
+                          linewidth=0, hatch=BY_KEY[key]["hatch"], alpha=0.55, zorder=2.01)
 
 # ---------- states + counties ----------
 # Full-resolution TIGER boundaries (fetch_geology.py), so the county
@@ -290,11 +341,20 @@ for f in roads2["features"]:
     cls = f["properties"]["class"]
     (motorway_geoms if cls == "freeway" else trunk_geoms if cls == "major" else sec_geoms).append(
         shape(f["geometry"]))
-for geoms, color, lw, z in [(sec_geoms, SECONDARY_COLOR, 0.9, 4.0),
-                            (trunk_geoms, TRUNK_COLOR, 1.3, 4.2),
-                            (motorway_geoms, MOTORWAY_COLOR, 1.5, 4.4)]:
-    ax.add_geometries(geoms, crs=pc, facecolor="none", edgecolor="white",
-                      linewidth=lw + GLOW_EXTRA, alpha=GLOW_ALPHA, zorder=z - 0.05)
+ROAD_STYLE = ([(sec_geoms, SECONDARY_COLOR, 0.9, 4.0), (trunk_geoms, TRUNK_COLOR, 1.3, 4.2),
+               (motorway_geoms, MOTORWAY_COLOR, 1.5, 4.4)] if args.palette != "cvd" else
+              [(sec_geoms, "white", 0.7, 4.0), (trunk_geoms, "white", 1.4, 4.2),
+               (motorway_geoms, "white", 2.2, 4.4)])
+# cvd: grayscale casing, darker and wider for bigger roads, so class reads by weight
+CASING = {4.0: ("#6e6e6e", 1.0), 4.2: ("#3c3c3c", 1.6), 4.4: ("#111111", 2.0)}
+for geoms, color, lw, z in ROAD_STYLE:
+    if args.palette == "cvd":
+        cc, extra = CASING[z]
+        ax.add_geometries(geoms, crs=pc, facecolor="none", edgecolor=cc,
+                          linewidth=lw + extra, zorder=z - 0.05)
+    else:
+        ax.add_geometries(geoms, crs=pc, facecolor="none", edgecolor="white",
+                          linewidth=lw + GLOW_EXTRA, alpha=GLOW_ALPHA, zorder=z - 0.05)
     ax.add_geometries(geoms, crs=pc, facecolor="none", edgecolor=color, linewidth=lw, zorder=z)
 
 # ---------- faults ----------
