@@ -52,6 +52,10 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`high-surf-vs-coastal-flood/`](high-surf-vs-coastal-flood/) — static
+  explainer graphic contrasting NWS High Surf and Coastal Flood alerts
+  (cause, threat, who's at risk, what to do, and alert levels in official
+  NWS colors).
 
 ## Shared resources
 

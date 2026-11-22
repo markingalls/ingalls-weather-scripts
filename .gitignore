@@ -105,3 +105,7 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+# --- high-surf-vs-coastal-flood ---
+# the rendered graphic is an output, not source -- regenerate with
+# build_graphic.py rather than tracking it.
+high-surf-vs-coastal-flood/high_surf_vs_coastal_flood*.png
