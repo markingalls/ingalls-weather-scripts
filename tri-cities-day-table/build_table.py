@@ -203,6 +203,10 @@ def parse_args():
                      help="Chance-of-precip source. ecmwf (default) is Open-Meteo's ECMWF "
                           "ensemble; wm6 is WM-6's 3h P(>0.25mm). Files without ECMWF data "
                           "fall back to wm6 automatically.")
+    ap.add_argument("--mix-below-f", type=float, default=None,
+                     help="One-off override: also show the rain/snow mix icon for any "
+                          "at/above-freezing column colder than this many °F (e.g. 34 for a "
+                          "marginal night). Off by default.")
     ap.add_argument("--output", default=None,
                      help="Defaults to <labels>_<day>_table.png, e.g. tri_cities_wednesday_table.png "
                           "or tri_cities_hermiston_wednesday_table.png")
@@ -363,8 +367,9 @@ def main():
                 ptype = "snow"
             elif col["wm6_p_snow"] is not None and col["wm6_p_snow"] >= WM6_SNOW_PROB:
                 ptype = "snow"
-            elif col["snow_to_surface"] or (col["wm6_p_snow"] is not None
-                                            and col["wm6_p_snow"] >= WM6_MIX_PROB):
+            elif (col["snow_to_surface"]
+                  or (col["wm6_p_snow"] is not None and col["wm6_p_snow"] >= WM6_MIX_PROB)
+                  or (args.mix_below_f is not None and col["temp"] < args.mix_below_f)):
                 ptype = "mix"
             else:
                 ptype = "rain"
