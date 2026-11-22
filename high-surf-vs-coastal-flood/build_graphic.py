@@ -84,14 +84,14 @@ COLUMNS = [
         "accent": COLOR_FLOOD,
         "icon": "flood",
         "rows": [
-            ("CAUSE", "High tides plus storm surge push the sea "
+            ("CAUSE", "High tides and/or storm surge push the sea "
                       "above its normal level."),
             ("THREAT", "Seawater floods normally dry land: roads, "
                        "parking lots, homes, businesses."),
             ("WHO", "Low-lying shoreline areas, mostly around "
                     "high tide."),
-            ("ACTION", "Don't drive through flooded roads. Move cars "
-                       "to higher ground before high tide."),
+            ("ACTION", "Sandbag low-lying buildings. Move cars to "
+                       "higher ground. Don't drive through flooded roads."),
         ],
         "alerts": ["Coastal Flood Advisory", "Coastal Flood Watch", "Coastal Flood Warning"],
         "alerts_note": None,
