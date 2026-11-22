@@ -102,8 +102,8 @@ python3 build_table.py --forecast forecast_yakima.json forecast_ellensburg.json
     icon font's own `MIXED_RAIN_SNOW` glyph is a whole cloud, so the mix
     icon is built from the drop/flake glyphs instead to match the other
     cells.
-  - **One-off override** `--mix-below-f N`: also show the mix icon for
-    any at/above-freezing column colder than N °F (used at 34 for the
+  - **One-off override** `--mix-at-or-below-f N`: also show the mix icon
+    for any at/above-freezing column at or below N °F (used at 34 for the
     marginal Nov 21-22 night). Off by default.
   - **Raindrop**: otherwise.
   - WM-6 probabilities need `WB_API_KEY` in `fetch_forecast.py`'s
