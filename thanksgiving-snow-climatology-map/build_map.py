@@ -244,6 +244,9 @@ LABELS = [
     ("McCall", -116.0987, 44.9110, None),
     ("Boise", -116.2023, 43.6150, None),
     ("Salmon", -113.9213, 45.1758, None),
+    ("Kalispell", -114.3129, 48.1958, None),
+    ("Missoula", -113.9940, 46.8721, None),
+    ("Butte", -112.5348, 46.0038, None),
     ("Twin Falls", -114.4609, 42.5629, None),
     ("Idaho Falls", -112.0362, 43.4917, None),
 ]
