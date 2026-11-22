@@ -105,3 +105,9 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+
+# fetch_climatology.py writes the raw per-station Thanksgiving pull to
+# output/, and build_map.py renders PNGs there -- neither is source, so
+# don't track them.
+thanksgiving-snow-climatology-map/output/*.json
+thanksgiving-snow-climatology-map/output/*.png
