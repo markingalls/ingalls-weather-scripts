@@ -53,7 +53,7 @@ workflows. Each project lives in its own directory with its own README.
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
 - [`thanksgiving-snow-climatology-map/`](thanksgiving-snow-climatology-map/)
-  — gridded map of how often WA/OR/ID has had snow on Thanksgiving
+  — gridded map of how often the Pacific Northwest has had snow on Thanksgiving
   (measurable snowfall, or snow on the ground), built from every ACIS
   station's full period of record plus terrain, with major cities labeled.
 

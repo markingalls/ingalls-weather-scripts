@@ -1,15 +1,17 @@
 """
-Fetches every Thanksgiving Day's snowfall and snow depth for every
-WA/OR/ID station in ACIS (the same backend behind xmacis.rcc-acis.org),
+Fetches every Thanksgiving Day's snowfall and snow depth for every ACIS
+station (the same backend behind xmacis.rcc-acis.org) inside the map's
+bounding box -- WA/OR/ID plus the visible parts of BC, AB, MT, WY, UT,
+NV, and CA, so the grid extends past the WA/OR/ID borders --
 across the full period of record, and writes output/thanksgiving_snow.json:
 one entry per station with its location, elevation, and per-year snowfall
 (inches) and snow depth (inches) on that year's Thanksgiving.
 
-One ACIS MultiStnData call per year (all three states at once, both
+One ACIS MultiStnData call per year (the whole bbox at once, both
 elements), so a full 1890-present pull is ~135 requests, run in a small
-thread pool -- each one is slow server-side (it scans every station in
-three states), so the whole pull takes several minutes. No API key
-required.
+thread pool; takes several minutes. No API key required. Canadian
+stations come through ACIS's GHCN-Daily feed (ECCC and CoCoRaHS-Canada
+sites), so coverage north of the border is thinner than in the US.
 
 The per-station "% of Thanksgivings with snow" is computed in build_map.py
 rather than here, so the threshold / metric / minimum-years settings can
@@ -40,7 +42,9 @@ from pathlib import Path
 import requests
 
 BASE_URL = "https://data.rcc-acis.org/MultiStnData"
-STATES = "wa,or,id"
+# Map frame (build_map.py's LON/LAT_MIN/MAX) padded by its GRID_PAD_DEG,
+# so stations just outside the frame still inform the grid at its edges.
+BBOX = (-126.0, 40.45, -109.7, 50.25)  # lon_min, lat_min, lon_max, lat_max
 
 FIRST_YEAR = 1890  # ACIS's daily COOP record in WA/OR/ID starts in the early 1890s
 
@@ -76,7 +80,7 @@ def parse_inches(v):
 
 def fetch_year(year):
     day = thanksgiving_date(year).isoformat()
-    params = {"state": STATES, "sdate": day, "edate": day, "elems": "snow,snwd",
+    params = {"bbox": ",".join(str(v) for v in BBOX), "sdate": day, "edate": day, "elems": "snow,snwd",
               "meta": "uid,name,state,ll,elev,sids"}
     for attempt in range(4):
         try:
@@ -89,7 +93,7 @@ def fetch_year(year):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fetch WA/OR/ID Thanksgiving snow history from ACIS.")
+    parser = argparse.ArgumentParser(description="Fetch Pacific Northwest Thanksgiving snow history from ACIS.")
     parser.add_argument("--first-year", type=int, default=FIRST_YEAR)
     parser.add_argument("--last-year", type=int, default=None,
                         help="Last Thanksgiving to include (default: the most recent one already past).")
@@ -122,7 +126,7 @@ def main():
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_FILE, "w") as f:
-        json.dump({"first_year": years[0], "last_year": years[-1], "states": STATES.upper().split(","),
+        json.dump({"first_year": years[0], "last_year": years[-1], "bbox": BBOX,
                    "stations": stations}, f)
     print(f"Wrote {len(stations)} stations, {years[0]}-{years[-1]}, to {OUTPUT_FILE}")
 

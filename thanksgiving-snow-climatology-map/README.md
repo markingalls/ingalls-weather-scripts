@@ -1,7 +1,8 @@
 # Pacific Northwest Thanksgiving Snow Climatology Map
 
-A styled, gridded map of Washington, Oregon, and Idaho shaded by the
-percent of Thanksgivings that had snow. It's built from every ACIS station's
+A styled, gridded map of the Pacific Northwest shaded by the percent of
+Thanksgivings that had snow. It covers WA/OR/ID plus the parts of BC, AB,
+MT, WY, UT, NV, and CA that are visible in the frame. It's built from every ACIS station's
 own period of record (the backend behind xmACIS / SC-ACIS: NWS COOP,
 first-order airport, CoCoRaHS, and SNOTEL daily records) and spread onto a
 ~3 km terrain grid. Major cities are labeled with the repo's standard
@@ -17,7 +18,8 @@ Two versions, picked with `--metric`:
 ## Files
 
 - `fetch_climatology.py` — pulls every Thanksgiving's snowfall and snow
-  depth for every WA/OR/ID station in ACIS, 1890–the most recent
+  depth for every ACIS station in the map's bounding box (the frame plus
+  1° of padding), 1890–the most recent
   Thanksgiving, and writes `output/thanksgiving_snow.json`. One
   `MultiStnData` call per year; takes several minutes. Only needs
   re-running once a year, after a new Thanksgiving.
@@ -30,7 +32,7 @@ Two versions, picked with `--metric`:
   needs GDAL, apt-only) and the Poppins font used for map labels.
 
 Shared basemap data lives one level up in [`../maps/`](../maps/), and the
-Ingalls Weather logo in
+Ingalls Weather logo (top-right inside the frame) in
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
 
 ## Usage
@@ -74,8 +76,10 @@ Output: `output/thanksgiving_snow_<metric>.png`.
   a 50% black box centered on the point, and the bold value above it. The
   value is the nearest grid cell, so it matches the shading under it.
   Tri-Cities is one label at the centroid of Kennewick, Pasco and
-  Richland, averaging all three. A value that rounds to 0% shows the name
-  only (Portland on the snowfall map). Snoqualmie Pass and Pendleton were
+  Richland, averaging all three. One deliberate departure from the
+  convention: 0% is shown as "0%" rather than name-only, because on this
+  map a 0% (Astoria, Portland) is the point, not a missing value.
+  Snoqualmie Pass and Pendleton were
   tried and dropped because they crowded Seattle/Wenatchee and
   Tri-Cities.
 - **The `depth` map runs much higher in the mountains** than the
@@ -105,7 +109,8 @@ Output: `output/thanksgiving_snow_<metric>.png`.
      with short-range (20 km) weights. A nugget term fades the correction
      away from stations, so the grid honors each station where it is and
      relies on the elevation relationship in between.
-  3. Lightly smooth (σ = 0.8 cells), clip to 0–100%, and mask to WA/OR/ID.
+  3. Lightly smooth (σ = 0.8 cells), clip to 0–100%, and mask to land
+     within 60 km of a qualifying station (`MAX_STATION_DIST_KM`).
      For display only, the grid is bilinearly upsampled 4× so bin edges
      render as curves instead of ~3 km stair steps.
 
@@ -120,6 +125,10 @@ Output: `output/thanksgiving_snow_<metric>.png`.
   through the San Juans. Each coastal state's offshore 3 nm state-waters
   line is dropped, which removes the phantom line along the WA/OR coast
   and through the Strait of Juan de Fuca.
-- Only WA/OR/ID are shaded. Neighboring states and provinces are left as
-  muted land, so they read as "no data" rather than "0%". (Canada's
-  Thanksgiving is in October anyway.)
+- **Adjacent states and provinces are shaded too**, from the same ACIS
+  pull. Canadian stations come through ACIS's GHCN-Daily feed (ECCC and
+  CoCoRaHS-Canada sites), so BC/AB coverage is thinner. Land more than
+  60 km from every qualifying station is left as muted, unshaded land
+  rather than extrapolated, so any gaps read as "no data," not "0%." The
+  BC/AB numbers use the US Thanksgiving date: they show snow odds on that
+  late-November day, not on Canadian Thanksgiving, which is in October.

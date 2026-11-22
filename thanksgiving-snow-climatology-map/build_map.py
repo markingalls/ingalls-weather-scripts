@@ -2,9 +2,12 @@
 Pacific Northwest Thanksgiving Snow Climatology Map -- builder
 Ingalls Weather
 
-Gridded map of Washington, Oregon, and Idaho shaded by the percent of
-Thanksgivings that had snow, built from every ACIS station's own period of
-record and spread onto a ~3 km terrain grid (see grid_climatology()). Two
+Gridded map of the Pacific Northwest (WA/OR/ID plus the visible parts of
+BC, AB, MT, WY, UT, NV, and CA) shaded by the percent of Thanksgivings that
+had snow, built from every ACIS station's own period of record and spread
+onto a ~3 km terrain grid (see grid_climatology()). Land farther than
+MAX_STATION_DIST_KM from any qualifying station is left unshaded rather
+than extrapolated. Two
 metrics (--metric):
   - snowfall (default): measurable snow *fell* on Thanksgiving Day
     (daily snowfall >= SNOWFALL_THRESHOLD_IN, 0.1" -- trace doesn't count).
@@ -30,7 +33,9 @@ local elevation relationship between them.
 
 Labels follow the repo's default value-at-location convention (no dot,
 name on a 50% black box centered on the point, bold value above it), with
-values sampled from the nearest grid cell.
+values sampled from the nearest grid cell. Unlike the convention's default,
+0% is shown as "0%" rather than name-only -- on this map a 0% is the
+point (e.g. Portland), not a missing value.
 
 Reads output/thanksgiving_snow.json, written by fetch_climatology.py --
 run that first (once; it only needs re-running after a new Thanksgiving).
@@ -92,9 +97,6 @@ TERRAIN_FILE = MAPS_DIR / "pnw_terrain_3km.npz"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 TARGET_COUNTRIES = {"United States of America", "Canada", "Mexico"}
-# States the station data covers -- the grid is masked to these; every
-# other state/province is left as plain muted land.
-DATA_STATES = {"Washington", "Oregon", "Idaho"}
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -161,6 +163,10 @@ GWR_EXTRAP_BELOW_M = 300.0    # ...or below the lowest
 RESID_NEIGHBORS = 8
 RESID_LENGTH_KM = 20.0        # residual-correction Gaussian length scale
 RESID_NUGGET = 0.25           # pulls the residual back toward 0 away from stations
+# Land cells farther than this from every qualifying station stay unshaded
+# (plain muted land) instead of being extrapolated -- mostly matters in BC
+# and AB, where ACIS's GHCN-fed Canadian coverage is thin.
+MAX_STATION_DIST_KM = 60.0
 FINAL_SMOOTH_SIGMA = 0.8      # grid cells; just takes the edge off single-cell speckle
 # Display-only bilinear upsampling of the ~3 km grid, so bin boundaries
 # render as smooth curves instead of stair-stepped ~3 km cells. Labels
@@ -219,6 +225,7 @@ PCT_TICK_LABELS = ["0", "1", "5", "10", "15", "20", "30", "40", "50", "75", "100
 # ---------------------------------------------------------------------------
 LABELS = [
     ("Bellingham", -122.4787, 48.7519, None),
+    ("Astoria", -123.8313, 46.1879, None),
     ("Seattle", -122.3321, 47.6062, None),
     ("Portland", -122.6784, 45.5152, None),
     ("Eugene", -123.0868, 44.0521, None),
@@ -236,6 +243,7 @@ LABELS = [
     ("Burns", -119.0541, 43.5866, None),
     ("McCall", -116.0987, 44.9110, None),
     ("Boise", -116.2023, 43.6150, None),
+    ("Salmon", -113.9213, 45.1758, None),
     ("Twin Falls", -114.4609, 42.5629, None),
     ("Idaho Falls", -112.0362, 43.4917, None),
 ]
@@ -376,21 +384,12 @@ def load_land():
             for feat in data["features"] if feat.get("geometry")]
 
 
-def load_states_and_lakes():
-    """(union of the data states' polygons -- the grid mask --, lake
-    polygons to fill as water)."""
+def load_lakes():
     with open(STATES_LAKES_FILE) as f:
         data = json.load(f)
-    data_states, lakes = [], []
-    for feat in data["features"]:
-        props = feat["properties"]
-        geom = shape(feat["geometry"])
-        if "Lake" in props.get("featurecla", ""):
-            lakes.append(shapely.set_precision(geom, grid_size=COORD_SNAP_GRID_DEG)
-                         .segmentize(BORDER_DENSIFY_SEGMENT_DEG))
-        elif props.get("admin") == "United States of America" and props.get("name") in DATA_STATES:
-            data_states.append(geom)
-    return unary_union(data_states), lakes
+    return [shapely.set_precision(shape(feat["geometry"]), grid_size=COORD_SNAP_GRID_DEG)
+            .segmentize(BORDER_DENSIFY_SEGMENT_DEG)
+            for feat in data["features"] if "Lake" in feat["properties"].get("featurecla", "")]
 
 
 def load_boundary_lines(path, country_filter):
@@ -459,20 +458,28 @@ def build_map(metric, min_years, output_path):
 
     print("Loading basemap layers...")
     land_geoms = load_land()
-    data_states, lake_geoms = load_states_and_lakes()
+    lake_geoms = load_lakes()
+    land_union = unary_union(land_geoms)
     country_lines = load_country_lines()
     state_lines = load_state_lines(country_lines)
 
-    inside = shapely.contains_xy(data_states, glon, glat)
-    # Display grid: bilinear upsample, then mask against the state outline
-    # at the finer resolution so the shading meets the borders cleanly.
+    # Shade land within MAX_STATION_DIST_KM of a qualifying station.
+    st_tree = cKDTree(to_km([s["lon"] for s in stns], [s["lat"] for s in stns]))
+
+    def shade_mask(lon2d, lat2d):
+        near = st_tree.query(to_km(lon2d.ravel(), lat2d.ravel()))[0].reshape(lon2d.shape) <= MAX_STATION_DIST_KM
+        return near & shapely.contains_xy(land_union, lon2d, lat2d)
+
+    inside = shade_mask(glon, glat)
+    # Display grid: bilinear upsample, then mask at the finer resolution so
+    # the shading meets the coastline cleanly.
     dlon_1d = np.linspace(glon_1d[0], glon_1d[-1], len(glon_1d) * DISPLAY_UPSAMPLE)
     dlat_1d = np.linspace(glat_1d[0], glat_1d[-1], len(glat_1d) * DISPLAY_UPSAMPLE)
     dgrid = zoom(grid, (len(dlat_1d) / grid.shape[0], len(dlon_1d) / grid.shape[1]), order=1)
     dlon, dlat = np.meshgrid(dlon_1d, dlat_1d)
-    grid_masked = np.ma.masked_where(~shapely.contains_xy(data_states, dlon, dlat), dgrid)
+    grid_masked = np.ma.masked_where(~shade_mask(dlon, dlat), dgrid)
     vis = grid[inside & (glon >= LON_MIN) & (glon <= LON_MAX) & (glat >= LAT_MIN) & (glat <= LAT_MAX)]
-    print(f"Grid range inside WA/OR/ID: {vis.min():.0f}% - {vis.max():.0f}%")
+    print(f"Shaded grid range in frame: {vis.min():.0f}% - {vis.max():.0f}%")
 
     # ---- Label values: nearest grid cell, averaged over sample points ----
     def sample(lon, lat):
@@ -512,8 +519,8 @@ def build_map(metric, min_years, output_path):
 
     # Labels -- name centered on the point on a 50% black box, value (bold,
     # larger, no box) centered just above it. Repo default convention; see
-    # blue-mountains-downslope-map. A value that rounds to 0% shows the
-    # name only.
+    # blue-mountains-downslope-map. 0% is shown as a value here, not
+    # name-only (see module docstring).
     geodetic_transform = pc._as_mpl_transform(ax)
     name_stroke = [pe.withStroke(linewidth=0.9, foreground=(0, 0, 0, 0.85))]
     value_stroke = [pe.withStroke(linewidth=2.2, foreground=(0, 0, 0, 0.9))]
@@ -525,8 +532,6 @@ def build_map(metric, min_years, output_path):
                     bbox=dict(boxstyle="round,pad=0.04,rounding_size=0.25", facecolor="black",
                               alpha=0.50, edgecolor="none"))
         t.set_path_effects(name_stroke)
-        if round(label_vals[name]) == 0:
-            continue
         val_tr = offset_copy(geodetic_transform, fig=fig, x=0, y=VALUE_GAP_PT, units="points")
         v = ax.text(lon_c, lat_c, f"{label_vals[name]:.0f}%", fontsize=VALUE_FONTSIZE, fontproperties=poppins_bold,
                     color="white", ha="center", va="bottom", zorder=102, transform=val_tr)
@@ -568,7 +573,7 @@ def build_map(metric, min_years, output_path):
     fig.text(0.03, 0.938, cfg["subtitle"], fontsize=12.5, fontproperties=poppins_med,
              color="#3a3835", ha="left", va="top")
     fig.text(0.03, 0.905,
-             f"Gridded from {len(stns)} WA/OR/ID stations with ≥{min_years} Thanksgivings on record "
+             f"Gridded from {len(stns)} stations with ≥{min_years} Thanksgivings on record "
              f"({span_lo}–{span_hi}) + terrain",
              fontsize=10.5, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
 
@@ -580,7 +585,7 @@ def build_map(metric, min_years, output_path):
     plt.close(fig)
     print(f"Saved base map to {output_path}")
 
-    # ---- Composite logo, bottom-left, snug inside the frame ----
+    # ---- Composite logo, top-right, snug inside the frame ----
     if LOGO_FILE.exists():
         base = Image.open(output_path).convert("RGB")
         bw, bh = base.size
@@ -589,15 +594,15 @@ def build_map(metric, min_years, output_path):
         black_cols = [x for x in range(bw) if (arr[y, x] < 40).all()]
         x = bw // 2
         black_rows = [yy for yy in range(bh) if (arr[yy, x] < 40).all()]
-        frame_left = min(black_cols) if black_cols else 20
-        frame_bottom = max(black_rows) if black_rows else bh - 20
+        frame_right = max(black_cols) if black_cols else bw - 20
+        frame_top = min(black_rows) if black_rows else 20
 
         logo = Image.open(LOGO_FILE).convert("RGB")
         target_w = int(bw * 0.08)
         target_h = int(logo.height * target_w / logo.width)
         logo_resized = logo.resize((target_w, target_h), Image.LANCZOS)
 
-        pos = (frame_left + MAP_FRAME_INSET_PX, frame_bottom - MAP_FRAME_INSET_PX - target_h)
+        pos = (frame_right - MAP_FRAME_INSET_PX - target_w, frame_top + MAP_FRAME_INSET_PX)
         base.paste(logo_resized, pos)
         base.save(output_path)
         print(f"Composited logo at {pos}")
@@ -607,7 +612,7 @@ def build_map(metric, min_years, output_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Build an Ingalls Weather WA/OR/ID Thanksgiving snow climatology map.")
+        description="Build an Ingalls Weather Pacific Northwest Thanksgiving snow climatology map.")
     parser.add_argument("--metric", choices=sorted(METRICS), default="snowfall",
                         help="snowfall = measurable snow fell (default); depth = snow on the ground.")
     parser.add_argument("--min-years", type=int, default=DEFAULT_MIN_YEARS,
