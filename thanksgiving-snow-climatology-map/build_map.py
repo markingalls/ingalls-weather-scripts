@@ -247,6 +247,7 @@ LABELS = [
     ("Kalispell", -114.3129, 48.1958, None),
     ("Missoula", -113.9940, 46.8721, None),
     ("Butte", -112.5348, 46.0038, None),
+    ("Great Falls", -111.3008, 47.5053, None),
     ("Twin Falls", -114.4609, 42.5629, None),
     ("Idaho Falls", -112.0362, 43.4917, None),
 ]
