@@ -52,6 +52,9 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`pnw-museums-list/`](pnw-museums-list/) — generates a styled,
+  Instagram-ready graphic of a Pacific Northwest museum bucket list,
+  grouped by city.
 
 ## Shared resources
 
