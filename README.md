@@ -53,8 +53,8 @@ workflows. Each project lives in its own directory with its own README.
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
 - [`pnw-museums-list/`](pnw-museums-list/) — generates a styled,
-  Instagram-ready graphic of a Pacific Northwest museum bucket list,
-  grouped by city.
+  to-do-style Instagram graphic of a Pacific Northwest museum bucket
+  list.
 
 ## Shared resources
 

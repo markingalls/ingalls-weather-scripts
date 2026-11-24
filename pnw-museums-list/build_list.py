@@ -2,9 +2,10 @@
 Pacific Northwest Museums -- bucket-list graphic
 Ingalls Weather
 
-Renders a styled, Instagram-ready (4:5) list of Pacific Northwest museums,
-grouped by city, in the same visual style as the repo's map products:
-Poppins type, the #f7f6f2 page tone, a black-framed panel, a muted
+Renders a Pacific Northwest museum bucket list as a to-do-style graphic
+(two columns of open-circle "City - Museum" lines), modestly wide for
+Instagram, in the same visual style as the repo's map products: Poppins
+type, the #f7f6f2 page tone throughout, a black outline frame, a muted
 credit line along the bottom, and the Ingalls Weather logo.
 
 USAGE
@@ -16,7 +17,6 @@ Logo is read from /assets/ingalls_weather_logo.png at repo root.
 """
 
 import argparse
-from itertools import groupby
 from pathlib import Path
 
 import matplotlib
@@ -24,6 +24,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patches as mpatches
+from matplotlib.lines import Line2D
 import numpy as np
 from PIL import Image
 
@@ -40,19 +41,20 @@ POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
 
 # ---------------------------------------------------------------------------
-# Figure geometry -- 4:5 portrait for Instagram (1680x2100 px at 200 dpi).
+# Figure geometry -- modestly wide (2000x1680 px at 200 dpi, ~1.19:1), so
+# two columns of full "City - Museum" lines fit without wrapping.
 # ---------------------------------------------------------------------------
-FIG_WIDTH_IN, FIG_HEIGHT_IN = 8.4, 10.5
+FIG_WIDTH_IN, FIG_HEIGHT_IN = 10.0, 8.4
 FIG_DPI = 200
-PANEL_RECT = [0.03, 0.045, 0.94, 0.835]   # left, bottom, width, height (figure fraction)
+PANEL_RECT = [0.03, 0.06, 0.94, 0.765]   # left, bottom, width, height (figure fraction)
 
 PAGE_COLOR = "#f7f6f2"
-PANEL_COLOR = "#ffffff"
 CITY_COLOR = "#4a6b7a"
 TEXT_COLOR = "#2b2a26"
 SUBTITLE_COLOR = "#3a3835"
 CREDIT_COLOR = "#8a887e"
-RULE_COLOR = "#d7dcd0"
+BULLET_COLOR = "#4a6b7a"
+MAX_FONT_SIZE = 12.5
 
 # ---------------------------------------------------------------------------
 # The list -- (city, museum), sorted by city then museum.
@@ -91,82 +93,72 @@ MUSEUMS = [
 ]
 
 
-def city_groups():
-    return [(city, [m for _, m in items]) for city, items in groupby(MUSEUMS, key=lambda t: t[0])]
-
-
-def split_columns(groups):
-    """Split city groups (kept intact, in order) into two columns whose
-    line counts (one heading line + one per museum, plus a gap) are as
-    close to even as possible."""
-    weights = [1 + len(ms) + 0.45 for _, ms in groups]
-    total = sum(weights)
-    best_i, best_diff, running = 0, float("inf"), 0
-    for i, w in enumerate(weights):
-        running += w
-        diff = abs(total - 2 * running)
-        if diff < best_diff:
-            best_i, best_diff = i + 1, diff
-    return groups[:best_i], groups[best_i:]
-
-
 def build_list(output_path):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_med = fm.FontProperties(fname=POPPINS_MED_PATH)
 
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor(PAGE_COLOR)
+    renderer = fig.canvas.get_renderer()
+    fig_w_px = FIG_WIDTH_IN * FIG_DPI
 
-    # Black-framed white panel, same 1.6 frame weight as the map products.
+    # Outline-only frame, same 1.6 weight as the map products' frame --
+    # no fill, so the page tone runs straight through it.
     px, py, pw, ph = PANEL_RECT
     fig.patches.append(mpatches.Rectangle((px, py), pw, ph, transform=fig.transFigure,
-                                          facecolor=PANEL_COLOR, edgecolor="black",
+                                          facecolor="none", edgecolor="black",
                                           linewidth=1.6, zorder=0))
 
-    groups = city_groups()
-    columns = split_columns(groups)
+    # Two columns, filled top-to-bottom in list order (left column first).
+    n_rows = (len(MUSEUMS) + 1) // 2
+    columns = [MUSEUMS[:n_rows], MUSEUMS[n_rows:]]
+    col_w = pw / 2
+    pad_x = 0.03
+    bullet_gap = 0.018          # bullet center -> text start
+    text_room = col_w - pad_x - bullet_gap - 0.012
 
-    line_h = 0.0228
-    gap_h = 0.45 * line_h
-    # Vertically center the taller column inside the panel.
-    col_heights = [sum((1 + len(ms)) * line_h for _, ms in col) + (len(col) - 1) * gap_h
-                   for col in columns]
-    top = py + ph / 2 + max(col_heights) / 2 + 0.004
-    col_x = [px + 0.04, px + pw / 2 + 0.022]
-    indent = 0.018
+    def width_frac(txt, prop, size):
+        t = fig.text(0, 0, txt, fontproperties=prop, fontsize=size)
+        w = t.get_window_extent(renderer).width / fig_w_px
+        t.remove()
+        return w
 
-    for x, col in zip(col_x, columns):
-        y = top
-        for city, museums in col:
-            fig.text(x, y, city.upper(), fontsize=10, fontproperties=poppins_med,
-                     color=CITY_COLOR, ha="left", va="top")
-            y -= line_h
-            for m in museums:
-                fig.text(x + indent, y, m, fontsize=10.5, fontproperties=poppins_reg,
-                         color=TEXT_COLOR, ha="left", va="top")
-                y -= line_h
-            y -= gap_h
+    # Largest font size (<= MAX_FONT_SIZE) at which the longest line fits.
+    size = MAX_FONT_SIZE
+    while size > 7 and max(width_frac(c, poppins_med, size) + width_frac(f" - {m}", poppins_reg, size)
+                           for c, m in MUSEUMS) > text_room:
+        size -= 0.25
 
-    # Thin center rule between the two columns.
-    fig.add_artist(plt.Line2D([px + pw / 2, px + pw / 2], [py + 0.03, py + ph - 0.03],
-                              transform=fig.transFigure, color=RULE_COLOR, linewidth=1.0))
+    row_h = (ph - 0.09) / n_rows
+    top = py + ph - 0.045 - row_h / 2
 
-    # Title & subtitle above the panel
-    n_cities = len(groups)
-    fig.text(0.03, 0.977, "Pacific Northwest Museums", fontsize=22,
+    for ci, col in enumerate(columns):
+        x0 = px + ci * col_w + pad_x
+        for ri, (city, museum) in enumerate(col):
+            y = top - ri * row_h
+            fig.add_artist(Line2D([x0], [y - 0.0035], transform=fig.transFigure, marker="o", markersize=size * 0.8,
+                                  markerfacecolor="none", markeredgecolor=BULLET_COLOR, markeredgewidth=1.3,
+                                  linestyle="none"))
+            tx = x0 + bullet_gap
+            fig.text(tx, y, city, fontsize=size, fontproperties=poppins_med, color=CITY_COLOR,
+                     ha="left", va="center_baseline")
+            fig.text(tx + width_frac(city, poppins_med, size), y, f" - {museum}", fontsize=size,
+                     fontproperties=poppins_reg, color=TEXT_COLOR, ha="left", va="center_baseline")
+
+    # Title & subtitle above the frame
+    n_cities = len({c for c, _ in MUSEUMS})
+    fig.text(0.03, 0.965, "Pacific Northwest Museums", fontsize=24,
              fontproperties=poppins_reg, color=TEXT_COLOR, ha="left", va="top")
-    fig.text(0.03, 0.935, f"{len(MUSEUMS)} museums • {n_cities} cities • Washington, Oregon & British Columbia",
-             fontsize=11.5, fontproperties=poppins_med, color=SUBTITLE_COLOR, ha="left", va="top")
-    fig.text(0.03, 0.909, "A bucket list", fontsize=10.5, fontproperties=poppins_reg,
-             color="#5a584f", ha="left", va="top")
+    fig.text(0.03, 0.895, f"{len(MUSEUMS)} museums • {n_cities} cities • Washington, Oregon & British Columbia",
+             fontsize=12, fontproperties=poppins_med, color=SUBTITLE_COLOR, ha="left", va="top")
 
-    fig.text(0.5, 0.014, "Ingalls Weather", fontsize=9, fontproperties=poppins_reg,
+    fig.text(0.5, 0.018, "Ingalls Weather", fontsize=9.5, fontproperties=poppins_reg,
              color=CREDIT_COLOR, ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, facecolor=fig.get_facecolor(), dpi=FIG_DPI)
     plt.close(fig)
-    print(f"Saved list to {output_path}")
+    print(f"Saved list to {output_path} (list font {size}pt)")
 
     # ---- Composite logo, top-right, in the title band ----
     if LOGO_FILE.exists():
@@ -174,10 +166,9 @@ def build_list(output_path):
         bw, bh = base.size
         panel_right = int((px + pw) * bw)
         panel_top = int((1 - (py + ph)) * bh)
-        target = int(bw * 0.095)
+        target = int(panel_top * 0.78)
         logo = Image.open(LOGO_FILE).convert("RGB").resize((target, target), Image.LANCZOS)
-        margin = int((panel_top - target) / 2)
-        pos = (panel_right - target, margin)
+        pos = (panel_right - target, (panel_top - target) // 2)
         base.paste(logo, pos)
         base.save(output_path)
         print(f"Composited logo at {pos}")
