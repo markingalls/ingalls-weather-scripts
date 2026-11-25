@@ -362,7 +362,11 @@ def build_frame(data, frame_time, sunrise, sunset):
     mm_feels_c = metamesh_value_at(data.get("metamesh"), frame_time, "apparent_temperature") if mm_c is not None else None
     feels = (mm_feels_c * 9 / 5 + 32 if mm_feels_c is not None
              else grid_value_at(data["apparent_temperature_f"], frame_time))
-    gust = grid_value_at(data["wind_gust_mph"], frame_time)
+    # RRFS gusts when fetch_forecast.py got them (see its docstring), else
+    # NWS's gridded windGust
+    rrfs_gusts = (data.get("rrfs") or {}).get("gust_mph", {})
+    rrfs_gust = rrfs_gusts.get(frame_time.astimezone(timezone.utc).isoformat())
+    gust = rrfs_gust if rrfs_gust is not None else grid_value_at(data["wind_gust_mph"], frame_time)
     precip = precip_chance(data["ensemble"], frame_time)
 
     if precip and precip["pop"] >= SIGNIFICANT_POP_THRESHOLD:
@@ -378,6 +382,7 @@ def build_frame(data, frame_time, sunrise, sunset):
         "condition": period["shortForecast"],
         "temp": temp,
         "temp_source": "metamesh" if mm_c is not None else "nws",
+        "gust_source": "rrfs" if rrfs_gust is not None else "nws",
         "feels_like": round(feels) if feels is not None else None,
         "wind_dir": period.get("windDirection") or None,
         "wind": round_to_5_mph(wind) if wind is not None else None,
@@ -478,6 +483,20 @@ def draw_pie(ax, cx, cy, r, aspect):
     for dx, dy, rr in [(0, 0, 0.26), (-0.10, 0.08, 0.16), (0.10, 0.07, 0.15)]:
         ax.add_patch(Ellipse((cx + dx * r * aspect, cy + dy * r), 2 * rr * r * aspect, 2 * rr * r,
                              facecolor=CREAM, edgecolor="none", zorder=1.55))
+
+
+def center_text_row(fig, texts, cx, gap):
+    """Lays left-aligned Text objects out side by side, gap apart, with the
+    whole row centered on cx (axes/figure fraction -- the main axes fills
+    the figure). Widths come from the rendered extents, since the icon
+    glyph and the label are in different fonts."""
+    renderer = fig.canvas.get_renderer()
+    fig_w_px = fig.bbox.width
+    widths = [t.get_window_extent(renderer).width / fig_w_px for t in texts]
+    x = cx - (sum(widths) + gap * (len(texts) - 1)) / 2
+    for text, width in zip(texts, widths):
+        text.set_x(x)
+        x += width + gap
 
 
 def thanksgiving(year):
@@ -592,20 +611,22 @@ def main():
             ax.text(cx, FEELS_Y, f"Feels like {frame['feels_like']}°", ha="center", va="center",
                      fontproperties=f_med, fontsize=11.5, color=INK_SECONDARY, zorder=3)
 
-        # precip chance (if any) then wind, packed into the two detail rows
-        detail_ys = iter([DETAIL_1_Y, DETAIL_2_Y])
+        # precip chance on its own row (blank when there's none) and wind
+        # always on the row below, so wind sits on the same line across
+        # every card whether or not the card has a precip chance
         precip = frame["precip"]
         if precip:
-            y = next(detail_ys)
             precip_color = COLOR_SNOW if precip["is_snow"] else COLOR_RAIN
             precip_glyph = chr(GLYPHS["SNOWFLAKEday" if precip["is_snow"] else "RAINDROPday"])
             pop_pct = round(precip["pop"] * 100 / 5) * 5
-            ax.text(cx - 0.006, y, precip_glyph, ha="right", va="center",
-                     fontproperties=ICON_FONT, fontsize=14, color=precip_color, zorder=3)
-            ax.text(cx, y, f"{pop_pct:.0f}% {'snow' if precip['is_snow'] else 'rain'}", ha="left", va="center",
-                     fontproperties=f_med, fontsize=10.5, color=precip_color, zorder=3)
+            icon = ax.text(0, DETAIL_1_Y, precip_glyph, ha="left", va="center",
+                            fontproperties=ICON_FONT, fontsize=14, color=precip_color, zorder=3)
+            label = ax.text(0, DETAIL_1_Y, f"{pop_pct:.0f}% {'snow' if precip['is_snow'] else 'rain'}",
+                             ha="left", va="center", fontproperties=f_med, fontsize=10.5,
+                             color=precip_color, zorder=3)
+            center_text_row(fig, [icon, label], cx, gap=0.004)
         if frame["wind"] is not None:
-            y = next(detail_ys)
+            y = DETAIL_2_Y
             wind_text = "Calm" if frame["wind"] == 0 else f"{frame['wind_dir'] or ''} {frame['wind']} mph".strip()
             if frame["gust"] is not None:
                 wind_text += f" · Gusts {frame['gust']}"
@@ -657,6 +678,8 @@ def main():
                   LEAF_COLORS[i % len(LEAF_COLORS)], angle_deg=(i * 47) % 90 - 45)
     uses_metamesh = all(f["temp_source"] == "metamesh" for f in frames)
     sources = "NWS/ECMWF/MetaMesh" if uses_metamesh else "NWS/ECMWF"
+    if any(f["gust_source"] == "rrfs" for f in frames):
+        sources += "/RRFS"
     fig.text((LEFT + RIGHT) / 2, 0.088,
               f"Updated {now_local.strftime('%d %B %Y %H:%M')} {short_tz_abbr(now_local.strftime('%Z'))}",
               fontproperties=f_reg, fontsize=9.5, color=SUB_INK, ha="center")

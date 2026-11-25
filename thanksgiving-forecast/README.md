@@ -26,6 +26,7 @@ python3 fetch_forecast.py
 python3 build_graphic.py      # -> thanksgiving_forecast.png
 
 # Other hours/labels
+python3 fetch_forecast.py --hours 8 12 16 20
 python3 build_graphic.py --hours 8 12 16 20 --labels "Trot" "Kickoff" "Dinner" "Pie"
 ```
 
@@ -43,7 +44,15 @@ and `halloween-trick-or-treat-forecast/`:
 - MetaMesh temperature and feels-like, falling back to NWS without a key.
 - Chance of precip from the 50-member ECMWF ensemble, over the 2 hours
   centered on each card.
-- NWS wind and gusts.
+- NWS sustained wind and direction.
+- **Gusts from NOAA RRFS** (3km CONUS, `GUST:surface`) at each card's hour.
+  `fetch_forecast.py` picks the newest 00/06/12/18Z cycle, which runs to
+  84h, that NOMADS has already published far enough out. It then
+  byte-range downloads just the gust record (about 1.2 MB) from each hour's
+  GRIB2 file and takes the grid point nearest KPSC. It falls back to NWS's
+  gridded gusts if RRFS can't be reached, and adds RRFS to the attribution
+  line when it's used. Pass the same `--date`/`--hours` to
+  `fetch_forecast.py` as to `build_graphic.py`.
 - Sunrise and sunset from NOAA's solar equations, which drive the
   `BEFORE DAWN`/`DAWN`/`DAYLIGHT`/`DUSK`/`AFTER DARK` label.
 
@@ -59,3 +68,7 @@ The second line is one nudge, in this priority order:
 2. Umbrella or road caution when the precip chance is lower.
 3. A turkey-fryer warning when wind or gusts reach 15 mph or more.
 4. Headlights at dawn, at dusk, or in the dark.
+
+**Layout:** the rain/snow chance is centered as one icon-plus-label unit, and
+it's left blank when there's no chance. Wind is always on the row beneath
+it, so it lines up across all four cards.
