@@ -48,6 +48,10 @@ workflows. Each project lives in its own directory with its own README.
   (xmACIS) and 7 days forecast (WindBorne MetaMesh), against 1991-2020
   daily climatology (percentile shading and normal from xmACIS; record
   highs pooled across Tri-Cities-area stations).
+- [`pnw-precip-type-map/`](pnw-precip-type-map/) — TV-style "forecast
+  highs and weather" map of the Pacific Northwest for tomorrow: rain / mix /
+  snow shading (light/moderate/heavy) and highs at select cities, from
+  ECMWF IFS.
 - [`tpw-wm6-ensemble-map/`](tpw-wm6-ensemble-map/) — one-off map of total
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest

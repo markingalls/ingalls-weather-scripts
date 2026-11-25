@@ -105,3 +105,9 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+
+# --- pnw-precip-type-map ---
+# build_map.py fetches ECMWF IFS live each run; the .npz snapshots and
+# rendered PNGs in output/ are outputs, not source.
+pnw-precip-type-map/output/*.npz
+pnw-precip-type-map/output/*.png
