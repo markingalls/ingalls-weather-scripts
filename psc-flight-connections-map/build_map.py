@@ -147,7 +147,7 @@ LAND_COLOR, OCEAN_COLOR = "#d7dcd0", "#bfe1ef"
 MAPS = {
     "us": dict(
         fig_size=(10.8, 8.6),
-        axes_rect=[0.03, 0.205, 0.94, 0.665],
+        axes_rect=[0.03, 0.19, 0.94, 0.715],
         proj=ccrs.LambertConformal(central_longitude=-97.5, central_latitude=40,
                                    standard_parallels=(33, 45)),
         extent=[-124.0, -67.0, 22.5, 54.5],
@@ -160,11 +160,16 @@ MAPS = {
         dot_size=26,
         nonstop_size=70,
         label_nonstop=True,
+        # PSC -> nonstop great-circle spokes and the "PSC" label on the star.
+        # Off for the world map, where they just smudge over the dense
+        # western-US cluster at that scale.
+        show_spokes=True,
+        label_origin=True,
         legend_ncol=5,
     ),
     "world": dict(
         fig_size=(12.0, 8.0),
-        axes_rect=[0.03, 0.19, 0.94, 0.68],
+        axes_rect=[0.03, 0.19, 0.94, 0.71],
         proj=ccrs.Robinson(central_longitude=10),
         extent=None,  # global
         visible_box=(-180.0, 180.0, -90.0, 90.0),
@@ -173,6 +178,8 @@ MAPS = {
         dot_size=16,
         nonstop_size=40,
         label_nonstop=False,
+        show_spokes=False,
+        label_origin=False,
         legend_ncol=5,
     ),
 }
@@ -184,8 +191,8 @@ NONSTOP_LABEL_OFFSETS = {
     "PHX": (-6, 2), "AZA": (6, -5),
 }
 
-FIG_DPI = 200
-MAP_FRAME_INSET_PX = 22
+FIG_DPI = 300
+MAP_FRAME_INSET_PX = 33  # scales with FIG_DPI (22px at 200 dpi)
 
 
 # ===========================================================================
@@ -558,7 +565,7 @@ def build_map(kind, origin, airports, fetched_at, output_path):
         by_cat.setdefault(classify(a), []).append(a)
 
     # Great-circle spokes PSC -> each nonstop destination.
-    for a in by_cat.get("nonstop", []):
+    for a in (by_cat.get("nonstop", []) if cfg["show_spokes"] else []):
         ax.plot([origin["lon"], a["lon"]], [origin["lat"], a["lat"]], transform=geod,
                 color="#1f1d1a", linewidth=1.0, alpha=0.55, zorder=20, solid_capstyle="round")
 
@@ -596,10 +603,11 @@ def build_map(kind, origin, airports, fetched_at, output_path):
             ax.text(a["lon"], a["lat"], a["iata"] or a["name"], transform=t, fontsize=8.5,
                     fontproperties=poppins_med, color="#1f1d1a", ha="left" if dx >= 0 else "right",
                     va="center", zorder=46, path_effects=stroke)
-    t = offset_copy(base_t, fig=fig, x=0, y=9, units="points")
-    ax.text(origin["lon"], origin["lat"], ORIGIN_IATA, transform=t, fontsize=9.5,
-            fontproperties=poppins_med, color=ORIGIN_COLOR, ha="center", va="bottom",
-            zorder=46, path_effects=stroke)
+    if cfg["label_origin"]:
+        t = offset_copy(base_t, fig=fig, x=0, y=9, units="points")
+        ax.text(origin["lon"], origin["lat"], ORIGIN_IATA, transform=t, fontsize=9.5,
+                fontproperties=poppins_med, color=ORIGIN_COLOR, ha="center", va="bottom",
+                zorder=46, path_effects=stroke)
 
     ax.spines["geo"].set_edgecolor("black")
     ax.spines["geo"].set_linewidth(1.6)
@@ -639,12 +647,8 @@ def build_map(kind, origin, airports, fetched_at, output_path):
              f"{cfg['region_label']} • {len(visible)} airports with 0 or 1 layovers "
              f"({len(ns)} nonstop, {n_one} with one stop)",
              fontsize=12, fontproperties=poppins_med, color="#3a3835", ha="left", va="top")
-    fetched_local = fetched_at.astimezone(LOCAL_TZ)
-    fig.text(0.03, 0.905,
-             f"Colored by layover airport • scheduled passenger routes as listed "
-             f"{fetched_local.strftime('%b %-d, %Y')}, charters excluded, seasonal included",
-             fontsize=10.25, fontproperties=poppins_reg, color="#5a584f", ha="left", va="top")
-    fig.text(0.5, 0.012, "Route data: Wikipedia airport \"Airlines and destinations\" tables — Ingalls Weather",
+    as_of = fetched_at.astimezone(LOCAL_TZ).strftime("%b %-d, %Y")
+    fig.text(0.5, 0.012, f"Route data: Wikipedia airport \"Airlines and destinations\" tables, {as_of} — Ingalls Weather",
              fontsize=9, fontproperties=poppins_reg, color="#8a887e", ha="center", va="bottom")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

@@ -7,7 +7,11 @@ Wikipedia's airport "Airlines and destinations" tables:
 - **US + southern Canada** (Lambert Conformal, Baja/Caribbean edges
   included) -- nonstop destinations labeled with their IATA codes, with
   great-circle spokes from PSC.
-- **World** (Robinson) -- same data, global.
+- **World** (Robinson) -- same data, global, without the spokes or the
+  PSC label (they just smudge over the dense western-US cluster at that
+  scale).
+
+Both render at 300 dpi (3240x2580 and 3600x2400 px).
 
 Dot colors:
 
