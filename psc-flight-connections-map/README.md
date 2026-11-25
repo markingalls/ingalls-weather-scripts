@@ -36,7 +36,10 @@ Legend counts are per map (only airports inside that map's frame).
 Shared basemap data in [`../maps/`](../maps/): `world_countries_50m.json`
 (Natural Earth 1:50m admin-0 countries, slimmed to name/ISO code and
 rounded to 0.001 deg -- added for this project since the other basemap
-files only cover North America), plus `states_lakes_slim.json` and
+files only cover North America), `world_lakes_50m.json` (Natural Earth
+1:50m lakes, painted back in as water on the US map so all five Great
+Lakes show -- `states_lakes_slim.json` only carries Superior and
+Michigan), plus `states_lakes_slim.json` and
 `admin0_boundary_lines.json` for state/province and US/Canada/Mexico border
 lines on the US map.
 

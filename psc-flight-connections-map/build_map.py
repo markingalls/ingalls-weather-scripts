@@ -83,6 +83,7 @@ OUTPUT_DIR = THIS_DIR / "output"
 
 WORLD_COUNTRIES_FILE = MAPS_DIR / "world_countries_50m.json"
 STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
+LAKES_FILE = MAPS_DIR / "world_lakes_50m.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
@@ -139,7 +140,7 @@ HUB_COLORS = {
 }
 FALLBACK_HUB_COLORS = ["#b5651d", "#2c3e8f", "#a0a0d0", "#7b241c", "#1abc9c"]
 
-LAND_COLOR, OCEAN_COLOR = "#d7dcd0", "#bfe1ef"
+LAND_COLOR, OCEAN_COLOR = "#f4f3ee", "#bfe1ef"
 
 # ---------------------------------------------------------------------------
 # Map definitions
@@ -520,6 +521,18 @@ def load_states():
     return out
 
 
+def load_lakes():
+    """
+    Natural Earth 1:50m lake polygons (all five Great Lakes plus the larger
+    lakes/reservoirs). The world countries file fills right across lakes,
+    so the US map paints these back in as water on top. (states_lakes_slim
+    only carries Superior and Michigan of the Great Lakes.)
+    """
+    with open(LAKES_FILE) as f:
+        data = json.load(f)
+    return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
+
+
 def load_boundary_lines(path):
     with open(path) as f:
         data = json.load(f)
@@ -551,6 +564,8 @@ def build_map(kind, origin, airports, fetched_at, output_path):
         ax.add_geometries(antarctica, crs=pc, facecolor=LAND_COLOR, edgecolor="#8a8578",
                           linewidth=0.35, zorder=1)
     else:
+        ax.add_geometries(load_lakes(), crs=pc, facecolor=OCEAN_COLOR, edgecolor="#8a8578",
+                          linewidth=0.4, zorder=1.5)
         ax.add_geometries(load_states(), crs=pc, facecolor="none", edgecolor="#a8a396",
                           linewidth=0.5, zorder=2)
         ax.add_geometries(load_boundary_lines(ADMIN0_LINES_FILE), crs=pc, facecolor="none",
