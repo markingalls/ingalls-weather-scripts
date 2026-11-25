@@ -64,7 +64,17 @@ Parsing details (`parse_destination_cell()`):
 - Each wikilink in a destinations cell is one airport. The link target is
   the airport's article, and redirects are resolved via the API, so the
   same airport linked under two spellings merges into one dot.
-- Tables under a "Cargo" heading are skipped.
+- **Passenger routes only, no cargo.** A table is read only if it sits
+  directly under a "Passenger" heading, or under "Airlines and
+  destinations" itself on a page with no Passenger/Cargo split. Tables
+  under any other heading (Cargo, Charter, ...) are skipped, as is any
+  table whose header or caption mentions cargo. As a backstop, rows whose
+  airline is a freight operator (`CARGO_AIRLINE_RE`: "... Cargo", FedEx,
+  UPS, DHL, Amazon Air, Atlas, Kalitta, Ameriflight, ...) are dropped even
+  inside a passenger table. Audited 2026-11-25: every one of the 12 pages
+  read (PSC + its 11 nonstops) keeps cargo under its own "Cargo" heading
+  (SLC and DEN have none listed), and no freight carrier appears in the
+  scraped routes.
 - `Seasonal:` routes are **kept**; `Charter:` / `Seasonal charter:` routes
   are **dropped**.
 - `(begins <date>)` notes dated after today drop the route (not flying

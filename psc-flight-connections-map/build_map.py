@@ -106,6 +106,13 @@ HTTP_HEADERS = {"User-Agent": "airport-connections-map/1.0 (python-requests; one
 # Pause between successful requests, to stay under Wikimedia's rate limit.
 REQUEST_SPACING_S = 2.0
 
+# Freight-only operators, matched against the airline column.
+CARGO_AIRLINE_RE = re.compile(
+    r"cargo|freight|fedex|\bups\b|\bdhl\b|amazon air|prime air|atlas air|kalitta|"
+    r"ameriflight|\babx\b|air transport international|western global|cargolux|"
+    r"aerologic|airzeta|polar air|airnet|martinaire|empire airlines|mountain air cargo",
+    re.I)
+
 DATE_NOTE_RE = re.compile(r"\(\s*(begins|resumes|ends|until)\s+([^)]*?)\s*\)", re.I)
 DATE_FORMATS = ("%B %d, %Y", "%d %B %Y", "%B %Y", "%b %d, %Y")
 
@@ -289,8 +296,18 @@ def fetch_airport_routes(title, today):
         headers = [c.get_text(" ", strip=True).lower() for c in first_row.find_all(["th", "td"])]
         if not any("airline" in h for h in headers) or not any("destination" in h for h in headers):
             continue
+        # Passenger routes only. Allowlist, not blocklist: the table must sit
+        # directly under a "Passenger" heading, or under "Airlines and
+        # destinations" itself on pages with no Passenger/Cargo split. A
+        # table under any other heading (Cargo, Charter, Former, ...) is
+        # skipped, and so is one whose own header/caption says cargo.
         heading = table.find_previous(["h2", "h3", "h4"])
-        if heading and "cargo" in heading.get_text().lower():
+        heading_text = heading.get_text(" ", strip=True).lower() if heading else ""
+        caption = table.find("caption")
+        caption_text = caption.get_text(" ", strip=True).lower() if caption else ""
+        if "passenger" not in heading_text and "airlines and destinations" not in heading_text:
+            continue
+        if "cargo" in caption_text or any("cargo" in h for h in headers):
             continue
         dest_col = next(i for i, h in enumerate(headers) if "destination" in h)
         for tr in table.find_all("tr")[1:]:
@@ -298,6 +315,10 @@ def fetch_airport_routes(title, today):
             if len(cells) <= dest_col:
                 continue
             airline = cells[0].get_text(" ", strip=True)
+            # Backstop for a freight operator listed inside a passenger table
+            # (e.g. "Alaska Air Cargo", "FedEx Feeder").
+            if CARGO_AIRLINE_RE.search(airline):
+                continue
             for r in parse_destination_cell(cells[dest_col], today):
                 r["airline"] = airline
                 routes.append(r)
