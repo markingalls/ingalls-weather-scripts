@@ -11,7 +11,10 @@ Wikipedia's airport "Airlines and destinations" tables:
   PSC label (they just smudge over the dense western-US cluster at that
   scale).
 
-Both render at 300 dpi (3240x2580 and 3600x2400 px).
+Both render at 300 dpi (3240x2580 and 3600x2400 px), then
+`pad_to_square()` adds background-colored bands evenly above and below so
+the final PNGs are square for posting (3240x3240 and 3600x3600) -- the
+rendered map itself isn't resized or reflowed.
 
 Dot colors:
 

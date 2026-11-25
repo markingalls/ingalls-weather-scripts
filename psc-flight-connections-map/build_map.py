@@ -140,6 +140,7 @@ HUB_COLORS = {
 }
 FALLBACK_HUB_COLORS = ["#b5651d", "#2c3e8f", "#a0a0d0", "#7b241c", "#1abc9c"]
 
+BG_COLOR = "#f7f6f2"  # figure background, also used for the square padding
 LAND_COLOR, OCEAN_COLOR = "#f4f3ee", "#bfe1ef"
 
 # ---------------------------------------------------------------------------
@@ -550,7 +551,7 @@ def build_map(kind, origin, airports, fetched_at, output_path):
     geod = ccrs.Geodetic()
 
     fig = plt.figure(figsize=(fig_w, fig_h), dpi=FIG_DPI)
-    fig.patch.set_facecolor("#f7f6f2")
+    fig.patch.set_facecolor(BG_COLOR)
     ax = fig.add_axes(cfg["axes_rect"], projection=cfg["proj"])
     if cfg["extent"]:
         ax.set_extent(cfg["extent"], crs=pc)
@@ -686,6 +687,25 @@ def build_map(kind, origin, airports, fetched_at, output_path):
         base.save(output_path)
     else:
         print(f"NOTE: logo not found at {LOGO_FILE}, skipping.")
+
+    pad_to_square(output_path)
+
+
+def pad_to_square(path):
+    """
+    Pad the finished PNG to a square for social posting: the rendered image
+    is left untouched and BG_COLOR bands are added evenly above and below
+    (or left/right, if it's ever taller than wide).
+    """
+    img = Image.open(path).convert("RGB")
+    w, h = img.size
+    side = max(w, h)
+    if w == h:
+        return
+    square = Image.new("RGB", (side, side), BG_COLOR)
+    square.paste(img, ((side - w) // 2, (side - h) // 2))
+    square.save(path)
+    print(f"Padded to {side}x{side} square")
 
 
 def print_summary(airports):
