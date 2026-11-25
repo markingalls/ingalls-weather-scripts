@@ -8,9 +8,10 @@ WA, OR, and ID, plus slivers of southern BC, western MT, and northern CA/NV:
   for rain, purple for mix, blue for snow). Each type has three shades,
   light, moderate, and heavy, set by the day's total liquid equivalent.
 - **City labels:** the day's forecast high at a set of select cities, in the
-  repo's standard city style (same as `../columbia-basin-temps/`): a white
-  dot, the name beside it, and the high ("54°F") tucked underneath. There
-  are no condition icons. The precip shading carries the weather.
+  repo's default label style (same as `../thanksgiving-snow-climatology-map/`):
+  the city name centered on its location in a 50%-black rounded box, with the
+  high in bold just above it. The city list is that map's too. There are no
+  condition icons. The precip shading carries the weather.
 
 Everything comes from one source, ECMWF's free Open Data IFS distribution
 (0.25°, 3-hourly steps), fetched live via Herbie. No API key is needed.
@@ -21,8 +22,7 @@ Everything comes from one source, ECMWF's free Open Data IFS distribution
   and renders the map. Each live run also saves a `.npz` snapshot to
   `output/`, so `--file` can re-render without fetching again.
 - `requirements.txt` / `setup.sh` hold the Python and system dependencies
-  (same as `../dew-point-storm-map/`: GDAL for cartopy, libeccodes for
-  cfgrib, and the Poppins font).
+  (GDAL for cartopy, libeccodes for cfgrib, and the Poppins font weights).
 
 Shared basemap data comes from [`../maps/`](../maps/) (`land_slim.json`,
 `admin1_boundary_lines.json`, `admin0_boundary_lines.json`). Borders come
@@ -81,14 +81,15 @@ python3 build_map.py --file output/snapshot_2026-11-26.npz  # re-render, no fetc
   cities in valleys next to high terrain can read a few degrees cool
   (and vice versa): the grid cell's mean elevation isn't the town's.
   Treat them as model guidance, not a hand-edited forecast.
-- **Projection:** Lambert Conformal Conic centered on the domain, with
-  standard parallels at about 43° and 48°N, so shapes and east-west scale
-  stay true. PlateCarree, used by `../dew-point-storm-map/`, stretches the
-  map about 40% horizontally at this latitude. The frame is the projected
-  rectangle between the lon/lat box's corners, so it shows a bit beyond the
-  box near the bottom corners; the fetch padding covers that. The figure
-  height is derived from the projected extent, so changing `LON_*`/`LAT_*`
-  doesn't leave gutters.
+- **Projection and size:** Lambert Conformal Conic centered on WA/OR/ID
+  (−117.6°), with standard parallels at 43° and 48°N, so shapes and
+  east-west scale stay true. PlateCarree stretches the map about 40%
+  horizontally at this latitude. The output size is fixed at 2000×1567 px,
+  and the zoom is fit to that frame: it spans `LAT_MIN`–`LAT_MAX`
+  (41.95°–49.45°) along the central meridian, enough room for Bellingham's
+  value label at the top and Medford at the bottom. The width follows from
+  the frame's aspect ratio. To zoom, change those two latitudes and
+  everything else adjusts.
 - Border and coastline geometries are densified to 0.05° vertex spacing
   before drawing. Natural Earth stores the 49th parallel and the 42nd
   (OR/CA/NV) with very few vertices, and under Lambert those would draw as

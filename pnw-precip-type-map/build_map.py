@@ -88,69 +88,67 @@ LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
+POPPINS_SEMIBOLD_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-SemiBold.ttf"
+POPPINS_BOLD_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Bold.ttf"
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 # ---------------------------------------------------------------------------
-# Map domain -- WA/OR/ID with a little room on every side (Vancouver/
-# Victoria BC to the north, Redding-ish to the south, Missoula to the east).
-# ---------------------------------------------------------------------------
-LON_MIN, LON_MAX = -125.6, -110.6
-LAT_MIN, LAT_MAX = 41.3, 49.9
-
-# ---------------------------------------------------------------------------
-# Projection -- Lambert Conformal Conic with standard parallels bracketing
-# the domain (the usual choice for a mid-latitude regional map: shapes and
-# east-west scale stay true, unlike PlateCarree's ~40% horizontal stretch
-# at 45N). The map frame is the projected bounding rectangle of the
-# LON/LAT box above, so it shows a little extra area at the corners -- the
-# fetch/resample padding below is sized so data still reaches them.
-# ---------------------------------------------------------------------------
-PROJ = ccrs.LambertConformal(central_longitude=(LON_MIN + LON_MAX) / 2,
-                             central_latitude=(LAT_MIN + LAT_MAX) / 2,
-                             standard_parallels=(LAT_MIN + 1.5, LAT_MAX - 1.5))
-
-
-def projected_extent():
-    """[x0, x1, y0, y1] in PROJ coordinates bounding the LON/LAT box's
-    (curved, once projected) outline."""
-    edge_lon = np.concatenate([np.linspace(LON_MIN, LON_MAX, 60), np.full(60, LON_MAX),
-                               np.linspace(LON_MAX, LON_MIN, 60), np.full(60, LON_MIN)])
-    edge_lat = np.concatenate([np.full(60, LAT_MIN), np.linspace(LAT_MIN, LAT_MAX, 60),
-                               np.full(60, LAT_MAX), np.linspace(LAT_MAX, LAT_MIN, 60)])
-    xy = PROJ.transform_points(ccrs.PlateCarree(), edge_lon, edge_lat)
-    # Trim the corners in a bit: the full bounding box of the curved outline
-    # would show a lot of out-of-domain area in the bottom corners (the
-    # bottom edge sags in LCC), so take the box between the outline's
-    # corner points instead.
-    corners = PROJ.transform_points(ccrs.PlateCarree(), np.array([LON_MIN, LON_MAX, LON_MAX, LON_MIN]),
-                                    np.array([LAT_MIN, LAT_MIN, LAT_MAX, LAT_MAX]))
-    x0 = max(corners[0, 0], corners[3, 0])
-    x1 = min(corners[1, 0], corners[2, 0])
-    y0 = xy[:, 1].min()
-    y1 = max(corners[2, 1], corners[3, 1])
-    return [x0, x1, y0, y1]
-
-
-MAP_EXTENT = projected_extent()
-
-# ---------------------------------------------------------------------------
-# Figure geometry -- the axes box's aspect ratio (width_in / height_in)
-# must match the projected extent's x/y ratio, or cartopy shrinks one
-# dimension and leaves empty gutters, so the figure height is derived from
-# it rather than hand-tuned.
+# Figure geometry -- fixed output size (2000 x 1568 px at FIG_DPI): a
+# 9.4 x 5.39 in map frame with room for titles above and the legend below.
+# The map's zoom is fit to this frame (see MAP_EXTENT), not the other way
+# around.
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN = 10.0
 FIG_DPI = 200
 AXES_LEFT, AXES_WIDTH_FRAC = 0.03, 0.94
 AXES_BOTTOM_IN, AXES_TOP_GAP_IN = 1.45, 1.00   # room for legend below / titles above
-_axes_h_in = (FIG_WIDTH_IN * AXES_WIDTH_FRAC * (MAP_EXTENT[3] - MAP_EXTENT[2])
-              / (MAP_EXTENT[1] - MAP_EXTENT[0]))
+_axes_h_in = 5.3893
 FIG_HEIGHT_IN = AXES_BOTTOM_IN + _axes_h_in + AXES_TOP_GAP_IN
 AXES_RECT = [AXES_LEFT, AXES_BOTTOM_IN / FIG_HEIGHT_IN, AXES_WIDTH_FRAC, _axes_h_in / FIG_HEIGHT_IN]
 MAP_FRAME_INSET_PX = 22
 
-FETCH_PAD_DEG = 3.0  # generous: LCC's frame corners reach past the lon/lat box
+# ---------------------------------------------------------------------------
+# Map domain / projection -- Lambert Conformal Conic centered on WA/OR/ID,
+# standard parallels bracketing the region (shapes and east-west scale stay
+# true, unlike PlateCarree's ~40% horizontal stretch at 45N). The frame
+# spans LAT_MIN..LAT_MAX along the central meridian -- enough to fit
+# Bellingham's value label at the top and Medford at the bottom -- and its
+# width follows from the frame's fixed aspect ratio, which takes in the
+# coast to the west and Great Falls to the east.
+# ---------------------------------------------------------------------------
+CENTER_LON = -117.6
+LAT_MIN, LAT_MAX = 41.95, 49.45
+PROJ = ccrs.LambertConformal(central_longitude=CENTER_LON,
+                             central_latitude=(LAT_MIN + LAT_MAX) / 2,
+                             standard_parallels=(43.0, 48.0))
+
+
+def projected_extent():
+    """[x0, x1, y0, y1] in PROJ coordinates: LAT_MIN..LAT_MAX tall along the
+    central meridian, as wide as the frame's aspect ratio allows."""
+    pts = PROJ.transform_points(ccrs.PlateCarree(), np.array([CENTER_LON, CENTER_LON]),
+                                np.array([LAT_MIN, LAT_MAX]))
+    y0, y1 = pts[0, 1], pts[1, 1]
+    half_w = (y1 - y0) * (FIG_WIDTH_IN * AXES_WIDTH_FRAC / _axes_h_in) / 2
+    return [-half_w, half_w, y0, y1]
+
+
+MAP_EXTENT = projected_extent()
+
+
+def extent_lonlat_bounds():
+    """Lon/lat bounding box of the projected frame (for cropping fetches)."""
+    x0, x1, y0, y1 = MAP_EXTENT
+    xs = np.concatenate([np.linspace(x0, x1, 50), np.full(50, x1), np.linspace(x1, x0, 50), np.full(50, x0)])
+    ys = np.concatenate([np.full(50, y0), np.linspace(y0, y1, 50), np.full(50, y1), np.linspace(y1, y0, 50)])
+    ll = ccrs.PlateCarree().transform_points(PROJ, xs, ys)
+    return ll[:, 0].min(), ll[:, 0].max(), ll[:, 1].min(), ll[:, 1].max()
+
+
+LON_MIN, LON_MAX, _LAT_LO, _LAT_HI = extent_lonlat_bounds()
+
+FETCH_PAD_DEG = 1.5
 
 # Precip is resampled straight onto a regular grid in PROJ's own (x, y)
 # meters, one cell per output pixel of the map frame, and drawn with
@@ -203,34 +201,43 @@ PRECIP_COLORS = {
 }
 PRECIP_ALPHA = 0.88
 
+# Same label set as ../thanksgiving-snow-climatology-map/ (the repo's
+# standard PNW city list for this domain).
 CITIES = [
-    # (name, lon, lat, label side)
-    ("Vancouver", -123.1207, 49.2827, "left"),
-    ("Bellingham", -122.4787, 48.7519, "right"),
-    ("Seattle", -122.3321, 47.6062, "right"),
-    ("Aberdeen", -123.8157, 46.9754, "right"),
-    ("Portland", -122.6784, 45.5152, "right"),
-    ("Astoria", -123.8313, 46.1879, "right"),
-    ("Newport", -124.0535, 44.6368, "right"),
-    ("Eugene", -123.0868, 44.0521, "right"),
-    ("Medford", -122.8756, 42.3265, "right"),
-    ("Klamath Falls", -121.7817, 42.2249, "right"),
-    ("Bend", -121.3153, 44.0582, "right"),
-    ("Burns", -119.0541, 43.5866, "right"),
-    ("Wenatchee", -120.3103, 47.4235, "right"),
-    ("Yakima", -120.5059, 46.6021, "right"),
-    ("Tri-Cities", -119.2781, 46.2565, "right"),
-    ("Pendleton", -118.7879, 45.6721, "right"),
-    ("Spokane", -117.4260, 47.6588, "right"),
-    ("Lewiston", -117.0177, 46.4165, "right"),
-    ("Baker City", -117.8344, 44.7749, "right"),
-    ("Boise", -116.2023, 43.6150, "right"),
-    ("Twin Falls", -114.4609, 42.5629, "right"),
-    ("Idaho Falls", -112.0362, 43.4917, "left"),
-    ("McCall", -116.0985, 44.9110, "right"),
-    ("Missoula", -113.9940, 46.8721, "right"),
-    ("Kalispell", -114.3129, 48.1920, "right"),
+    # (name, lon, lat)
+    ("Bellingham", -122.4787, 48.7519),
+    ("Astoria", -123.8313, 46.1879),
+    ("Seattle", -122.3321, 47.6062),
+    ("Portland", -122.6784, 45.5152),
+    ("Eugene", -123.0868, 44.0521),
+    ("Medford", -122.8756, 42.3265),
+    ("Bend", -121.3153, 44.0582),
+    ("Wenatchee", -120.3103, 47.4235),
+    ("Yakima", -120.5059, 46.6021),
+    ("Tri-Cities", -119.1741, 46.2455),
+    ("Omak", -119.5273, 48.4110),
+    ("Spokane", -117.4260, 47.6588),
+    ("Lewiston", -117.0177, 46.4165),
+    ("Baker City", -117.8344, 44.7749),
+    ("Burns", -119.0541, 43.5866),
+    ("McCall", -116.0987, 44.9110),
+    ("Boise", -116.2023, 43.6150),
+    ("Salmon", -113.9213, 45.1758),
+    ("Ketchum", -114.3637, 43.6807),
+    ("Kalispell", -114.3129, 48.1958),
+    ("Missoula", -113.9940, 46.8721),
+    ("Butte", -112.5348, 46.0038),
+    ("Great Falls", -111.3008, 47.5053),
+    ("Twin Falls", -114.4609, 42.5629),
+    ("Idaho Falls", -112.0362, 43.4917),
 ]
+# Label style -- the repo default (see ../thanksgiving-snow-climatology-map/
+# and blue-mountains-downslope-map): name centered on the point in a 50%
+# black rounded box, value in bold just above it. Sizes scaled down a touch
+# from that map's 12.5/20 pt for this shorter frame.
+NAME_FONTSIZE = 11.5
+VALUE_FONTSIZE = 18
+VALUE_GAP_PT = 6.5  # name's half-height + a small gap, in points
 
 
 # ---------------------------------------------------------------------------
@@ -324,7 +331,7 @@ def fetch_day(date):
         if lat is None:
             lat_1d, lon_1d = ds_tp.latitude.values, ds_tp.longitude.values
             lon_1d = np.where(lon_1d > 180, lon_1d - 360, lon_1d)
-            lat_idx = np.where((lat_1d >= LAT_MIN - FETCH_PAD_DEG) & (lat_1d <= LAT_MAX + FETCH_PAD_DEG))[0]
+            lat_idx = np.where((lat_1d >= _LAT_LO - FETCH_PAD_DEG) & (lat_1d <= _LAT_HI + FETCH_PAD_DEG))[0]
             lon_idx = np.where((lon_1d >= LON_MIN - FETCH_PAD_DEG) & (lon_1d <= LON_MAX + FETCH_PAD_DEG))[0]
             lon, lat = np.meshgrid(lon_1d[lon_idx], lat_1d[lat_idx])
             total_tp = np.zeros(lat.shape, dtype=np.float32)
@@ -479,32 +486,26 @@ def build_map(date, output_path, override_path=None):
     ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
-    # City labels -- the repo's standard style, identical to
-    # ../columbia-basin-temps/: white dot, name beside it, the day's high
-    # ("54°F") tucked tight underneath, white Poppins Medium with a dark
-    # stroke, offsets in points so spacing is constant regardless of scale.
+    # City labels -- repo default style (see NAME_FONTSIZE above).
+    poppins_bold = fm.FontProperties(fname=POPPINS_BOLD_PATH)
+    poppins_sb = fm.FontProperties(fname=POPPINS_SEMIBOLD_PATH)
     geodetic_transform = pc._as_mpl_transform(ax)
-    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
+    name_stroke = [pe.withStroke(linewidth=0.9, foreground=(0, 0, 0, 0.85))]
+    value_stroke = [pe.withStroke(linewidth=2.2, foreground=(0, 0, 0, 0.9))]
     x0, x1, y0, y1 = MAP_EXTENT
-    for (name, lon_c, lat_c, pos), city_f in zip(CITIES, city_highs_f):
+    for (name, lon_c, lat_c), city_f in zip(CITIES, city_highs_f):
         px, py = PROJ.transform_point(lon_c, lat_c, pc)
         if not (x0 <= px <= x1 and y0 <= py <= y1):
             continue
-        ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
-                mec="black", mew=0.8, transform=pc)
-        dx_pt = 6 if pos == "right" else -6
-        ha = "left" if pos == "right" else "right"
-
-        name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
-        name_txt = ax.text(lon_c, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold,
-                           color="white", ha=ha, va="center", zorder=101, transform=name_transform)
-        name_txt.set_path_effects(stroke)
-
-        temp_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-4, units="points")
-        temp_txt = ax.text(lon_c, lat_c, f"{city_f:.0f}°F", fontsize=9.75,
-                           fontproperties=poppins_semibold, color="white", ha=ha, va="top",
-                           zorder=101, transform=temp_transform)
-        temp_txt.set_path_effects(stroke)
+        t = ax.text(lon_c, lat_c, f" {name} ", fontsize=NAME_FONTSIZE, fontproperties=poppins_sb,
+                    color="white", ha="center", va="center", zorder=101, transform=geodetic_transform,
+                    bbox=dict(boxstyle="round,pad=0.04,rounding_size=0.25", facecolor="black",
+                              alpha=0.50, edgecolor="none"))
+        t.set_path_effects(name_stroke)
+        val_tr = offset_copy(geodetic_transform, fig=fig, x=0, y=VALUE_GAP_PT, units="points")
+        v = ax.text(lon_c, lat_c, f"{city_f:.0f}°", fontsize=VALUE_FONTSIZE, fontproperties=poppins_bold,
+                    color="white", ha="center", va="bottom", zorder=102, transform=val_tr)
+        v.set_path_effects(value_stroke)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
@@ -543,7 +544,7 @@ def build_map(date, output_path, override_path=None):
     thresh_txt = ", ".join(f"{lbl} ≥ {v:.2f} in".replace(" 0.", " .", 1)
                            for lbl, v in zip(INTENSITY_LABELS, INTENSITY_THRESHOLDS_IN))
     fig.text(0.5, 0.28 / FIG_HEIGHT_IN,
-             f"Day's total liquid equivalent: {thresh_txt}  •  City values: forecast high",
+             f"Day's total liquid equivalent: {thresh_txt}  •  City values: forecast high (°F)",
              fontsize=8, fontproperties=poppins_reg, color="#5a584f", ha="center", va="bottom")
 
     # Title & subtitle above the map
