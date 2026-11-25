@@ -7,7 +7,9 @@ WA, OR, and ID, plus slivers of southern BC, western MT, and northern CA/NV:
 - **Shading:** where precipitation falls that day, colored by type (green
   for rain, purple for mix, blue for snow). Each type has three shades,
   light, moderate, and heavy, set by the day's total liquid equivalent.
-- **City labels:** the day's forecast high at a set of select cities. There
+- **City labels:** the day's forecast high at a set of select cities, in the
+  repo's standard city style (same as `../columbia-basin-temps/`): a white
+  dot, the name beside it, and the high ("54°F") tucked underneath. There
   are no condition icons. The precip shading carries the weather.
 
 Everything comes from one source, ECMWF's free Open Data IFS distribution
@@ -23,7 +25,9 @@ Everything comes from one source, ECMWF's free Open Data IFS distribution
   cfgrib, and the Poppins font).
 
 Shared basemap data comes from [`../maps/`](../maps/) (`land_slim.json`,
-`states_lakes_slim.json`, `admin0_boundary_lines.json`). The logo comes from
+`admin1_boundary_lines.json`, `admin0_boundary_lines.json`). Borders come
+from the line datasets, not polygon outlines, the same as
+`../columbia-basin-temps/`. The logo comes from
 [`../assets/ingalls_weather_logo.png`](../assets/ingalls_weather_logo.png).
 
 ## Usage
@@ -63,17 +67,30 @@ python3 build_map.py --file output/snapshot_2026-11-26.npz  # re-render, no fetc
   moderate ≥ 0.10 in, heavy ≥ 0.50 in (`INTENSITY_THRESHOLDS_IN`). These are
   liquid amounts, so heavy snow means half an inch or more of water, about
   5+ inches of snow.
-- **Smoothing:** total, snow, and mix amounts are resampled to a 0.02° grid,
-  then lightly gaussian-smoothed (σ ≈ 0.1°) *before* classifying. This
-  keeps the 0.25° cell edges from showing as blocks. The categories are
-  drawn with nearest-cell shading, not gouraud, so neighboring types never
-  blend into colors that aren't on the legend.
+- **Smoothing and gridding:** total, snow, and mix amounts are resampled
+  directly onto a regular grid in the map projection's own coordinates,
+  with one cell per output pixel. They're then lightly gaussian-smoothed
+  (about 11 km) *before* classifying, so the 0.25° cell edges round off.
+  The categories are drawn with `imshow` and nearest interpolation, so
+  neighboring types never blend into colors that aren't on the legend.
+  Resampling on a lon/lat grid and letting cartopy project it would rotate
+  the cells under Lambert and leave visible stair-steps at type edges.
 - **Highs** are the max of `mx2t3` (max 2m temperature over the previous 3
   hours) for steps ending between 10am and 8pm local, roughly 7am–7pm,
-  sampled bilinearly at each city. These are 0.25° grid-cell values, so
+  interpolated linearly to each city from the native grid. These are 0.25° grid-cell values, so
   cities in valleys next to high terrain can read a few degrees cool
   (and vice versa): the grid cell's mean elevation isn't the town's.
   Treat them as model guidance, not a hand-edited forecast.
-- Uses `PlateCarree` and `pcolormesh` like `../dew-point-storm-map/`. See
-  that README for why. The figure height is derived from the domain's
-  lon/lat spans, so changing `LON_*`/`LAT_*` doesn't leave gutters.
+- **Projection:** Lambert Conformal Conic centered on the domain, with
+  standard parallels at about 43° and 48°N, so shapes and east-west scale
+  stay true. PlateCarree, used by `../dew-point-storm-map/`, stretches the
+  map about 40% horizontally at this latitude. The frame is the projected
+  rectangle between the lon/lat box's corners, so it shows a bit beyond the
+  box near the bottom corners; the fetch padding covers that. The figure
+  height is derived from the projected extent, so changing `LON_*`/`LAT_*`
+  doesn't leave gutters.
+- Border and coastline geometries are densified to 0.05° vertex spacing
+  before drawing. Natural Earth stores the 49th parallel and the 42nd
+  (OR/CA/NV) with very few vertices, and under Lambert those would draw as
+  straight chords instead of following the parallel's curve. Without this,
+  the US/Canada border showed up as several diverging lines.

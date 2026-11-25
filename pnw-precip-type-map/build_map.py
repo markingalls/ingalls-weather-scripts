@@ -68,6 +68,7 @@ from scipy.ndimage import gaussian_filter
 from herbie import Herbie
 
 import cartopy.crs as ccrs
+from shapely import segmentize
 from shapely.geometry import shape
 from PIL import Image
 
@@ -81,11 +82,9 @@ THIS_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = THIS_DIR / "output"
 
 LAND_FILE = MAPS_DIR / "land_slim.json"
-STATES_LAKES_FILE = MAPS_DIR / "states_lakes_slim.json"
+ADMIN1_LINES_FILE = MAPS_DIR / "admin1_boundary_lines.json"
 ADMIN0_LINES_FILE = MAPS_DIR / "admin0_boundary_lines.json"
 LOGO_FILE = ASSETS_DIR / "ingalls_weather_logo.png"
-
-TARGET_COUNTRIES = {"United States of America", "Canada"}
 
 POPPINS_REG_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Regular.ttf"
 POPPINS_MED_PATH = "/usr/share/fonts/truetype/google-fonts/Poppins-Medium.ttf"
@@ -100,32 +99,75 @@ LON_MIN, LON_MAX = -125.6, -110.6
 LAT_MIN, LAT_MAX = 41.3, 49.9
 
 # ---------------------------------------------------------------------------
+# Projection -- Lambert Conformal Conic with standard parallels bracketing
+# the domain (the usual choice for a mid-latitude regional map: shapes and
+# east-west scale stay true, unlike PlateCarree's ~40% horizontal stretch
+# at 45N). The map frame is the projected bounding rectangle of the
+# LON/LAT box above, so it shows a little extra area at the corners -- the
+# fetch/resample padding below is sized so data still reaches them.
+# ---------------------------------------------------------------------------
+PROJ = ccrs.LambertConformal(central_longitude=(LON_MIN + LON_MAX) / 2,
+                             central_latitude=(LAT_MIN + LAT_MAX) / 2,
+                             standard_parallels=(LAT_MIN + 1.5, LAT_MAX - 1.5))
+
+
+def projected_extent():
+    """[x0, x1, y0, y1] in PROJ coordinates bounding the LON/LAT box's
+    (curved, once projected) outline."""
+    edge_lon = np.concatenate([np.linspace(LON_MIN, LON_MAX, 60), np.full(60, LON_MAX),
+                               np.linspace(LON_MAX, LON_MIN, 60), np.full(60, LON_MIN)])
+    edge_lat = np.concatenate([np.full(60, LAT_MIN), np.linspace(LAT_MIN, LAT_MAX, 60),
+                               np.full(60, LAT_MAX), np.linspace(LAT_MAX, LAT_MIN, 60)])
+    xy = PROJ.transform_points(ccrs.PlateCarree(), edge_lon, edge_lat)
+    # Trim the corners in a bit: the full bounding box of the curved outline
+    # would show a lot of out-of-domain area in the bottom corners (the
+    # bottom edge sags in LCC), so take the box between the outline's
+    # corner points instead.
+    corners = PROJ.transform_points(ccrs.PlateCarree(), np.array([LON_MIN, LON_MAX, LON_MAX, LON_MIN]),
+                                    np.array([LAT_MIN, LAT_MIN, LAT_MAX, LAT_MAX]))
+    x0 = max(corners[0, 0], corners[3, 0])
+    x1 = min(corners[1, 0], corners[2, 0])
+    y0 = xy[:, 1].min()
+    y1 = max(corners[2, 1], corners[3, 1])
+    return [x0, x1, y0, y1]
+
+
+MAP_EXTENT = projected_extent()
+
+# ---------------------------------------------------------------------------
 # Figure geometry -- the axes box's aspect ratio (width_in / height_in)
-# must match the domain's lon/lat span ratio under PlateCarree, or cartopy
-# shrinks one dimension and leaves empty gutters. AXES_HEIGHT_FRAC is
-# derived from the spans rather than hand-tuned.
+# must match the projected extent's x/y ratio, or cartopy shrinks one
+# dimension and leaves empty gutters, so the figure height is derived from
+# it rather than hand-tuned.
 # ---------------------------------------------------------------------------
 FIG_WIDTH_IN = 10.0
 FIG_DPI = 200
 AXES_LEFT, AXES_WIDTH_FRAC = 0.03, 0.94
 AXES_BOTTOM_IN, AXES_TOP_GAP_IN = 1.45, 1.00   # room for legend below / titles above
-_axes_h_in = FIG_WIDTH_IN * AXES_WIDTH_FRAC * (LAT_MAX - LAT_MIN) / (LON_MAX - LON_MIN)
+_axes_h_in = (FIG_WIDTH_IN * AXES_WIDTH_FRAC * (MAP_EXTENT[3] - MAP_EXTENT[2])
+              / (MAP_EXTENT[1] - MAP_EXTENT[0]))
 FIG_HEIGHT_IN = AXES_BOTTOM_IN + _axes_h_in + AXES_TOP_GAP_IN
 AXES_RECT = [AXES_LEFT, AXES_BOTTOM_IN / FIG_HEIGHT_IN, AXES_WIDTH_FRAC, _axes_h_in / FIG_HEIGHT_IN]
 MAP_FRAME_INSET_PX = 22
 
-FETCH_PAD_DEG = 2.0
-RESAMPLE_PAD_DEG = 1.0
-RESAMPLE_DEG = 0.02  # fine enough that the categorical edges don't read as stair-steps
-RESAMPLE_LON_MIN, RESAMPLE_LON_MAX = LON_MIN - RESAMPLE_PAD_DEG, LON_MAX + RESAMPLE_PAD_DEG
-RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX = LAT_MIN - RESAMPLE_PAD_DEG, LAT_MAX + RESAMPLE_PAD_DEG
-RESAMPLE_NX = int(round((RESAMPLE_LON_MAX - RESAMPLE_LON_MIN) / RESAMPLE_DEG)) + 1
-RESAMPLE_NY = int(round((RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN) / RESAMPLE_DEG)) + 1
-# Gaussian smoothing (in resampled-grid cells) applied to the precip
-# fields before classifying, so 0.25 deg cell edges round off into natural
-# curves. ~0.1 deg -- well under the native grid spacing, so it doesn't
-# smear real features.
-SMOOTH_SIGMA = 5.0
+FETCH_PAD_DEG = 3.0  # generous: LCC's frame corners reach past the lon/lat box
+
+# Precip is resampled straight onto a regular grid in PROJ's own (x, y)
+# meters, one cell per output pixel of the map frame, and drawn with
+# imshow. Resampling on a lon/lat grid instead and letting cartopy project
+# it rotates that grid's cells under LCC, so categorical edges come out as
+# visible stair-steps; a pixel-aligned projected grid has none.
+GRID_NX = int(round(FIG_WIDTH_IN * AXES_WIDTH_FRAC * FIG_DPI))
+GRID_NY = int(round(_axes_h_in * FIG_DPI))
+# Gaussian smoothing applied to the precip fields before classifying, so
+# 0.25 deg (~25 km) cell edges round off into natural curves. ~11 km --
+# under the native grid spacing, so it doesn't smear real features.
+SMOOTH_KM = 11.0
+# Boundary geometries are densified to this vertex spacing (deg) before
+# drawing: Natural Earth stores straight-in-lon/lat borders like the 49th
+# parallel with very few vertices, which LCC would otherwise draw as
+# straight chords instead of following the parallel's curve.
+DENSIFY_DEG = 0.05
 
 # ---------------------------------------------------------------------------
 # ECMWF IFS (Open Data, via Herbie) -- 0.25 deg, 3-hourly steps.
@@ -312,32 +354,33 @@ def fetch_day(date):
 # ---------------------------------------------------------------------------
 # Resampling / classification
 # ---------------------------------------------------------------------------
-def regular_axes():
-    return (np.linspace(RESAMPLE_LON_MIN, RESAMPLE_LON_MAX, RESAMPLE_NX),
-            np.linspace(RESAMPLE_LAT_MIN, RESAMPLE_LAT_MAX, RESAMPLE_NY))
+def projected_grid_axes():
+    """Cell-center x/y (PROJ meters) of the pixel-aligned map grid."""
+    x0, x1, y0, y1 = MAP_EXTENT
+    dx, dy = (x1 - x0) / GRID_NX, (y1 - y0) / GRID_NY
+    return (np.linspace(x0 + dx / 2, x1 - dx / 2, GRID_NX),
+            np.linspace(y0 + dy / 2, y1 - dy / 2, GRID_NY))
 
 
-def resample_to_regular_grid(lat, lon, values):
-    reg_lon, reg_lat = regular_axes()
-    reg_lon_grid, reg_lat_grid = np.meshgrid(reg_lon, reg_lat)
-    points = np.column_stack([np.ravel(lon), np.ravel(lat)])
-    regridded = griddata(points, np.ravel(values), (reg_lon_grid, reg_lat_grid), method="linear")
-    nan_mask = np.isnan(regridded)
-    if nan_mask.any():
-        regridded[nan_mask] = griddata(points, np.ravel(values),
-                                        (reg_lon_grid[nan_mask], reg_lat_grid[nan_mask]), method="nearest")
-    return regridded
+def resample_to_projected_grid(lat, lon, values_list):
+    """Linearly interpolate one or more fields on the source lon/lat grid
+    onto the pixel-aligned PROJ grid. The Delaunay triangulation is shared
+    across fields."""
+    from scipy.interpolate import LinearNDInterpolator
+    from scipy.spatial import Delaunay
+    src = PROJ.transform_points(ccrs.PlateCarree(), np.ravel(lon), np.ravel(lat))[:, :2]
+    tri = Delaunay(src)
+    gx, gy = np.meshgrid(*projected_grid_axes())
+    out = []
+    for values in values_list:
+        out.append(LinearNDInterpolator(tri, np.ravel(values))(gx, gy))
+    return out
 
 
-def sample_grid_value(value_grid, lon_pt, lat_pt):
-    """Bilinear sample of the regular resampled grid at a point."""
-    fx = (lon_pt - RESAMPLE_LON_MIN) / (RESAMPLE_LON_MAX - RESAMPLE_LON_MIN) * (RESAMPLE_NX - 1)
-    fy = (lat_pt - RESAMPLE_LAT_MIN) / (RESAMPLE_LAT_MAX - RESAMPLE_LAT_MIN) * (RESAMPLE_NY - 1)
-    x0, y0 = int(np.floor(fx)), int(np.floor(fy))
-    tx, ty = fx - x0, fy - y0
-    v = value_grid
-    return ((1 - tx) * (1 - ty) * v[y0, x0] + tx * (1 - ty) * v[y0, x0 + 1]
-            + (1 - tx) * ty * v[y0 + 1, x0] + tx * ty * v[y0 + 1, x0 + 1])
+def sample_points(lat, lon, values, lon_pts, lat_pts):
+    """Linear interpolation of a source-grid field at arbitrary points."""
+    return griddata(np.column_stack([np.ravel(lon), np.ravel(lat)]), np.ravel(values),
+                    (np.asarray(lon_pts), np.asarray(lat_pts)), method="linear")
 
 
 def classify_precip(total_in, snow_in, mix_in):
@@ -362,23 +405,16 @@ def classify_precip(total_in, snow_in, mix_in):
 def load_land():
     with open(LAND_FILE) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"] if feat.get("geometry")]
-
-
-def load_states():
-    """State/province polygons -- lake features are dropped entirely so they
-    don't get drawn as a false state/province border."""
-    with open(STATES_LAKES_FILE) as f:
-        data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]
-            if "Lake" not in feat["properties"].get("featurecla", "")
-            and feat["properties"].get("admin") in TARGET_COUNTRIES]
+    return [segmentize(shape(feat["geometry"]), DENSIFY_DEG) for feat in data["features"] if feat.get("geometry")]
 
 
 def load_boundary_lines(path):
+    """Border *lines* (each border stored once, so neighbors share vertices
+    -- same reasoning as ../columbia-basin-temps/), densified so they
+    follow parallels' curves under LCC (see DENSIFY_DEG)."""
     with open(path) as f:
         data = json.load(f)
-    return [shape(feat["geometry"]) for feat in data["features"]]
+    return [segmentize(shape(feat["geometry"]), DENSIFY_DEG) for feat in data["features"]]
 
 
 # ---------------------------------------------------------------------------
@@ -398,71 +434,77 @@ def build_map(date, output_path, override_path=None):
     run_init = datetime.fromisoformat(str(snap["run_init"]))
     lat, lon = snap["lat"], snap["lon"]
 
-    print("Resampling onto a regular grid...")
+    print("Resampling onto the projected map grid...")
     m_to_in = 1000 / MM_PER_IN
-    total_in = gaussian_filter(resample_to_regular_grid(lat, lon, snap["total_tp_m"] * m_to_in), SMOOTH_SIGMA)
-    snow_in = gaussian_filter(resample_to_regular_grid(lat, lon, snap["snow_m"] * m_to_in), SMOOTH_SIGMA)
-    mix_in = gaussian_filter(resample_to_regular_grid(lat, lon, snap["mix_m"] * m_to_in), SMOOTH_SIGMA)
-    high_f = k_to_f(resample_to_regular_grid(lat, lon, snap["high_k"]))
+    gx, gy = projected_grid_axes()
+    sigma = SMOOTH_KM * 1000 / (gx[1] - gx[0])
+    total_in, snow_in, mix_in = (gaussian_filter(np.nan_to_num(g), sigma) for g in resample_to_projected_grid(
+        lat, lon, [snap["total_tp_m"] * m_to_in, snap["snow_m"] * m_to_in, snap["mix_m"] * m_to_in]))
 
     cat = classify_precip(total_in, snow_in, mix_in)
     for t_i, t in enumerate(PRECIP_TYPES):
         n = ((cat >= 1 + t_i * 3) & (cat <= 3 + t_i * 3)).sum()
-        print(f"  {t}: {100 * n / cat.size:.1f}% of grid")
+        print(f"  {t}: {100 * n / cat.size:.1f}% of map")
     print(f"Max daily precip: {total_in.max():.2f} in")
+
+    city_highs_f = k_to_f(sample_points(lat, lon, snap["high_k"],
+                                        [c[1] for c in CITIES], [c[2] for c in CITIES]))
 
     print("Loading basemap layers...")
     land_geoms = load_land()
-    state_geoms = load_states()
+    admin1_lines = load_boundary_lines(ADMIN1_LINES_FILE)
     admin0_lines = load_boundary_lines(ADMIN0_LINES_FILE)
 
-    # PlateCarree + pcolormesh, same reasoning as ../dew-point-storm-map/
-    # (no blank-corner slack, no inverse-lookup gaps at the frame edge).
+    # Lambert Conformal (see PROJ above).
     pc = ccrs.PlateCarree()
     fig = plt.figure(figsize=(FIG_WIDTH_IN, FIG_HEIGHT_IN), dpi=FIG_DPI)
     fig.patch.set_facecolor("#f7f6f2")
 
-    ax = fig.add_axes(AXES_RECT, projection=pc)
-    ax.set_extent([LON_MIN, LON_MAX, LAT_MIN, LAT_MAX], crs=pc)
+    ax = fig.add_axes(AXES_RECT, projection=PROJ)
+    ax.set_extent(MAP_EXTENT, crs=PROJ)
     ax.patch.set_facecolor("#bfe1ef")  # pastel ocean, same as ../wildcad-fires-map/
 
     ax.add_geometries(land_geoms, crs=pc, facecolor="#d7dcd0", edgecolor="none", zorder=1)
 
-    # Precip shading -- categorical, so nearest-cell shading on a fine grid
-    # (RESAMPLE_DEG) rather than gouraud, which would blend neighboring
-    # categories' colors into shades that aren't on the legend.
+    # Precip shading -- categorical, drawn pixel-for-pixel from the projected
+    # grid with nearest interpolation, so neighboring categories never blend
+    # into colors that aren't on the legend.
     colors = [c for t in PRECIP_TYPES for c in PRECIP_COLORS[t]]
     cmap = ListedColormap(colors)
     norm = BoundaryNorm(np.arange(0.5, len(colors) + 1.5), cmap.N)
-    reg_lon, reg_lat = regular_axes()
-    ax.pcolormesh(reg_lon, reg_lat, np.ma.masked_equal(cat, 0), transform=pc, cmap=cmap, norm=norm,
-                  shading="nearest", alpha=PRECIP_ALPHA, zorder=1.2, rasterized=True)
+    ax.imshow(np.ma.masked_equal(cat, 0), origin="lower", extent=MAP_EXTENT, transform=PROJ,
+              cmap=cmap, norm=norm, interpolation="nearest", alpha=PRECIP_ALPHA, zorder=1.2)
 
     ax.add_geometries(land_geoms, crs=pc, facecolor="none", edgecolor="#4a6b7a", linewidth=0.8, zorder=1.5)
-    ax.add_geometries(state_geoms, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
+    ax.add_geometries(admin1_lines, crs=pc, facecolor="none", edgecolor="#5a4632", linewidth=0.8, zorder=2)
     ax.add_geometries(admin0_lines, crs=pc, facecolor="none", edgecolor="#3a2f21", linewidth=1.1, zorder=2.5)
 
-    # City labels -- name, with the day's high on a second line, both tucked
-    # beside the dot via points-based offsets (same layout as
-    # ../columbia-basin-temps/).
+    # City labels -- the repo's standard style, identical to
+    # ../columbia-basin-temps/: white dot, name beside it, the day's high
+    # ("54°F") tucked tight underneath, white Poppins Medium with a dark
+    # stroke, offsets in points so spacing is constant regardless of scale.
     geodetic_transform = pc._as_mpl_transform(ax)
-    stroke = [pe.withStroke(linewidth=1.6, foreground=(0, 0, 0, 0.8))]
-    for name, lon_c, lat_c, pos in CITIES:
-        if not (LON_MIN <= lon_c <= LON_MAX and LAT_MIN <= lat_c <= LAT_MAX):
+    stroke = [pe.withStroke(linewidth=1.5, foreground=(0, 0, 0, 0.8))]
+    x0, x1, y0, y1 = MAP_EXTENT
+    for (name, lon_c, lat_c, pos), city_f in zip(CITIES, city_highs_f):
+        px, py = PROJ.transform_point(lon_c, lat_c, pc)
+        if not (x0 <= px <= x1 and y0 <= py <= y1):
             continue
-        ax.plot(lon_c, lat_c, marker="o", markersize=4.8, color="white", zorder=100,
+        ax.plot(lon_c, lat_c, marker="o", markersize=5.0, color="white", zorder=100,
                 mec="black", mew=0.8, transform=pc)
-        city_f = sample_grid_value(high_f, lon_c, lat_c)
         dx_pt = 6 if pos == "right" else -6
         ha = "left" if pos == "right" else "right"
-        name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=1, units="points")
-        name_txt = ax.text(lon_c, lat_c, name, fontsize=9.0, fontproperties=poppins_semibold,
-                           color="white", ha=ha, va="bottom", zorder=101, transform=name_transform)
+
+        name_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=0, units="points")
+        name_txt = ax.text(lon_c, lat_c, name, fontsize=9.75, fontproperties=poppins_semibold,
+                           color="white", ha=ha, va="center", zorder=101, transform=name_transform)
         name_txt.set_path_effects(stroke)
-        temp_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-1, units="points")
-        temp_txt = ax.text(lon_c, lat_c, f"{city_f:.0f}°", fontsize=13.5, fontproperties=poppins_semibold,
-                           color="white", ha=ha, va="top", zorder=101, transform=temp_transform)
-        temp_txt.set_path_effects([pe.withStroke(linewidth=2.0, foreground=(0, 0, 0, 0.8))])
+
+        temp_transform = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=-4, units="points")
+        temp_txt = ax.text(lon_c, lat_c, f"{city_f:.0f}°F", fontsize=9.75,
+                           fontproperties=poppins_semibold, color="white", ha=ha, va="top",
+                           zorder=101, transform=temp_transform)
+        temp_txt.set_path_effects(stroke)
 
     ax.spines['geo'].set_edgecolor('black')
     ax.spines['geo'].set_linewidth(1.6)
@@ -501,7 +543,7 @@ def build_map(date, output_path, override_path=None):
     thresh_txt = ", ".join(f"{lbl} ≥ {v:.2f} in".replace(" 0.", " .", 1)
                            for lbl, v in zip(INTENSITY_LABELS, INTENSITY_THRESHOLDS_IN))
     fig.text(0.5, 0.28 / FIG_HEIGHT_IN,
-             f"Day's total liquid equivalent: {thresh_txt}  •  Numbers: forecast high (°F)",
+             f"Day's total liquid equivalent: {thresh_txt}  •  City values: forecast high",
              fontsize=8, fontproperties=poppins_reg, color="#5a584f", ha="center", va="bottom")
 
     # Title & subtitle above the map
