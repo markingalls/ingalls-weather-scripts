@@ -236,7 +236,7 @@ CITIES = [
     ("La Push", -124.6365, 47.9087),
     ("Coos Bay", -124.2179, 43.3665),
     ("Old Faithful", -110.8281, 44.4605),
-    ("Afton", -110.9318, 42.7247),
+    ("Afton", -110.9318, 42.7247, (8, -14)),         # off Idaho Falls
 ]
 # Label style -- the repo default (see ../thanksgiving-snow-climatology-map/
 # and blue-mountains-downslope-map): name centered on the point in a 50%

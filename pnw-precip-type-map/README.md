@@ -43,8 +43,8 @@ python3 build_map.py --set-high Tri-Cities=57   # hand-adjust a city's high (rep
 `--set-high CITY=F` replaces the model value shown for that city in this run
 only. Nothing is saved, so the next run goes back to the model's highs.
 Individual labels can also be nudged off their point with the optional
-`(dx_pt, dy_pt)` on that city's entry in `CITIES` (Tri-Cities and Portland
-use it). The high is still sampled at the city's real location.
+`(dx_pt, dy_pt)` on that city's entry in `CITIES` (Tri-Cities, Portland, and
+Afton use it). The high is still sampled at the city's real location.
 
 ## Methodology notes
 
