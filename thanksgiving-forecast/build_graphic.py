@@ -341,7 +341,7 @@ def holiday_tips(frame):
     elif precip and precip["pop"] < 0.5:
         tips.append("Chance of snow: watch roads" if precip["is_snow"] else "Umbrella, just in case")
     elif wind >= WIND_TIP_THRESHOLD:
-        tips.append("Windy: mind the turkey fryer")
+        tips.append("Breezy: mind the turkey fryer")
     elif frame["light"] in ("DAWN", "DUSK"):
         tips.append("Low light: headlights on")
     elif frame["light"] != "DAYLIGHT":
