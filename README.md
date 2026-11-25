@@ -52,6 +52,10 @@ workflows. Each project lives in its own directory with its own README.
   precipitable water for a single valid time, from the WindBorne
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
+- [`psc-flight-connections-map/`](psc-flight-connections-map/) — US +
+  southern Canada and world maps of every airport reachable from PSC with
+  0 or 1 layovers, colored by layover airport, scraped from Wikipedia's
+  airport "Airlines and destinations" tables.
 
 ## Shared resources
 
