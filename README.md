@@ -52,6 +52,10 @@ workflows. Each project lives in its own directory with its own README.
   race-day forecast for the Tri-Cities Crunchwrap Crawl: three cards for the
   start, last year's winning time, and cutoff, with feels-like temps, precip chance,
   wind, and runner tips.
+- [`thanksgiving-forecast/`](thanksgiving-forecast/) — autumn-themed
+  Thanksgiving Day forecast for the Tri-Cities: four cards (default 07:00,
+  11:00, 15:00, 19:00) with feels-like temps, precip chance, wind, and
+  holiday tips.
 - [`tri-cities-temp-chart/`](tri-cities-temp-chart/) — generates a styled
   14-day chart of Tri-Cities daily high temperature: 7 days observed
   (xmACIS) and 7 days forecast (WindBorne MetaMesh), against 1991-2020

@@ -115,3 +115,8 @@ halloween-trick-or-treat-forecast/*_trick_or_treat_forecast.png
 # the rendered graphic is an output too -- neither is source.
 crunchwrap-crawl-forecast/forecast.json
 crunchwrap-crawl-forecast/crunchwrap_crawl_forecast*.png
+# --- thanksgiving-forecast ---
+# forecast.json is live data fetch_forecast.py regenerates every run, and
+# the rendered graphic is an output too -- neither is source.
+thanksgiving-forecast/forecast.json
+thanksgiving-forecast/thanksgiving_forecast*.png
