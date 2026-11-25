@@ -204,17 +204,19 @@ PRECIP_ALPHA = 0.88
 # Same label set as ../thanksgiving-snow-climatology-map/ (the repo's
 # standard PNW city list for this domain).
 CITIES = [
-    # (name, lon, lat)
+    # (name, lon, lat[, (dx_pt, dy_pt)]) -- the optional offset nudges the
+    # whole label (box + value) off the point to keep it from crowding a
+    # neighbor; the high is still sampled at the city's actual lon/lat.
     ("Bellingham", -122.4787, 48.7519),
     ("Astoria", -123.8313, 46.1879),
     ("Seattle", -122.3321, 47.6062),
-    ("Portland", -122.6784, 45.5152),
+    ("Portland", -122.6784, 45.5152, (10, -6)),      # off Astoria
     ("Eugene", -123.0868, 44.0521),
     ("Medford", -122.8756, 42.3265),
     ("Bend", -121.3153, 44.0582),
     ("Wenatchee", -120.3103, 47.4235),
     ("Yakima", -120.5059, 46.6021),
-    ("Tri-Cities", -119.1741, 46.2455),
+    ("Tri-Cities", -119.1741, 46.2455, (8, -14)),    # off Yakima
     ("Omak", -119.5273, 48.4110),
     ("Spokane", -117.4260, 47.6588),
     ("Lewiston", -117.0177, 46.4165),
@@ -230,6 +232,11 @@ CITIES = [
     ("Great Falls", -111.3008, 47.5053),
     ("Twin Falls", -114.4609, 42.5629),
     ("Idaho Falls", -112.0362, 43.4917),
+    ("Bozeman", -111.0429, 45.6770),
+    ("La Push", -124.6365, 47.9087),
+    ("Coos Bay", -124.2179, 43.3665),
+    ("Old Faithful", -110.8281, 44.4605),
+    ("Afton", -110.9318, 42.7247),
 ]
 # Label style -- the repo default (see ../thanksgiving-snow-climatology-map/
 # and blue-mountains-downslope-map): name centered on the point in a 50%
@@ -427,7 +434,7 @@ def load_boundary_lines(path):
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
-def build_map(date, output_path, override_path=None):
+def build_map(date, output_path, override_path=None, high_overrides=None):
     poppins_reg = fm.FontProperties(fname=POPPINS_REG_PATH)
     poppins_semibold = fm.FontProperties(fname=POPPINS_MED_PATH)
 
@@ -493,16 +500,25 @@ def build_map(date, output_path, override_path=None):
     name_stroke = [pe.withStroke(linewidth=0.9, foreground=(0, 0, 0, 0.85))]
     value_stroke = [pe.withStroke(linewidth=2.2, foreground=(0, 0, 0, 0.9))]
     x0, x1, y0, y1 = MAP_EXTENT
-    for (name, lon_c, lat_c), city_f in zip(CITIES, city_highs_f):
+    high_overrides = high_overrides or {}
+    unknown = set(high_overrides) - {c[0] for c in CITIES}
+    if unknown:
+        sys.exit(f"--set-high: unknown city {sorted(unknown)}")
+    for (name, lon_c, lat_c, *opt), city_f in zip(CITIES, city_highs_f):
+        if name in high_overrides:
+            print(f"  {name}: high set to {high_overrides[name]} (model {city_f:.0f})")
+            city_f = high_overrides[name]
+        dx_pt, dy_pt = opt[0] if opt else (0, 0)
+        name_tr = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=dy_pt, units="points")
         px, py = PROJ.transform_point(lon_c, lat_c, pc)
         if not (x0 <= px <= x1 and y0 <= py <= y1):
             continue
         t = ax.text(lon_c, lat_c, f" {name} ", fontsize=NAME_FONTSIZE, fontproperties=poppins_sb,
-                    color="white", ha="center", va="center", zorder=101, transform=geodetic_transform,
+                    color="white", ha="center", va="center", zorder=101, transform=name_tr,
                     bbox=dict(boxstyle="round,pad=0.04,rounding_size=0.25", facecolor="black",
                               alpha=0.50, edgecolor="none"))
         t.set_path_effects(name_stroke)
-        val_tr = offset_copy(geodetic_transform, fig=fig, x=0, y=VALUE_GAP_PT, units="points")
+        val_tr = offset_copy(geodetic_transform, fig=fig, x=dx_pt, y=dy_pt + VALUE_GAP_PT, units="points")
         v = ax.text(lon_c, lat_c, f"{city_f:.0f}°", fontsize=VALUE_FONTSIZE, fontproperties=poppins_bold,
                     color="white", ha="center", va="bottom", zorder=102, transform=val_tr)
         v.set_path_effects(value_stroke)
@@ -588,6 +604,9 @@ if __name__ == "__main__":
                         help="Target date, YYYY-MM-DD, local (Pacific) time (default: tomorrow).")
     parser.add_argument("--file", type=Path, default=None,
                         help="Render from a local saved snapshot (.npz) instead of fetching live.")
+    parser.add_argument("--set-high", action="append", default=[], metavar="CITY=F",
+                        help="Hand-set a city's displayed high (°F), e.g. --set-high Tri-Cities=57. "
+                             "Repeatable. Applies to this run only.")
     parser.add_argument("--out", type=Path, default=None,
                         help="Output PNG path (default: output/pnw_precip_type_map_<date>.png).")
     args = parser.parse_args()
@@ -601,4 +620,10 @@ if __name__ == "__main__":
         target_date = datetime.now(LOCAL_TZ).date() + timedelta(days=1)
 
     out_path = args.out or (OUTPUT_DIR / f"pnw_precip_type_map_{target_date.isoformat()}.png")
-    build_map(target_date, out_path, override_path=args.file)
+    overrides = {}
+    for item in args.set_high:
+        city, _, val = item.rpartition("=")
+        if not city:
+            sys.exit(f"--set-high expects CITY=F, got {item!r}")
+        overrides[city] = int(val)
+    build_map(target_date, out_path, override_path=args.file, high_overrides=overrides)
