@@ -56,3 +56,10 @@ python3 build_map.py          # render puget_sound_tornado_warnings.png
   leader line to the nearest edge of that day's polygons. The Grays
   Harbor days overlap heavily, so if you add a day or change the extent,
   re-check the label placement.
+- **No legend**: the per-day date labels (and the highlighted day's red)
+  carry the map on their own, so there isn't one.
+- **US-101**: `../maps/washington_roads.geojson` is missing US-101 around
+  the Olympic Peninsula and down the Grays Harbor coast, so `build_map.py`
+  also draws `../maps/western_wa_us101.geojson` in the trunk style. That
+  file is every non-link OSM way tagged `ref=US 101` in western
+  Washington, pulled from Overpass and lightly simplified (0.0003 deg).

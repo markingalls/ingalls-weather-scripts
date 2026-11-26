@@ -10,7 +10,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
-from matplotlib.patches import Patch
 import cartopy.crs as ccrs
 from shapely.geometry import shape, Point
 from shapely.ops import unary_union, nearest_points
@@ -120,7 +119,10 @@ MOTORWAY_COLOR = "#8FB8E0"  # pastel blue
 TRUNK_COLOR = "#F2B880"     # pastel orange
 
 motorway_geoms, trunk_geoms = [], []
-for region_file in ["washington_roads.geojson"]:
+# western_wa_us101.geojson patches US-101 around the Olympic Peninsula and
+# Grays Harbor coast, which washington_roads.geojson is missing. Overlapping
+# segments are just drawn twice in the same style.
+for region_file in ["washington_roads.geojson", "western_wa_us101.geojson"]:
     d = json.load(open(f"{MAPS_DIR}/{region_file}"))
     for f in d["features"]:
         hwy = f["properties"].get("highway")
@@ -288,34 +290,13 @@ else:
 
 # ---------- title / subtitle ----------
 n_total = len(warnings)
-hl_ws = by_day[highlight_day]
-n_past = n_total - len(hl_ws)
-hl_counties = sorted({c.strip() for w in hl_ws for c in w["counties"].split(",")})
-hl_date = hl_ws[0]["issue_pt"].strftime("%b %-d, %Y")
 
 subtitle_y = top_y + 0.018
 title_y = subtitle_y + 0.035
 fig.text(left_x, title_y, "Every NWS Seattle Tornado Warning Polygon",
           fontproperties=f_bold, fontsize=22, color="#2b2a26")
-subtitle = (f"All {n_total} storm-based warnings since polygons began in Oct 2007 "
-            f"— {hl_date} highlighted")
+subtitle = f"All {n_total} storm-based warnings since polygons began in Oct 2007"
 fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
-
-# ---------- legend ----------
-past_years = sorted({w["year"] for w in warnings if w["day"] != highlight_day})
-hl_where = ", ".join(c.replace(" [WA]", "") for c in hl_counties)
-legend_handles = [
-    Patch(facecolor=HIGHLIGHT_FILL, edgecolor=HIGHLIGHT_EDGE, alpha=0.85,
-          label=f"{hl_date} — {hl_where} Co."),
-    Patch(facecolor=PAST_FILL, edgecolor=PAST_EDGE, alpha=0.7,
-          label=f"Earlier warnings, {past_years[0]}–{past_years[-1]} ({n_past})"),
-]
-leg = fig.legend(handles=legend_handles, loc="lower left",
-                  bbox_to_anchor=(left_x + 0.012, map_pos.y0 + 0.012),
-                  bbox_transform=fig.transFigure,
-                  frameon=True, facecolor="white", edgecolor="#d8d5cc",
-                  framealpha=1.0, prop=f_reg, fontsize=10, borderpad=0.8)
-leg.get_frame().set_linewidth(0.8)
 
 # ---------- attribution ----------
 fig.text(center_x, 0.02,
