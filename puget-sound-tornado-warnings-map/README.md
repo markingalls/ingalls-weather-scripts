@@ -1,7 +1,7 @@
 # Puget Sound Tornado Warnings Map
 
 A one-off styled map of every Tornado Warning NWS Seattle (SEW) has issued
-since 1998, drawn as the warnings' storm-based polygons over western
+in the polygon era (storm-based warnings, Oct 2007 on), drawn over western
 Washington, with the most recent warning day highlighted. It was made for
 the 26 Nov 2026 King County warning, the first tornado warning ever
 issued for King County. Basemap and styling match
@@ -26,7 +26,7 @@ Run from inside this directory:
 
 ```bash
 bash setup.sh                 # first time / fresh environment only
-python3 fetch_warnings.py     # pull every SEW TO.W since 1998
+python3 fetch_warnings.py     # pull every SEW TO.W since 2007
 python3 build_map.py          # render puget_sound_tornado_warnings.png
 ```
 
@@ -35,12 +35,15 @@ python3 build_map.py          # render puget_sound_tornado_warnings.png
 - **Source**: api.weather.gov doesn't serve historical warnings, so this
   uses IEM's VTEC archive, the standard public record of NWS warnings.
   IEM's King County (WAC033) record goes back to 1988, and the 26 Nov 2026
-  warning is the only tornado warning in it. IEM lists no SEW tornado
-  warnings at all from 1998 to 2013, so all 14 on the map are from 2014
-  or later, and all of them have storm-based polygons.
-  `fetch_warnings.py` falls back to county geometry for any warning that
-  has no polygon stored (pre-2007 county-based warnings), but none of
-  these needed it.
+  warning is the only tornado warning in it.
+- **Polygon era only**: storm-based polygon warnings became the NWS
+  standard on 1 Oct 2007, so `fetch_warnings.py` starts in 2007. SEW's
+  first polygon-era tornado warning was Pierce County on 11 Oct 2014.
+  The earlier county-based SEW tornado warnings that IEM's text archive
+  has (Douglas/S. Okanogan Co. 4 Jul 1992, NE Snohomish Co. 31 May 1997)
+  are left off on purpose. `fetch_warnings.py` still falls back to county
+  geometry if a warning has no stored polygon (e.g. if you run it with
+  `--start-year` before 2007).
 - **Highlight**: `build_map.py` highlights the most recent warning day by
   Pacific-time date (official NWS Tornado Warning red, white halo).
   Everything earlier is drawn in a muted red underneath it.

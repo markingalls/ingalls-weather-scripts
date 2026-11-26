@@ -1,4 +1,4 @@
-"""Pull every NWS Seattle (SEW) Tornado Warning since START_YEAR from the
+"""Pull every polygon-era NWS Seattle (SEW) Tornado Warning from the
 Iowa Environmental Mesonet's VTEC archive, plus each warning's polygon,
 and write tornado_warnings.json for build_map.py.
 
@@ -15,7 +15,8 @@ import requests
 
 IEM = "https://mesonet.agron.iastate.edu"
 WFO = "SEW"
-START_YEAR = 1998
+# Storm-based (polygon) warnings became the NWS standard on 1 Oct 2007.
+START_YEAR = 2007
 
 
 def get_json(url, params):

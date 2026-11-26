@@ -263,14 +263,13 @@ hl_ws = by_day[highlight_day]
 n_past = n_total - len(hl_ws)
 hl_counties = sorted({c.strip() for w in hl_ws for c in w["counties"].split(",")})
 hl_date = hl_ws[0]["issue_pt"].strftime("%b %-d, %Y")
-first_year = data.get("start_year", min(w["year"] for w in warnings))
 
 subtitle_y = top_y + 0.018
 title_y = subtitle_y + 0.035
-fig.text(left_x, title_y, "Every NWS Seattle Tornado Warning",
+fig.text(left_x, title_y, "Every NWS Seattle Tornado Warning Polygon",
           fontproperties=f_bold, fontsize=22, color="#2b2a26")
-subtitle = (f"{n_total} warnings issued {first_year}–{datetime.now(PT).year} "
-            f"(none before 2014) — {hl_date} highlighted")
+subtitle = (f"All {n_total} storm-based warnings since polygons began in Oct 2007 "
+            f"— {hl_date} highlighted")
 fig.text(left_x, subtitle_y, subtitle, fontproperties=f_reg, fontsize=12, color="#5a584f")
 
 # ---------- legend ----------
