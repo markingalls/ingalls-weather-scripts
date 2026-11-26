@@ -69,6 +69,9 @@ reel per `--product ref|vel`. The user wants a **constant pace** matching
 the densest-scan stretch (around the warning) -- measure the lowest-tilt
 cut spacing there and set `--minutes-per-sec` = spacing / (4/30) -- and
 **highways** on.
+The user also wanted one combined reel: reflectivity then velocity,
+the pair played twice (~54 s) -- the end of the event script does it
+with ffmpeg concat, plus a CRF 27 `_share` copy under the upload limit.
 
 1. **Find the warning**: api.weather.gov/alerts?event=Tornado Warning&area=WA
    (last ~7 days) gives the polygon, valid times and the motion line

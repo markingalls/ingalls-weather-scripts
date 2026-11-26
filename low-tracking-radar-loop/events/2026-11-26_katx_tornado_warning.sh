@@ -23,3 +23,18 @@ for P in ref vel; do
     --highways --minutes-per-sec 13.4 \
     --title "Tornado-Warned Storm"
 done
+
+# Combined reel: reflectivity then velocity, the pair played twice.
+# Stream copy (both reels share encode settings), plus a CRF 27 re-encode
+# ("_share") that fits under ~30 MB upload limits.
+FF=$(python3 -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())")
+cd output
+REF=$(ls -t katx_ref_loop_20261126_*.mp4 | head -1)
+VEL=$(ls -t katx_vel_loop_20261126_*.mp4 | head -1)
+OUT=katx_ref_vel_x2_${REF#katx_ref_loop_}
+printf "file '%s'\n" "$REF" "$VEL" "$REF" "$VEL" > concat.txt
+"$FF" -loglevel error -y -f concat -safe 0 -i concat.txt -c copy -movflags +faststart "$OUT"
+rm concat.txt
+"$FF" -loglevel error -y -i "$OUT" -c:v libx264 -preset slow -crf 27 \
+  -pix_fmt yuv420p -movflags +faststart "${OUT%.mp4}_share.mp4"
+echo "saved output/$OUT and output/${OUT%.mp4}_share.mp4"
