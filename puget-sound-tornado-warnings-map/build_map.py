@@ -184,16 +184,45 @@ for day, ws in sorted(by_day.items()):
     date_str = ws[0]["issue_pt"].strftime("%b %-d, %Y")
     label = date_str if n == 1 else f"{date_str} ({n})"
     color = HIGHLIGHT_EDGE if is_hl else "#5e231d"
+    halo = [pe.withStroke(linewidth=2.5, foreground="white", alpha=0.85)]
+    line_halo = [pe.withStroke(linewidth=2.6, foreground="white", alpha=0.85)]
+    arrowprops = dict(arrowstyle="-", color=color,
+                      linewidth=1.3 if is_hl else 0.9, shrinkA=3, shrinkB=0)
+
+    # Sub-label under the highlighted day so it's clear the warning isn't
+    # still in effect when the map is shared after the fact. When present,
+    # the leader line hangs off the sub-label instead of the date so it
+    # doesn't cut through it.
+    expired = False
+    if is_hl:
+        last_expire = max(datetime.fromisoformat(w["expire"].replace("Z", "+00:00"))
+                          for w in ws)
+        expired = datetime.now(PT) > last_expire
+
     txt = ax.annotate(label, xy=(target.x, target.y), xytext=(lx, ly),
                        xycoords=data_xform, textcoords=data_xform,
                        ha=ha, va="center",
                        fontproperties=f_bold if is_hl else f_med,
                        fontsize=13 if is_hl else 10.5, color=color, zorder=10,
-                       arrowprops=dict(arrowstyle="-", color=color,
-                                       linewidth=1.3 if is_hl else 0.9,
-                                       shrinkA=3, shrinkB=0))
-    txt.set_path_effects([pe.withStroke(linewidth=2.5, foreground="white", alpha=0.85)])
-    txt.arrow_patch.set_path_effects([pe.withStroke(linewidth=2.6, foreground="white", alpha=0.85)])
+                       arrowprops=None if expired else arrowprops)
+    txt.set_path_effects(halo)
+    if not expired:
+        txt.arrow_patch.set_path_effects(line_halo)
+        continue
+
+    # Place the sub-label 17pt below the date, in display space, then
+    # convert back to the axes' data coords so annotate can draw the
+    # leader from it to the polygon.
+    fig.canvas.draw()
+    disp = data_xform.transform((lx, ly))
+    sub_xy = data_xform.inverted().transform((disp[0], disp[1] - 17 * fig.dpi / 72))
+    sub = ax.annotate("(now expired)", xy=(target.x, target.y), xytext=sub_xy,
+                       xycoords=data_xform, textcoords=data_xform,
+                       ha=ha, va="center", fontproperties=f_med,
+                       fontsize=10.5, color=color, zorder=10,
+                       arrowprops=arrowprops)
+    sub.set_path_effects(halo)
+    sub.arrow_patch.set_path_effects(line_halo)
 
 # ---------- city labels ----------
 cities = [

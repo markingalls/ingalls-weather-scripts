@@ -47,6 +47,10 @@ python3 build_map.py          # render puget_sound_tornado_warnings.png
 - **Highlight**: `build_map.py` highlights the most recent warning day by
   Pacific-time date (official NWS Tornado Warning red, white halo).
   Everything earlier is drawn in a muted red underneath it.
+- **"(now expired)"**: once every warning on the highlighted day has
+  passed its expire time, the highlighted label gets a "(now expired)"
+  line under the date, and the leader line hangs off that line instead.
+  While the warning is still active, the label is just the date.
 - **Labels**: one date label per warning day (with a count when there was
   more than one warning that day), placed by hand in `LABEL_POS` with a
   leader line to the nearest edge of that day's polygons. The Grays
