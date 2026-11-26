@@ -45,6 +45,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.patheffects as pe
 import matplotlib.patches
+from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 from PIL import Image, ImageDraw
 from pyproj import Geod, Transformer
@@ -71,6 +72,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(HERE, "output")
 CACHE_DIR = os.path.join(OUTPUT_DIR, "cache")
 LOGO_PATH = os.path.join(HERE, "..", "assets", "ingalls_weather_logo.png")
+MAPS_DIR = os.path.join(HERE, "..", "maps")
 
 LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
@@ -167,6 +169,15 @@ SEED_SEARCH_KM = 600
 TRACK_SMOOTH_DEG = 0.06
 # Crop box for cached MSLP (keeps the cache small).
 HRRR_CROP = (38.0, 54.0, -136.0, -115.0)  # lat0, lat1, lon0, lon1
+
+# ---------- highways ----------
+# Shared OSM motorway/trunk extracts in ../maps/, styled like the
+# Columbia Basin maps (pastel blue motorways over pastel orange trunks).
+ROAD_FILES = ["washington_roads.geojson", "oregon_roads.geojson", "idaho_roads_north.geojson"]
+MOTORWAY_TYPES = {"motorway", "motorway_link"}
+TRUNK_TYPES = {"trunk", "trunk_link"}
+MOTORWAY_COLOR = "#8FB8E0"  # pastel blue
+TRUNK_COLOR = "#F2B880"     # pastel orange
 
 # ---------- basemap ----------
 ESRI_URL = ("https://server.arcgisonline.com/ArcGIS/rest/services/"
@@ -631,6 +642,33 @@ def fetch_satellite(x0, x1, y0, y1, res):
     return mosaic, ext
 
 
+def load_highways(lon0, lon1, lat0, lat1):
+    """Motorway and trunk segments overlapping the lon/lat box, in web
+    mercator: (motorways, trunks), each a list of (N, 2) arrays."""
+    out = {"motorway": [], "trunk": []}
+    for name in ROAD_FILES:
+        path = os.path.join(MAPS_DIR, name)
+        if not os.path.exists(path):
+            continue
+        with open(path) as fh:
+            gj = json.load(fh)
+        for f in gj["features"]:
+            hwy = f["properties"].get("highway")
+            kind = "motorway" if hwy in MOTORWAY_TYPES else "trunk" if hwy in TRUNK_TYPES else None
+            if kind is None:
+                continue
+            geom = f["geometry"]
+            lines = geom["coordinates"] if geom["type"] == "MultiLineString" else [geom["coordinates"]]
+            for line in lines:
+                c = np.asarray(line, dtype=float)
+                if (c[:, 0].max() < lon0 or c[:, 0].min() > lon1
+                        or c[:, 1].max() < lat0 or c[:, 1].min() > lat1):
+                    continue
+                x, y = to_merc.transform(c[:, 0], c[:, 1])
+                out[kind].append(np.column_stack([x, y]))
+    return out["motorway"], out["trunk"]
+
+
 def build_grid(x0, x1, y0, y1, res):
     """Pixel-center coordinates of a north-up mercator grid at `res` m/px."""
     nx = int(np.ceil((x1 - x0) / res))
@@ -726,6 +764,13 @@ def main():
     ap.add_argument("--warnings", default="",
                     help="comma list of warning phenomena to draw while valid, "
                     "e.g. TO or TO,SV (default: none)")
+    ap.add_argument("--highways", action="store_true",
+                    help="draw motorways/trunks from ../maps/")
+    ap.add_argument("--minutes-per-sec", type=float,
+                    help="play at a constant pace of this many real minutes per "
+                    "video second, each scan held until the next arrives "
+                    "(default: every scan gets --frames-per-scan frames, so "
+                    "the pace speeds up wherever scans are sparser)")
     ap.add_argument("--towns", choices=sorted(TOWN_SETS), default="coast",
                     help="town label preset (default %(default)s)")
     ap.add_argument("--view-km", type=float, default=VIEW_KM,
@@ -897,6 +942,17 @@ def main():
                                  ys[-1] - res / 2, ys[0] + res / 2],
                     interpolation="bilinear", zorder=1)
 
+    if args.highways:
+        lon_a, lat_a = from_merc.transform([gx0, gx1], [gy0, gy1])
+        motorways, trunks = load_highways(lon_a[0], lon_a[1], lat_a[0], lat_a[1])
+        halo_road = [pe.withStroke(linewidth=2.4, foreground="#101418", alpha=0.45)]
+        for segs, color, lw, z in ((trunks, TRUNK_COLOR, 1.0, 2.0), (motorways, MOTORWAY_COLOR, 1.3, 2.1)):
+            lc = LineCollection(segs, colors=color, linewidths=lw, zorder=z,
+                                capstyle="round", joinstyle="round")
+            lc.set_path_effects(halo_road)
+            ax.add_collection(lc)
+        log(f"  {len(motorways)} motorway / {len(trunks)} trunk segments")
+
     # Towns
     # Each label is (artists, label-center x, y) so it can fade out as it
     # scrolls under the header block or the L (see fade_labels below).
@@ -1025,23 +1081,35 @@ def main():
          "-movflags", "+faststart", out_mp4],
         stdin=subprocess.PIPE)
 
+    # Video timeline: (scan index, camera time) per output frame.
     n = len(frames)
-    fps_scan = args.frames_per_scan
-    total = n * fps_scan
+    timeline = []
+    if args.minutes_per_sec:
+        # Constant pace: real time advances the same amount every frame;
+        # each scan stays up until the next one's start time.
+        step = timedelta(minutes=args.minutes_per_sec / args.fps)
+        scan_times = [t for t, _ in frames]
+        t = frames[0][0]
+        while t <= frames[-1][0]:
+            i = int(np.searchsorted([x.timestamp() for x in scan_times], t.timestamp(), side="right")) - 1
+            timeline.append((max(i, 0), t))
+            t += step
+    else:
+        # Every scan gets frames_per_scan frames; the camera glides
+        # between scan times.
+        for i in range(n):
+            for f in range(args.frames_per_scan):
+                t_cam = frames[i][0]
+                if i + 1 < n:
+                    t_cam += (frames[i + 1][0] - frames[i][0]) * (f / args.frames_per_scan)
+                timeline.append((i, t_cam))
+    total = len(timeline)
     hold = int(round(args.hold * args.fps))
+    timeline += [(n - 1, frames[-1][0])] * hold
     log(f"Rendering {total + hold} frames ({(total + hold) / args.fps:.1f} s) ...")
     cur_i, cur_img = -1, None
-    for k in range(total + hold):
-        kk = min(k, total - 1) if k < total else total - 1
-        i = kk // fps_scan
-        frac = (kk % fps_scan) / fps_scan
+    for k, (i, t_cam) in enumerate(timeline):
         t_scan = frames[i][0]
-        if i + 1 < n:
-            t_cam = t_scan + (frames[i + 1][0] - t_scan) * frac
-        else:
-            t_cam = t_scan
-        if k >= total:
-            t_cam = frames[-1][0]
         if i != cur_i:
             cur_img = composite(load_sweep(frames[i][1], storm_motion))
             cur_i = i

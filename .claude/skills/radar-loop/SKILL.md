@@ -62,9 +62,13 @@ re-deriving decisions.
 
 First done 2026-11-26 for the KSEW tornado-warned cell from Shelton to
 North Bend -- `low-tracking-radar-loop/events/2026-11-26_katx_tornado_warning.sh`
-is the template. Settings used there (the user hadn't tuned these yet --
-offer to adjust): `--view-km 100 --north-km 0 --towns puget --sails`,
-title "Tornado-Warned Storm", one reel per `--product ref|vel`.
+is the template. Settings used there (tuned by the user):
+`--view-km 100 --north-km 15 --towns puget --sails --highways
+--minutes-per-sec 13.4`, title "Tornado-Warned Storm", one
+reel per `--product ref|vel`. The user wants a **constant pace** matching
+the densest-scan stretch (around the warning) -- measure the lowest-tilt
+cut spacing there and set `--minutes-per-sec` = spacing / (4/30) -- and
+**highways** on.
 
 1. **Find the warning**: api.weather.gov/alerts?event=Tornado Warning&area=WA
    (last ~7 days) gives the polygon, valid times and the motion line

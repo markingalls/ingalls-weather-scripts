@@ -69,7 +69,9 @@ Storm-scale options: `--waypoints "ISO,lat,lon;..."` (follow a fixed,
 spline-smoothed track instead of tracking a low in HRRR; extrapolated
 past its ends), `--product ref|vel`, `--sails` (every lowest-tilt cut,
 not just the first in each volume -- ~2 min updates instead of ~5),
-`--warnings TO[,SV,...]`, `--towns coast|puget`, `--storm-motion
+`--warnings TO[,SV,...]`, `--towns coast|puget`, `--highways`
+(motorways/trunks from `../maps/`, colored like the Columbia Basin maps),
+`--minutes-per-sec X` (constant playback pace -- see "The loop"), `--storm-motion
 FROM/KT` (storm-relative velocity; only helps when the storm moves
 along the radar beam -- see below).
 
@@ -164,10 +166,15 @@ Output lands in `output/<site>_<ref|vel|srv>_loop_<YYYYMMDD_HHMM>.mp4` and
 
 - Scans are kept only while the tracked low is within 330 km of the radar
   -- past that the lowest tilt overshoots most of the precip shield.
-- Each scan holds for `--frames-per-scan` frames while the camera keeps
-  gliding along the track between scan times, so the pan is smooth at
+- By default each scan holds for `--frames-per-scan` frames while the
+  camera keeps gliding along the track between scan times, so the pan is smooth at
   30 fps even though scans come every ~5 minutes; echoes stay fixed to the
-  ground and update when the next scan arrives.
+  ground and update when the next scan arrives. That makes the pace
+  uneven wherever scan spacing changes -- with `--sails`, KATX went from
+  one lowest-tilt cut per ~5 min to one per ~1.8 min mid-event, so the
+  early part played ~3x faster. `--minutes-per-sec` instead advances
+  real time by the same amount every frame and holds each scan until
+  the next one starts (13.4 for 2026-11-26: the warning-period pace).
 - All text lives between the top 14% and bottom 35% of the frame, which
   Facebook's reel UI covers. A town label fades out only where it
   would overlap a header element (title, time, legend, credits, logo),
