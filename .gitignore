@@ -105,3 +105,10 @@ tri-cities-temp-chart/tri_cities_temp_chart*.png
 # rendered PNGs are outputs -- neither is source, so don't track them.
 tpw-wm6-ensemble-map/output/*.npz
 tpw-wm6-ensemble-map/output/*.png
+
+# --- puget-sound-tornado-warnings-map ---
+# tornado_warnings.json is data fetch_warnings.py regenerates on every run,
+# and the rendered map image is an output too. Neither is source, so don't
+# track them.
+puget-sound-tornado-warnings-map/tornado_warnings.json
+puget-sound-tornado-warnings-map/puget_sound_tornado_warnings*.png

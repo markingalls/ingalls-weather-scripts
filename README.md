@@ -53,6 +53,11 @@ workflows. Each project lives in its own directory with its own README.
   WeatherMesh-6 global ensemble mean, spanning Hawaii to the northwest
   corner of Saskatchewan.
 
+- [`puget-sound-tornado-warnings-map/`](puget-sound-tornado-warnings-map/)
+  — one-off map of every NWS Seattle Tornado Warning polygon since 1998,
+  over western Washington, with the most recent warning day highlighted
+  (built for the 26 Nov 2026 King County warning).
+
 ## Shared resources
 
 - [`maps/`](maps/) — reusable basemap data (coastlines, borders, counties,
