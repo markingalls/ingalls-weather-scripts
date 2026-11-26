@@ -13,6 +13,12 @@ analyses; the camera rides a smoothed version of that track, centered
 Washington coast and Puget Sound over open ocean. There's no marker on
 the low itself -- the circulation in the radar is the point.
 
+It also does **storm-scale loops** that follow a single cell along a
+fixed track (`--waypoints`), in reflectivity or base velocity, with NWS
+warning polygons drawn only while they were valid -- e.g. the
+2026-11-26 tornado-warned cell from Shelton to North Bend
+([`events/2026-11-26_katx_tornado_warning.sh`](events/2026-11-26_katx_tornado_warning.sh)).
+
 ## Files
 
 - `build_loop.py` -- lists the radar's Level II volumes for the window,
@@ -20,6 +26,11 @@ the low itself -- the circulation in the radar is the point.
   tiles, and renders/encodes the reel. Processed sweeps, HRRR fields, and
   tiles are cached under `output/cache/`, so re-renders (e.g. to tweak
   styling) don't re-fetch anything.
+- `rotation_track.py` -- follows a velocity couplet through the
+  lowest-tilt sweeps from a rough first-guess path and prints a
+  `--waypoints` string for a storm-following loop.
+- `events/` -- the exact command (with its waypoints) for each storm
+  loop made, so it can be re-rendered or used as a template.
 - `requirements.txt` / `setup.sh` -- Python dependencies (all pip, no
   apt: pygrib's wheels bundle eccodes, and imageio-ffmpeg ships its own
   ffmpeg) plus the Poppins font.
@@ -40,6 +51,28 @@ python3 build_loop.py --seed 45.0,-126.1   # first-guess low position, if the
                                            # default pick grabs the wrong low
 ```
 
+Storm-scale loop following a cell (see `events/` for a real one):
+
+```bash
+# 1. Waypoints: seed with a rough path (e.g. the warning's location +
+#    motion extrapolated back), check the log, trim bad detections.
+python3 rotation_track.py --site KATX --start 2026-11-26T17:20Z \
+    --end 2026-11-26T20:40Z \
+    --guess "2026-11-26T17:36Z,47.133,-123.399;2026-11-26T19:52Z,47.503,-122.024"
+# 2. Render, once per product.
+python3 build_loop.py --site KATX --product vel --sails --waypoints "..." \
+    --start ... --end ... --view-km 100 --north-km 0 --towns puget \
+    --warnings TO --title "Tornado-Warned Storm"
+```
+
+Storm-scale options: `--waypoints "ISO,lat,lon;..."` (follow a fixed,
+spline-smoothed track instead of tracking a low in HRRR; extrapolated
+past its ends), `--product ref|vel`, `--sails` (every lowest-tilt cut,
+not just the first in each volume -- ~2 min updates instead of ~5),
+`--warnings TO[,SV,...]`, `--towns coast|puget`, `--storm-motion
+FROM/KT` (storm-relative velocity; only helps when the storm moves
+along the radar beam -- see below).
+
 Other knobs: `--view-km` (frame width in ground km, default 265),
 `--north-km` (camera offset north of the low, default 50; negative is
 south),
@@ -47,7 +80,7 @@ south),
 scan is on screen), `--hold` (seconds to hold the final frame, 2),
 `--max-frames N` (debug: only the last N scans).
 
-Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
+Output lands in `output/<site>_<ref|vel|srv>_loop_<YYYYMMDD_HHMM>.mp4` and
 `..._cover.png`, named for the last scan's UTC time.
 
 ## Methodology
@@ -56,9 +89,12 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
 
 - Level II volumes from the Unidata/AWS open-data bucket
   (`unidata-nexrad-level2`), read with MetPy's `Level2File`. Only the
-  first sweep is kept -- the lowest tilt (~0.3 deg at KLGX, which scans
-  below 0.5 deg for coastal coverage) super-res reflectivity, 0.5 deg x
-  250 m.
+  lowest tilt is kept (~0.3 deg at KLGX, which scans below 0.5 deg for
+  coastal coverage; 0.5 deg elsewhere), super-res 0.5 deg x 250 m.
+  Reflectivity comes from the surveillance cut (it carries CC), velocity
+  from the Doppler cut. By default only the first lowest-tilt cut per
+  volume is used; `--sails` uses every one (SAILS/MRLE repeat it two or
+  three times a volume), each a frame stamped with its own start time.
 - **Non-meteorological echo** (sea clutter, AP, birds) is dropped where
   correlation coefficient is under 0.85. CC is averaged over a 3-radial x
   7-gate window first: per-gate CC is noisy in light rain, and masking on
@@ -69,6 +105,18 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
 - The palette is a TV-style continuous ramp (greens to 26 dBZ, yellow
   from 30); weak echoes fade in
   semi-transparent so they don't wall off the imagery underneath.
+- **Velocity** is shown in kt, raw (not dealiased) -- fine as long as the
+  storm's velocities stay under the Nyquist (25 m/s / 49 kt for KATX's
+  VCP 212 on 2026-11-26; the couplet there peaked under 30 kt). The
+  palette has a narrow gray band at zero and turns clearly red right
+  away, because a weak couplet embedded in inbound flow is green next to
+  a few kt outbound -- with a wide gray band it read only as "less
+  green". Only the speckle filter applies (no CC in the Doppler cut).
+- **Storm-relative velocity** (`--storm-motion`) subtracts the storm's
+  motion along each radial. It only matters when the storm moves along
+  the beam: on 2026-11-26 the cell moved ENE, almost across KATX's beam,
+  so only ~3 of its 24 kt projected and SRV looked the same as base
+  velocity.
 - Radar is resampled (nearest gate) onto the frame's pixel grid. Ground
   range is treated as slant range -- at the lowest tilt the difference is
   under a kilometer even at 460 km.
@@ -90,6 +138,28 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
 - The camera follows cubic smoothing splines of lat/lon through the
   hourly centers, so it never jitters hour to hour.
 
+### Following a storm cell
+
+- `--waypoints` replaces the HRRR tracker with the same smoothing
+  spline through hand-given points (extrapolated linearly past the
+  ends), and drops the 330 km range filter.
+- `rotation_track.py` finds those points: for each lowest-tilt velocity
+  sweep it computes azimuthal shear across ~1 deg (two super-res
+  radials), smooths it, and takes the strongest |shear| within 15 km of
+  the first-guess path. Detections under 5e-3 /s are skipped as
+  background. Max reflectivity was tried first and is useless inside a
+  band of cells -- it hops between neighbors.
+
+### Warnings
+
+- `--warnings` pulls storm-based warning polygons from the IEM archive
+  (`mesonet.agron.iastate.edu/geojson/sbw.geojson`) for the loop's time
+  span, keeps those within radar range, and shows each one only while
+  the displayed scan time is inside its `polygon_begin`..`polygon_end`
+  -- so a warning cut back by a follow-up statement shows each polygon
+  version only for its own span. Tornado red, severe yellow, flash
+  flood green, special marine orange; drawn under the town labels.
+
 ### The loop
 
 - Scans are kept only while the tracked low is within 330 km of the radar
@@ -106,7 +176,8 @@ Output lands in `output/<site>_low_tracking_<YYYYMMDD_HHMM>.mp4` and
 
 ### Basemap
 
-Esri World Imagery tiles at zoom 10, mosaicked once for the whole camera
-path, Lanczos-resampled to the frame's pixel grid, and darkened ~20% so
+Esri World Imagery tiles, mosaicked once for the whole camera path at
+the coarsest zoom (10 or finer) whose pixels are at most ~0.75 of an
+output pixel -- zoom 10 at the 265 km synoptic view, 11 at storm scale -- Lanczos-resampled to the frame's pixel grid, and darkened ~20% so
 the radar reads. The credit line in the header reads "Ingalls Weather ·
 NEXRAD Level II · Imagery: Esri, Maxar, Earthstar Geographics".

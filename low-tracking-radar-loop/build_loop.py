@@ -27,6 +27,7 @@ filtering) and usage.
 
 import argparse
 import io
+import json
 import logging
 import os
 import subprocess
@@ -124,6 +125,34 @@ REF_STOPS = [
 ]
 DBZ_MAX = REF_STOPS[-1][0]
 
+# Base velocity (kt): inbound greens, outbound reds, a narrow gray band
+# at zero -- the standard radar-app convention. Weak outbound turns
+# clearly red right away, so a weak couplet embedded in inbound flow
+# (green next to a few kt outbound) still reads as green/red, not just
+# "less green". Brightest at the extremes.
+MS_TO_KT = 1.943844
+VEL_STOPS = [
+    (-64, "#d4ffb0", 0.95),
+    (-50, "#33ff33", 0.95),
+    (-36, "#00d000", 0.93),
+    (-24, "#00a000", 0.90),
+    (-12, "#006b00", 0.88),
+    (-2, "#365c36", 0.85),
+    (0, "#6e6e6e", 0.85),
+    (2, "#5c3636", 0.85),
+    (12, "#8a0000", 0.88),
+    (24, "#c40000", 0.90),
+    (36, "#ff1a1a", 0.93),
+    (50, "#ff6e8a", 0.95),
+    (64, "#ffc4d9", 0.95),
+]
+VEL_MAX = VEL_STOPS[-1][0]
+
+# Warning polygons (NWS storm-based warnings, from the IEM archive). Each
+# is drawn only while it was valid. Outline color by phenomena.
+IEM_SBW_URL = "https://mesonet.agron.iastate.edu/geojson/sbw.geojson"
+WARNING_COLORS = {"TO": "#ff2525", "SV": "#ffd21f", "FF": "#33e06b", "MA": "#ff8c1a"}
+
 # ---------- HRRR ----------
 S3_HRRR = "https://noaa-hrrr-bdp-pds.s3.amazonaws.com"
 # The MSLMA field is smoothed before searching for the minimum -- raw
@@ -148,7 +177,11 @@ SAT_BRIGHTNESS = 0.78
 
 # ---------- towns ----------
 # (name, lat, lon, side) -- side is where the label goes relative to the dot.
-TOWNS = [
+# Two presets (--towns): "coast" for the WA/OR coast at the ~265 km
+# synoptic zoom, "puget" for storm-scale loops (~100 km) over Puget Sound,
+# where the coast set's few labels would be too sparse and a denser set
+# at 265 km would collide.
+TOWNS_COAST = [
     ("Forks", 47.9504, -124.3855, "right"),
     ("Taholah", 47.3418, -124.2896, "left"),
     ("Ocean Shores", 46.9737, -124.1563, "left"),
@@ -172,6 +205,28 @@ TOWNS = [
     ("Newport", 44.6368, -124.0535, "right"),
     ("Portland", 45.5152, -122.6784, "right"),
 ]
+TOWNS_PUGET = [
+    ("Everett", 47.9790, -122.2021, "right"),
+    ("Seattle", 47.6062, -122.3321, "left"),
+    ("Bellevue", 47.6101, -122.2015, "right"),
+    ("Redmond", 47.6740, -122.1215, "right"),
+    ("Bremerton", 47.5673, -122.6326, "left"),
+    ("Belfair", 47.4507, -122.8265, "right"),
+    ("Shelton", 47.2151, -123.1007, "right"),
+    ("Olympia", 47.0379, -122.9007, "right"),
+    ("Gig Harbor", 47.3293, -122.5801, "left"),
+    ("Tacoma", 47.2529, -122.4443, "left"),
+    ("Federal Way", 47.3223, -122.3126, "left"),
+    ("Renton", 47.4829, -122.2171, "right"),
+    ("Kent", 47.3809, -122.2348, "right"),
+    ("Auburn", 47.3073, -122.2285, "right"),
+    ("Puyallup", 47.1854, -122.2929, "right"),
+    ("Enumclaw", 47.2043, -121.9915, "right"),
+    ("Issaquah", 47.5301, -122.0326, "left"),
+    ("Snoqualmie", 47.5287, -121.8254, "right"),
+    ("North Bend", 47.4957, -121.7868, "right"),
+]
+TOWN_SETS = {"coast": TOWNS_COAST, "puget": TOWNS_PUGET}
 
 geod = Geod(ellps="WGS84")
 to_merc = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
@@ -244,49 +299,100 @@ def _xml_all(text, tag):
         i = b
 
 
-def fetch_sweep(key):
-    """Download one volume and cache its lowest-tilt REF (+RHO) as .npz."""
+def _sweep_time(ray):
+    h = ray[0]
+    return (datetime(1970, 1, 1, tzinfo=timezone.utc)
+            + timedelta(days=h.date - 1, milliseconds=h.time_ms))
+
+
+def fetch_sweeps(job):
+    """Download one volume and cache its lowest-tilt sweep(s) of `product`
+    as .npz. Returns [(sweep start time, path), ...].
+
+    job = (key, product, all_low). product "ref" takes the surveillance
+    cut (REF + CC); "vel" takes the Doppler cut (VEL). With all_low, every
+    cut at the lowest elevation is kept -- SAILS/MRLE repeat it two or
+    three times a volume -- otherwise just the first."""
+    key, product, all_low = job
     name = key.rsplit("/", 1)[-1]
-    cache = os.path.join(CACHE_DIR, f"{name}.npz")
-    if os.path.exists(cache):
-        return cache
+    index = os.path.join(CACHE_DIR, f"{name}_{product}{'_all' if all_low else ''}.json")
+    if os.path.exists(index):
+        with open(index) as fh:
+            return [(datetime.fromisoformat(t), p) for t, p in json.load(fh)]
     logging.getLogger("metpy").setLevel(logging.ERROR)
     from metpy.io import Level2File
 
     r = get(f"{S3_RADAR}/{key}")
     if r is None:
-        return None
+        return []
     try:
         f = Level2File(io.BytesIO(r.content))
     except Exception as e:  # truncated/partial upload
         print(f"  skip {name}: {e}", flush=True)
-        return None
-    sweep = f.sweeps[0]
-    ref_hdr = sweep[0][4][b"REF"][0]
-    ngates = ref_hdr.num_gates
-    az = np.array([ray[0].az_angle for ray in sweep], dtype=np.float32)
-    ref = np.full((len(sweep), ngates), np.nan, dtype=np.float32)
-    rho = np.full((len(sweep), ngates), np.nan, dtype=np.float32)
-    for i, ray in enumerate(sweep):
-        d = ray[4][b"REF"][1]
-        ref[i, :len(d)] = d
-        if b"RHO" in ray[4]:
-            d = ray[4][b"RHO"][1]
-            rho[i, :len(d)] = d
-    vol = sweep[0][1]
-    t = f.dt.replace(tzinfo=timezone.utc)
-    np.savez_compressed(
-        cache, az=az, ref=ref.astype(np.float16), rho=rho.astype(np.float16),
-        first_gate=ref_hdr.first_gate, gate_width=ref_hdr.gate_width,
-        lat=vol.lat, lon=vol.lon, time=t.isoformat(),
-        elev=sweep[0][0].el_angle)
-    return cache
+        return []
+    els = [float(np.median([ray[0].el_angle for ray in sw])) for sw in f.sweeps]
+    low = [i for i, e in enumerate(els) if e < min(els) + 0.25]
+    moment = b"REF" if product == "ref" else b"VEL"
+    # Surveillance cuts carry CC; Doppler cuts carry VEL.
+    want = [i for i in low if (b"RHO" in f.sweeps[i][0][4]) == (product == "ref")
+            and moment in f.sweeps[i][0][4]]
+    if not all_low:
+        want = want[:1]
+    out = []
+    for n, i in enumerate(want):
+        sweep = f.sweeps[i]
+        hdr = sweep[0][4][moment][0]
+        ngates = max(len(ray[4][moment][1]) for ray in sweep if moment in ray[4])
+        az = np.array([ray[0].az_angle for ray in sweep], dtype=np.float32)
+        data = np.full((len(sweep), ngates), np.nan, dtype=np.float32)
+        rho = np.full((len(sweep), ngates), np.nan, dtype=np.float32)
+        for j, ray in enumerate(sweep):
+            if moment in ray[4]:
+                d = ray[4][moment][1]
+                data[j, :len(d)] = d
+            if b"RHO" in ray[4]:
+                d = ray[4][b"RHO"][1][:ngates]
+                rho[j, :len(d)] = d
+        vol = sweep[0][1]
+        t = _sweep_time(sweep[0])
+        path = os.path.join(CACHE_DIR, f"{name}_{product}_{n}.npz")
+        np.savez_compressed(
+            path, product=product, az=az, data=data.astype(np.float16),
+            rho=rho.astype(np.float16), first_gate=hdr.first_gate,
+            gate_width=hdr.gate_width, lat=vol.lat, lon=vol.lon,
+            time=t.isoformat(), elev=els[i])
+        out.append((t, path))
+    with open(index, "w") as fh:
+        json.dump([(t.isoformat(), p) for t, p in out], fh)
+    return out
 
 
-def load_sweep(path):
+def load_sweep(path, storm_motion=None):
+    """storm_motion=(from_deg, kt) turns velocity storm-relative: the
+    storm's own motion projected onto each radial is subtracted, so a
+    rotation couplet isn't swamped by the flow carrying the storm."""
     d = np.load(path)
-    ref = d["ref"].astype(np.float32)
-    rho = d["rho"].astype(np.float32)
+    product = str(d["product"])
+    data = d["data"].astype(np.float32)
+    if product == "ref":
+        _filter_ref(data, d["rho"].astype(np.float32))
+    else:
+        data *= MS_TO_KT
+        if storm_motion:
+            toward = np.radians(storm_motion[0] + 180)
+            data -= storm_motion[1] * np.cos(np.radians(d["az"])[:, None] - toward)
+    # Speckle filter: drop gates with fewer than SPECKLE_MIN_NEIGHBORS of
+    # their 8 neighbors (az wraps) also carrying echo.
+    valid = np.isfinite(data).astype(np.float32)
+    neigh = uniform_filter(valid, size=3, mode=("wrap", "constant")) * 9 - valid
+    data[(valid > 0) & (neigh < SPECKLE_MIN_NEIGHBORS - 0.01)] = np.nan
+    return dict(product=product, az=d["az"], data=data,
+                first_gate=float(d["first_gate"]), gate_width=float(d["gate_width"]),
+                lat=float(d["lat"]), lon=float(d["lon"]),
+                time=datetime.fromisoformat(str(d["time"])), elev=float(d["elev"]))
+
+
+def _filter_ref(ref, rho):
     # Drop non-met echo (low CC). CC is averaged over a small polar window
     # first -- per-gate CC is noisy in light rain, and masking on it raw
     # punches pinholes all through real echo. Where CC wasn't recorded
@@ -297,15 +403,6 @@ def load_sweep(path):
     rho_s = np.where(w > 0.2, rs / np.maximum(w, 1e-6), np.nan)
     ref[(rho_s < RHO_MIN) & np.isfinite(rho_s)] = np.nan
     ref[ref < DBZ_MIN] = np.nan
-    # Speckle filter: drop gates with fewer than SPECKLE_MIN_NEIGHBORS of
-    # their 8 neighbors (az wraps) also carrying echo.
-    valid = np.isfinite(ref).astype(np.float32)
-    neigh = uniform_filter(valid, size=3, mode=("wrap", "constant")) * 9 - valid
-    ref[(valid > 0) & (neigh < SPECKLE_MIN_NEIGHBORS - 0.01)] = np.nan
-    return dict(az=d["az"], ref=ref, first_gate=float(d["first_gate"]),
-                gate_width=float(d["gate_width"]), lat=float(d["lat"]),
-                lon=float(d["lon"]), time=datetime.fromisoformat(str(d["time"])),
-                elev=float(d["elev"]))
 
 
 # =====================================================================
@@ -443,14 +540,65 @@ class SmoothTrack:
         return float(self.lat(h)), float(self.lon(h)), float(np.interp(h, self.h, self.p))
 
 
+def parse_waypoints(text):
+    """"ISO,lat,lon;ISO,lat,lon;..." -> track list for SmoothTrack."""
+    pts = []
+    for item in text.split(";"):
+        t, la, lo = [v.strip() for v in item.split(",")]
+        pts.append((parse_time(t, None), float(la), float(lo), np.nan))
+    if len(pts) < 2:
+        sys.exit("--waypoints needs at least two points")
+    return sorted(pts)
+
+
+# =====================================================================
+# Warnings
+# =====================================================================
+
+def fetch_warnings(start, end, phenomena):
+    """Storm-based warning polygons valid any time in [start, end], from
+    the IEM archive: [(phenomena, begin, end, [(lon, lat), ...]), ...].
+    Uses each polygon's own valid window (polygon_begin/end), so a
+    warning whose polygon was cut back by a follow-up statement shows each
+    version only for its own span."""
+    tag = f"sbw_{start:%Y%m%d%H%M}_{end:%Y%m%d%H%M}.json"
+    cache = os.path.join(CACHE_DIR, tag)
+    if os.path.exists(cache):
+        with open(cache) as fh:
+            gj = json.load(fh)
+    else:
+        r = get(IEM_SBW_URL, params={"sts": f"{start:%Y-%m-%dT%H:%MZ}",
+                                     "ets": f"{end:%Y-%m-%dT%H:%MZ}"})
+        if r is None:
+            log("  NOTE: couldn't fetch warnings from IEM -- none drawn.")
+            return []
+        gj = r.json()
+        with open(cache, "w") as fh:
+            json.dump(gj, fh)
+    out = []
+    for f in gj.get("features", []):
+        p = f["properties"]
+        if p.get("phenomena") not in phenomena or p.get("significance") != "W":
+            continue
+        b = datetime.fromisoformat(p["polygon_begin"].replace("Z", "+00:00"))
+        e = datetime.fromisoformat(p["polygon_end"].replace("Z", "+00:00"))
+        geom = f["geometry"]
+        polys = geom["coordinates"] if geom["type"] == "MultiPolygon" else [geom["coordinates"]]
+        for poly in polys:
+            out.append((p["phenomena"], b, e, poly[0]))
+    return out
+
+
 # =====================================================================
 # Basemap
 # =====================================================================
 
-def fetch_satellite(x0, x1, y0, y1):
-    """Esri World Imagery mosaic covering the mercator box, at TILE_ZOOM.
-    Returns (rgb uint8, extent [x0, x1, y0, y1])."""
-    z = TILE_ZOOM
+def fetch_satellite(x0, x1, y0, y1, res):
+    """Esri World Imagery mosaic covering the mercator box, at the
+    coarsest zoom (but at least TILE_ZOOM) whose pixels are no bigger than
+    ~0.75 output pixel, so the Lanczos downsample stays sharp at any view
+    width. Returns (rgb uint8, extent [x0, x1, y0, y1])."""
+    z = max(TILE_ZOOM, int(np.ceil(np.log2(2 * MERC_HALF / (256 * 0.75 * res)))))
     n = 2 ** z
     tile_m = 2 * MERC_HALF / n
     tx0 = int((x0 + MERC_HALF) // tile_m)
@@ -564,6 +712,22 @@ def main():
     ap.add_argument("--end", help="ISO time. Default: now (newest scan).")
     ap.add_argument("--seed", help="LAT,LON first guess for the low center "
                     "(default: deepest MSLP within 600 km of the radar)")
+    ap.add_argument("--waypoints", help="follow a fixed track instead of an "
+                    "HRRR-tracked low: 'ISO,lat,lon;ISO,lat,lon;...' (times "
+                    "UTC unless an offset is given; extrapolated past the ends)")
+    ap.add_argument("--product", choices=["ref", "vel"], default="ref",
+                    help="lowest-tilt reflectivity or base velocity")
+    ap.add_argument("--storm-motion", help="FROM_DEG/KT, e.g. 249/24 (as in a "
+                    "warning's motion line): with --product vel, show "
+                    "storm-relative velocity instead of base velocity")
+    ap.add_argument("--sails", action="store_true",
+                    help="use every lowest-tilt cut in a volume (SAILS/MRLE "
+                    "repeats it), not just the first -- ~2 min updates")
+    ap.add_argument("--warnings", default="",
+                    help="comma list of warning phenomena to draw while valid, "
+                    "e.g. TO or TO,SV (default: none)")
+    ap.add_argument("--towns", choices=sorted(TOWN_SETS), default="coast",
+                    help="town label preset (default %(default)s)")
     ap.add_argument("--view-km", type=float, default=VIEW_KM,
                     help="frame width in ground km (default %(default)s)")
     ap.add_argument("--north-km", type=float, default=CAMERA_NORTH_KM,
@@ -581,6 +745,9 @@ def main():
     args = ap.parse_args()
 
     os.makedirs(CACHE_DIR, exist_ok=True)
+    storm_motion = None
+    if args.storm_motion:
+        storm_motion = tuple(float(v) for v in args.storm_motion.split("/"))
     now = datetime.now(timezone.utc)
     local_midnight = datetime.now(LOCAL_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
     start = parse_time(args.start, local_midnight.astimezone(timezone.utc))
@@ -595,40 +762,61 @@ def main():
     log(f"  {len(scans)} volumes")
 
     # One volume first, for the radar's location.
-    first = fetch_sweep(scans[0][1])
-    s0 = load_sweep(first)
+    first = fetch_sweeps((scans[0][1], args.product, args.sails))
+    if not first:
+        sys.exit(f"Couldn't read {scans[0][1]}")
+    s0 = load_sweep(first[0][1])
     rlat, rlon = s0["lat"], s0["lon"]
 
-    # ---- track the low ----
-    log("Tracking the low in HRRR MSLP ...")
-    fields = hrrr_fields(start - timedelta(hours=1), scans[-1][0])
-    if len(fields) < 2:
-        sys.exit("Not enough HRRR hours posted to track the low.")
-    seed = tuple(float(v) for v in args.seed.split(",")) if args.seed else None
-    track = track_low(fields, rlat, rlon, seed)
-    trk = SmoothTrack(track)
+    if args.waypoints:
+        # ---- fixed track (e.g. a storm cell's motion) ----
+        trk = SmoothTrack(parse_waypoints(args.waypoints))
+        keep = scans
+    else:
+        # ---- track the low ----
+        log("Tracking the low in HRRR MSLP ...")
+        fields = hrrr_fields(start - timedelta(hours=1), scans[-1][0])
+        if len(fields) < 2:
+            sys.exit("Not enough HRRR hours posted to track the low.")
+        seed = tuple(float(v) for v in args.seed.split(",")) if args.seed else None
+        track = track_low(fields, rlat, rlon, seed)
+        trk = SmoothTrack(track)
 
-    # Keep scans covered by the track and with the low in radar range.
-    keep = []
-    for t, key in scans:
-        if not (trk.start <= t <= trk.end):
-            continue
-        la, lo, _ = trk.at(t)
-        _, _, d = geod.inv(rlon, rlat, lo, la)
-        if d / 1000 <= MAX_LOW_RANGE_KM:
-            keep.append((t, key))
+        # Keep scans covered by the track and with the low in radar range.
+        keep = []
+        for t, key in scans:
+            if not (trk.start <= t <= trk.end):
+                continue
+            la, lo, _ = trk.at(t)
+            _, _, d = geod.inv(rlon, rlat, lo, la)
+            if d / 1000 <= MAX_LOW_RANGE_KM:
+                keep.append((t, key))
     if args.max_frames:
         keep = keep[-args.max_frames:]
     if not keep:
         sys.exit("No scans with the low inside radar range.")
-    log(f"  {len(keep)} scans in loop: {keep[0][0]:%H:%M} - {keep[-1][0]:%H:%M} UTC")
+    log(f"  {len(keep)} volumes in loop: {keep[0][0]:%H:%M} - {keep[-1][0]:%H:%M} UTC")
 
     # ---- fetch radar ----
     log("Fetching radar volumes ...")
     with Pool(args.workers) as pool:
-        paths = pool.map(fetch_sweep, [k for _, k in keep])
-    frames = [(t, p) for (t, _), p in zip(keep, paths) if p]
-    log(f"  {len(frames)} sweeps ready")
+        swept = pool.map(fetch_sweeps, [(k, args.product, args.sails) for _, k in keep])
+    frames = sorted(x for vol in swept for x in vol if start <= x[0] <= end)
+    if args.max_frames:
+        frames = frames[-args.max_frames:]
+    if not frames:
+        sys.exit("No sweeps in window.")
+    log(f"  {len(frames)} sweeps ready: {frames[0][0]:%H:%M:%S} - {frames[-1][0]:%H:%M:%S} UTC")
+
+    phenomena = [v.strip().upper() for v in args.warnings.split(",") if v.strip()]
+    warnings = []
+    if phenomena:
+        log(f"Fetching {'/'.join(phenomena)} warnings ...")
+        # Only polygons within radar range -- IEM returns the whole country.
+        warnings = [w for w in fetch_warnings(frames[0][0], frames[-1][0], phenomena)
+                    if geod.inv(rlon, rlat, w[3][0][0], w[3][0][1])[2] < 460_000]
+        for ph, wb, we, _ in warnings:
+            log(f"  {ph}.W polygon valid {wb:%H:%M}-{we:%H:%M}Z")
 
     # ---- camera geometry (web mercator) ----
     mid_lat = np.mean([trk.at(t)[0] for t, _ in frames])
@@ -652,7 +840,7 @@ def main():
 
     # ---- basemap onto the grid ----
     log("Fetching satellite basemap ...")
-    mosaic, mext = fetch_satellite(gx0, gx1, gy0, gy1)
+    mosaic, mext = fetch_satellite(gx0, gx1, gy0, gy1, res)
     mres = (mext[1] - mext[0]) / mosaic.width
     crop = mosaic.crop((int((xs[0] - res / 2 - mext[0]) / mres),
                         int((mext[3] - (ys[0] + res / 2)) / mres),
@@ -668,14 +856,17 @@ def main():
     az_g, _, dist_g = geod.inv(np.full(lon_g.shape, rlon), np.full(lon_g.shape, rlat), lon_g, lat_g)
     del XX, YY, lon_g, lat_g
     azbin_g = (np.mod(az_g, 360) * 10).astype(np.int16) % 3600
-    rng_km = dist_g / 1000
-    gate_g = np.round((rng_km - s0["first_gate"]) / s0["gate_width"]).astype(np.int32)
-    del az_g, dist_g, rng_km
+    rng_g = (dist_g / 1000).astype(np.float32)
+    del az_g, dist_g
 
+    if args.product == "ref":
+        stops, vmin, vmax = REF_STOPS, DBZ_MIN, DBZ_MAX
+    else:
+        stops, vmin, vmax = VEL_STOPS, -VEL_MAX, VEL_MAX
     cmap = LinearSegmentedColormap.from_list(
-        "ref", [((d - DBZ_MIN) / (DBZ_MAX - DBZ_MIN),
-                 (*matplotlib.colors.to_rgb(c), a)) for d, c, a in REF_STOPS])
-    norm = Normalize(DBZ_MIN, DBZ_MAX)
+        args.product, [((d - vmin) / (vmax - vmin),
+                        (*matplotlib.colors.to_rgb(c), a)) for d, c, a in stops])
+    norm = Normalize(vmin, vmax)
 
     def composite(sw):
         """Sweep -> RGB image on the grid (radar over satellite)."""
@@ -688,11 +879,11 @@ def main():
         dj = np.abs(((az_sorted[j] - centers) + 180) % 360 - 180)
         djm = np.abs(((az_sorted[jm] - centers) + 180) % 360 - 180)
         table = np.where(dj < djm, order[j], order[jm])
-        ref = sw["ref"]
-        g = gate_g
-        ok = (g >= 0) & (g < ref.shape[1])
+        data = sw["data"]
+        g = np.round((rng_g - sw["first_gate"]) / sw["gate_width"]).astype(np.int32)
+        ok = (g >= 0) & (g < data.shape[1])
         vals = np.full(g.shape, np.nan, dtype=np.float32)
-        vals[ok] = ref[table[azbin_g[ok]], g[ok]]
+        vals[ok] = data[table[azbin_g[ok]], g[ok]]
         rgba = cmap(norm(vals))
         rgba[np.isnan(vals)] = 0
         a = rgba[..., 3:4]
@@ -711,7 +902,7 @@ def main():
     # scrolls under the header block or the L (see fade_labels below).
     halo = [pe.withStroke(linewidth=2.4, foreground="#101418")]
     labels = []
-    for name, la, lo, side in TOWNS:
+    for name, la, lo, side in TOWN_SETS[args.towns]:
         x, y = to_merc.transform(lo, la)
         dot, = ax.plot(x, y, "o", ms=4.2, mfc="white", mec="#101418", mew=0.9, zorder=5)
         sign = 1 if side == "right" else -1
@@ -727,6 +918,15 @@ def main():
                   path_effects=halo, zorder=6, clip_on=True)
     labels.append(([dot, txt], x, y))
 
+    # Warning polygons, each shown only while valid (see the render loop).
+    warn_artists = []
+    for ph, wb, we, ring in warnings:
+        wx, wy = to_merc.transform([c[0] for c in ring], [c[1] for c in ring])
+        line, = ax.plot(wx, wy, color=WARNING_COLORS.get(ph, "white"), lw=2.6,
+                        zorder=4, solid_joinstyle="round", visible=False,
+                        path_effects=[pe.withStroke(linewidth=4.6, foreground="#101418")])
+        warn_artists.append((line, wb, we))
+
     # Top scrim (gradient) so the title reads over any imagery.
     scrim_ax = fig.add_axes([0, 0.62, 1, 0.38], zorder=10)
     grad = np.clip(np.linspace(-0.1, 1.4, 256), 0, 1)[:, None] ** 1.2
@@ -741,24 +941,27 @@ def main():
                      color="white", va="top", zorder=11)
     t_text = fig.text(left, top - 0.037, "", fontproperties=f_semi, fontsize=13,
                       color="white", va="top", zorder=11)
-    subtitle = fig.text(left, top - 0.063, f"{site} radar · lowest tilt reflectivity",
+    what = ("reflectivity" if args.product == "ref" else
+            "storm-relative velocity" if storm_motion else "base velocity")
+    subtitle = fig.text(left, top - 0.063, f"{site} radar · lowest tilt {what}",
                         fontproperties=f_reg, fontsize=9.5, color="#d9dde2", va="top", zorder=11)
     header_artists = [title, t_text, subtitle]  # what town labels must stay clear of
 
-    # Color bar (dBZ)
+    # Color bar
     cb_ax = fig.add_axes([left, top - 0.094, 0.52, 0.008], zorder=11)
-    cb_rgba = cmap(norm(np.linspace(DBZ_MIN, DBZ_MAX, 256)[None, :]))
+    cb_rgba = cmap(norm(np.linspace(vmin, vmax, 256)[None, :]))
     cb_rgba[..., 3] = 1
-    cb_ax.imshow(cb_rgba, aspect="auto", extent=[DBZ_MIN, DBZ_MAX, 0, 1])
+    cb_ax.imshow(cb_rgba, aspect="auto", extent=[vmin, vmax, 0, 1])
     cb_ax.set_yticks([])
     for sp in cb_ax.spines.values():
         sp.set_visible(False)
-    cb_ax.set_xticks([20, 30, 40, 50, 60])
+    cb_ax.set_xticks([20, 30, 40, 50, 60] if args.product == "ref" else [-60, -30, 0, 30, 60])
     cb_ax.tick_params(axis="x", length=0, pad=2, colors="white")
     for lab in cb_ax.get_xticklabels():
         lab.set_fontproperties(f_reg)
         lab.set_fontsize(7.5)
-    dbz = fig.text(left + 0.535, top - 0.090, "dBZ", fontproperties=f_med, fontsize=8,
+    unit = "dBZ" if args.product == "ref" else "kt"
+    dbz = fig.text(left + 0.535, top - 0.090, unit, fontproperties=f_med, fontsize=8,
                    color="white", va="center", zorder=11)
     credit = fig.text(left, top - 0.121,
                       "Ingalls Weather · NEXRAD Level II · Imagery: Esri, Maxar, Earthstar Geographics",
@@ -811,7 +1014,7 @@ def main():
                 art.set_visible(a > 0)
 
     # ---- render ----
-    out_mp4 = os.path.join(OUTPUT_DIR, f"{site.lower()}_low_tracking_{frames[-1][0]:%Y%m%d_%H%M}.mp4")
+    out_mp4 = os.path.join(OUTPUT_DIR, f"{site.lower()}_{'srv' if storm_motion else args.product}_loop_{frames[-1][0]:%Y%m%d_%H%M}.mp4")
     out_png = out_mp4[:-4] + "_cover.png"
     import imageio_ffmpeg
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
@@ -840,7 +1043,7 @@ def main():
         if k >= total:
             t_cam = frames[-1][0]
         if i != cur_i:
-            cur_img = composite(load_sweep(frames[i][1]))
+            cur_img = composite(load_sweep(frames[i][1], storm_motion))
             cur_i = i
             img.set_data(cur_img)
         cx, cy = camera(t_cam)
@@ -848,6 +1051,8 @@ def main():
         ax.set_ylim(cy - view_h / 2, cy + view_h / 2)
 
         fade_labels(cx, cy)
+        for line, wb, we in warn_artists:
+            line.set_visible(wb <= t_scan < we)
 
         lt = t_scan.astimezone(LOCAL_TZ)
         t_text.set_text(f"{lt:%a %b %-d} · {lt:%H:%M %Z}")

@@ -6,7 +6,7 @@
 # directly.
 set -e
 
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 mkdir -p /usr/share/fonts/truetype/google-fonts
 for f in Poppins-Regular Poppins-Medium Poppins-SemiBold Poppins-Bold; do

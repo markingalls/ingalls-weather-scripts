@@ -1,6 +1,6 @@
 ---
 name: radar-loop
-description: Make an Ingalls Weather storm-following radar loop reel (1080x1920 MP4 for Facebook Reels) with low-tracking-radar-loop/build_loop.py. Use when asked for an animated radar loop, a radar reel, or a loop that follows a low / storm center, from KLGX or any other NEXRAD site.
+description: Make an Ingalls Weather storm-following radar loop reel (1080x1920 MP4 for Facebook Reels) with low-tracking-radar-loop/build_loop.py. Use when asked for an animated radar loop, a radar reel, or a loop that follows a low, a storm cell, or a warned storm (reflectivity or velocity, with warning polygons), from any NEXRAD site.
 ---
 
 # Storm-following radar loop reel
@@ -58,6 +58,33 @@ re-deriving decisions.
 8. Send the MP4 and `_cover.png`. Outputs are gitignored -- commit only
    code/README changes.
 
+## Storm-cell loops (reflectivity / velocity, warning polygons)
+
+First done 2026-11-26 for the KSEW tornado-warned cell from Shelton to
+North Bend -- `low-tracking-radar-loop/events/2026-11-26_katx_tornado_warning.sh`
+is the template. Settings used there (the user hadn't tuned these yet --
+offer to adjust): `--view-km 100 --north-km 0 --towns puget --sails`,
+title "Tornado-Warned Storm", one reel per `--product ref|vel`.
+
+1. **Find the warning**: api.weather.gov/alerts?event=Tornado Warning&area=WA
+   (last ~7 days) gives the polygon, valid times and the motion line
+   ("...249DEG...24KT...lat,lon"); older ones are in the IEM archive
+   (what `--warnings` reads).
+2. **Pick the radar**: the closest one with the storm in range (KATX
+   for Puget Sound). Check its lowest-tilt Nyquist in the log if the
+   velocities look wild -- the script doesn't dealias.
+3. **Track**: extrapolate the warning's location + motion back to the
+   start as a first guess, then run `rotation_track.py`. Read its log;
+   drop detections that jump to other features, then pass the rest to
+   `--waypoints`. Max-reflectivity tracking doesn't work inside a band
+   of cells.
+4. **Velocity**: base velocity, not storm-relative, unless the storm
+   moves along the radar beam (SRV changes nothing when it moves across
+   the beam). A weak couplet is a small red patch against green
+   inbound flow; zoom-crop frames around the warning time to confirm it
+   reads.
+5. Commit an `events/<date>_<site>_<what>.sh` with the exact command.
+
 ## Gotchas
 
 - **Upload limit ~30 MB.** Encoding is CRF 23; a busier or tighter view
@@ -66,6 +93,10 @@ re-deriving decisions.
 - **HRRR latency:** the analysis for the top of an hour posts about
   50 min later. Until then the script fills from the previous run's
   f01/f02. Rerun later if the user wants analysis-only positions.
+- **Fresh container:** `setup.sh` installs with `python3 -m pip` --
+  plain `pip` may belong to a different Python than `python3`. If
+  Pillow fails to import (`_imaging`), `python3 -m pip install
+  --ignore-installed Pillow numpy`.
 - **Stopping a render:** use `pkill -f "^python3 build_loop.py"`. A bare
   `pkill -f build_loop.py` also matches (and kills) the shell running
   the pkill.
